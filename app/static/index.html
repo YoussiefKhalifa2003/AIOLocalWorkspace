@@ -24,7 +24,7 @@
       <nav class="tabs" id="mainTabs">
         <button type="button" data-tab="chat" class="tab active">Chat</button>
         <button type="button" data-tab="board" class="tab">Board</button>
-        <button type="button" data-tab="models" class="tab">Models</button>
+        <button type="button" data-tab="models" class="tab">Agents</button>
         <button type="button" data-tab="analytics" class="tab" id="analyticsTab">Analytics</button>
       </nav>
       <label class="speak"><input type="checkbox" id="speakToggle" /> speak replies</label>
@@ -72,11 +72,17 @@
     </div>
     <div id="modelsView" class="models-view hidden">
       <div class="models-body">
-        <h2>Agent models</h2>
-        <p class="hint" id="modelsHint">Pick an OpenCode free model (or Gemini) for each agent.</p>
-        <div id="modelsForm"></div>
-        <button type="button" id="modelsSaveBtn">save</button>
-        <pre id="modelsStatus" class="voice-status"></pre>
+        <div class="roster-top">
+          <div>
+            <h2>Agents</h2>
+            <p class="hint" id="modelsHint">Who answers which @mention, and which model they use.</p>
+          </div>
+          <div class="roster-save">
+            <button type="button" id="modelsSaveBtn">save</button>
+            <pre id="modelsStatus" class="voice-status"></pre>
+          </div>
+        </div>
+        <div id="modelsForm" class="roster"></div>
       </div>
     </div>
     <div id="analyticsView" class="analytics-view hidden">

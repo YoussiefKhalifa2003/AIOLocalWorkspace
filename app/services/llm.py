@@ -127,7 +127,15 @@ class LLMClient:
                 if resp.status_code >= 400:
                     raise LLMError(f"LLM HTTP {resp.status_code} ({backend}): {resp.text}")
                 data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                msg = data["choices"][0]["message"]
+                content = msg.get("content")
+                if content:
+                    return content
+                # Some free models (reasoning-first) leave content null
+                reasoning = msg.get("reasoning") or ""
+                if isinstance(reasoning, str) and reasoning.strip():
+                    return reasoning
+                raise LLMError(f"LLM empty content ({backend}): {resp.text[:400]}")
             except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
                 last_error = exc
                 time.sleep(self.settings.llm_retry_backoff_seconds * (2**attempt))

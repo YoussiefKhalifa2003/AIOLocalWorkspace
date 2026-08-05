@@ -16,7 +16,7 @@ def test_free_models_catalog():
 def test_normalize_and_detect():
     assert normalize_model_id("opencode/big-pickle") == "big-pickle"
     assert is_opencode_model("big-pickle")
-    assert is_openrouter_model("qwen/qwen3-coder:free")
+    assert is_openrouter_model("cohere/north-mini-code:free")
     assert not is_openrouter_model("gemini-env")
 
 
@@ -39,9 +39,9 @@ def test_resolve_prefers_payload(tmp_path, monkeypatch):
     sess.SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     db = sess.SessionLocal()
     mid, backend = resolve_agent_model(
-        db, tenant_id=1, agent_type="coding", payload_model="qwen/qwen3-coder:free"
+        db, tenant_id=1, agent_type="coding", payload_model="cohere/north-mini-code:free"
     )
-    assert mid == "qwen/qwen3-coder:free"
+    assert mid == "cohere/north-mini-code:free"
     assert backend == "openrouter"
     mid2, backend2 = resolve_agent_model(
         db, tenant_id=1, agent_type="coding", payload_model="gemini-env"

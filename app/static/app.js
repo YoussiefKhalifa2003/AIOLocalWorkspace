@@ -157,27 +157,80 @@
     checklist: "Checklist",
   };
 
+  // Dry coworker notes — no callsigns / units / marketing bios
+  const AGENT_PROFILES = {
+    research: {
+      mention: "@Research",
+      job: "looks things up",
+      line: "I keep digging until the answer stops wiggling. If I can’t find it, I say that out loud.",
+      accent: "#4a9",
+    },
+    writing: {
+      mention: "@Writing",
+      job: "writes it down",
+      line: "I cut fluff first. Goal is something a tired teammate can skim once.",
+      accent: "#a84",
+    },
+    coding: {
+      mention: "@Code",
+      job: "builds it",
+      line: "Smallest change that runs. I won’t rewrite your whole file unless you ask.",
+      accent: "#4af",
+    },
+    code_review: {
+      mention: "@Review",
+      job: "checks the diff",
+      line: "I read the patch like it’s already live. Secrets and sharp edges get called early.",
+      accent: "#48a",
+    },
+    checklist: {
+      mention: "@Checklist",
+      job: "breaks work into ticks",
+      line: "I turn a foggy ask into numbered boxes. Boring on purpose.",
+      accent: "#a6a",
+    },
+  };
+
   async function loadModels() {
     const data = await api("/workspace/agent-models");
     const hint = $("modelsHint");
     if (!data.openrouter_configured && !data.opencode_configured) {
       hint.textContent =
-        "Add OPENROUTER_API_KEY in .env for free model picks (openrouter.ai/keys). Gemini (.env) still works.";
+        "Set OPENROUTER_API_KEY for free models. Gemini (.env) still works.";
     } else if (data.openrouter_configured) {
-      hint.textContent = "OpenRouter free models ready — pick one per agent, then save.";
+      hint.textContent = "Who answers which @mention, and which model they use.";
     } else {
-      hint.textContent = "OpenCode key set (may require billing). Prefer OpenRouter free models.";
+      hint.textContent = "OpenCode key set (may need billing). Prefer OpenRouter free models.";
     }
     if (!data.github_configured) {
       hint.textContent += " GITHUB_TOKEN optional for PRs.";
     }
     const form = $("modelsForm");
     form.innerHTML = "";
-    (data.agents || []).forEach((agent) => {
+    (data.agents || Object.keys(AGENT_PROFILES)).forEach((agent) => {
+      const profile = AGENT_PROFILES[agent] || {
+        mention: `@${AGENT_LABELS[agent] || agent}`,
+        job: agent,
+        line: "",
+        accent: AGENT_COLORS[agent] || "#666",
+      };
+
       const row = document.createElement("div");
-      row.className = "model-row";
+      row.className = "roster-row";
+      row.style.setProperty("--agent-accent", profile.accent);
+
+      const who = document.createElement("div");
+      who.className = "roster-who";
+      who.innerHTML = `
+        <p class="mention">${profile.mention}</p>
+        <p class="line">${profile.line}</p>
+        <span class="job">${profile.job}</span>
+      `;
+
+      const brain = document.createElement("div");
+      brain.className = "roster-model";
       const lab = document.createElement("label");
-      lab.textContent = AGENT_LABELS[agent] || agent;
+      lab.textContent = "model";
       lab.htmlFor = `model-${agent}`;
       const sel = document.createElement("select");
       sel.id = `model-${agent}`;
@@ -185,11 +238,10 @@
       (data.models || []).forEach((m) => {
         const opt = document.createElement("option");
         opt.value = m.id;
-        opt.textContent = m.free ? `${m.label} (Free)` : m.label;
+        opt.textContent = m.free ? `${m.label} · free` : m.label;
         if ((data.prefs || {})[agent] === m.id) opt.selected = true;
         sel.appendChild(opt);
       });
-      // If pref not in list, still show it
       const pref = (data.prefs || {})[agent];
       if (pref && ![...sel.options].some((o) => o.value === pref)) {
         const opt = document.createElement("option");
@@ -198,8 +250,11 @@
         opt.selected = true;
         sel.appendChild(opt);
       }
-      row.appendChild(lab);
-      row.appendChild(sel);
+      brain.appendChild(lab);
+      brain.appendChild(sel);
+
+      row.appendChild(who);
+      row.appendChild(brain);
       form.appendChild(row);
     });
   }
