@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
-# Local launcher — works even if editable install is flaky.
+# Local launcher - works even if editable install is flaky.
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 exec "$ROOT/.venv/bin/python" -m app.cli_pkg.main "$@"

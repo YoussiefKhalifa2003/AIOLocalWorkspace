@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -11,6 +12,35 @@ from app.config import Settings, get_settings
 
 class LLMError(RuntimeError):
     pass
+
+
+@dataclass
+class LLMResult:
+    content: str
+    tokens: int | None = None
+    backend: str = ""
+    model: str = ""
+
+
+def _tokens_from_usage(data: dict[str, Any]) -> int | None:
+    usage = data.get("usage") or {}
+    if not isinstance(usage, dict):
+        return None
+    total = usage.get("total_tokens")
+    if isinstance(total, int) and total > 0:
+        return total
+    prompt = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+    completion = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+    try:
+        n = int(prompt) + int(completion)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def estimate_tokens(messages: list[dict[str, str]], content: str) -> int:
+    n = sum(len(m.get("content") or "") for m in messages) + len(content or "")
+    return max(1, n // 4)
 
 
 class LLMClient:
@@ -82,6 +112,23 @@ class LLMClient:
         max_tokens: int = 2048,
         force_backend: str | None = None,
     ) -> str:
+        return self.chat_result(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            force_backend=force_backend,
+        ).content
+
+    def chat_result(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        max_tokens: int = 2048,
+        force_backend: str | None = None,
+    ) -> LLMResult:
         if force_backend == "openrouter":
             key = self.settings.openrouter_api_key.strip()
             base = self.settings.openrouter_base_url.rstrip("/")
@@ -94,7 +141,13 @@ class LLMClient:
             base, key, backend = self._endpoint_for(model)
 
         if not key:
-            return self._offline_stub(messages)
+            content = self._offline_stub(messages)
+            return LLMResult(
+                content=content,
+                tokens=estimate_tokens(messages, content),
+                backend="offline",
+                model=model or "offline",
+            )
 
         # Strip gemini-env sentinel
         use_model = model
@@ -129,13 +182,19 @@ class LLMClient:
                 data = resp.json()
                 msg = data["choices"][0]["message"]
                 content = msg.get("content")
-                if content:
-                    return content
-                # Some free models (reasoning-first) leave content null
-                reasoning = msg.get("reasoning") or ""
-                if isinstance(reasoning, str) and reasoning.strip():
-                    return reasoning
-                raise LLMError(f"LLM empty content ({backend}): {resp.text[:400]}")
+                if not content:
+                    reasoning = msg.get("reasoning") or ""
+                    if isinstance(reasoning, str) and reasoning.strip():
+                        content = reasoning
+                if not content:
+                    raise LLMError(f"LLM empty content ({backend}): {resp.text[:400]}")
+                tokens = _tokens_from_usage(data) or estimate_tokens(messages, content)
+                return LLMResult(
+                    content=content,
+                    tokens=tokens,
+                    backend=backend,
+                    model=use_model,
+                )
             except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
                 last_error = exc
                 time.sleep(self.settings.llm_retry_backoff_seconds * (2**attempt))

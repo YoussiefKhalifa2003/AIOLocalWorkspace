@@ -73,8 +73,35 @@ def analytics(
     auth: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
 ):
-    """Phase G: simple tables — success by model/backend, jobs per day."""
-    from app.db.models import AgentMetric
+    """Owner dashboard: people, models, tokens, open work."""
+    from app.services.dashboard import build_owner_dashboard
+    from app.services.isolation import get_project_for_tenant
+
+    try:
+        get_project_for_tenant(db, auth.tenant_id, project_id)
+    except IsolationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        return build_owner_dashboard(db, auth, project_id=project_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+class AssignTaskIn(BaseModel):
+    title: str
+    assignee_user_id: int
+
+
+@router.post("/projects/{project_id}/dashboard/assign")
+def dashboard_assign(
+    project_id: int,
+    body: AssignTaskIn,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """Owner-only: create a board card and assign it to a teammate."""
+    from app.db.models import Objective, User, WorkspaceMember
+    from app.services.audit import write_audit
     from app.services.chat_access import is_workspace_owner
     from app.services.isolation import get_project_for_tenant
 
@@ -85,34 +112,50 @@ def analytics(
     if not is_workspace_owner(db, auth):
         raise HTTPException(status_code=403, detail="owner only")
 
-    metrics = (
-        db.query(AgentMetric)
-        .filter(AgentMetric.tenant_id == auth.tenant_id, AgentMetric.project_id == project_id)
-        .all()
-    )
-    by_backend: dict[str, dict] = {}
-    for m in metrics:
-        key = f"{m.backend}|{m.model or '-'}"
-        slot = by_backend.setdefault(
-            key, {"backend": m.backend, "model": m.model, "total": 0, "success": 0, "fail": 0}
-        )
-        slot["total"] += 1
-        if m.success:
-            slot["success"] += 1
-        else:
-            slot["fail"] += 1
+    title = (body.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
 
-    jobs = (
-        db.query(Job)
-        .filter(Job.tenant_id == auth.tenant_id, Job.project_id == project_id)
-        .all()
+    member = (
+        db.query(WorkspaceMember)
+        .filter_by(tenant_id=auth.tenant_id, user_id=body.assignee_user_id)
+        .one_or_none()
     )
+    user = db.query(User).filter(User.id == body.assignee_user_id).one_or_none()
+    if member is None or user is None:
+        raise HTTPException(status_code=404, detail="assignee not in workspace")
+
+    max_order = (
+        db.query(Objective)
+        .filter(Objective.tenant_id == auth.tenant_id, Objective.project_id == project_id)
+        .count()
+    )
+    obj = Objective(
+        tenant_id=auth.tenant_id,
+        project_id=project_id,
+        user_id=auth.user_id,
+        assignee_user_id=user.id,
+        title=title[:255],
+        done=False,
+        status="todo",
+        sort_order=max_order + 1,
+    )
+    db.add(obj)
+    db.flush()
+    write_audit(
+        db,
+        tenant_id=auth.tenant_id,
+        project_id=project_id,
+        event_type="objective_assigned",
+        message=f"objective {obj.id} → {user.email}: {obj.title}",
+    )
+    db.commit()
     return {
-        "project_id": project_id,
-        "metrics_by_backend": list(by_backend.values()),
-        "jobs_total": len(jobs),
-        "jobs_done": sum(1 for j in jobs if j.status == "done"),
-        "jobs_failed": sum(1 for j in jobs if j.status == "failed"),
+        "id": obj.id,
+        "title": obj.title,
+        "status": obj.status,
+        "assignee_user_id": user.id,
+        "assignee_email": user.email,
     }
 
 

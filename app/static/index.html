@@ -27,7 +27,7 @@
         <button type="button" data-tab="chat" class="tab active">Chat</button>
         <button type="button" data-tab="board" class="tab">Board</button>
         <button type="button" data-tab="models" class="tab">Agents</button>
-        <button type="button" data-tab="analytics" class="tab" id="analyticsTab">Analytics</button>
+        <button type="button" data-tab="analytics" class="tab" id="analyticsTab">Dashboard</button>
       </nav>
       <label class="speak"><input type="checkbox" id="speakToggle" /> speak replies</label>
       <label class="speak"><input type="checkbox" id="voiceToggle" /> voice input</label>
@@ -55,7 +55,7 @@
         <div id="messages" class="messages"></div>
         <form id="composer">
           <div class="composer-wrap">
-            <input id="input" type="text" autocomplete="off" placeholder="chat · @people · !commands" />
+            <input id="input" type="text" autocomplete="off" placeholder="chat - @people - !commands" />
             <ul id="mentionBox" class="mention-box hidden"></ul>
           </div>
           <button id="micBtn" type="button" title="hold to speak / click to stop" disabled>mic</button>
@@ -77,7 +77,7 @@
         <div class="roster-top">
           <div>
             <h2>Agents</h2>
-            <p class="hint" id="modelsHint">Models power /skills — not @mentions.</p>
+            <p class="hint" id="modelsHint">Models power /skills - not @mentions.</p>
           </div>
           <div class="roster-save">
             <button type="button" id="modelsSaveBtn">save</button>

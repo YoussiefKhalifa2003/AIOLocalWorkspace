@@ -58,7 +58,7 @@ def _print_table(rows: list[dict[str, Any]], keys: list[str]) -> None:
 def _print_objectives(data: dict[str, Any]) -> None:
     typer.echo(f"OBJECTIVES  {data['bar']}  {data['done']}/{data['total']}")
     if not data["objectives"]:
-        typer.echo("(no objectives yet — add with: ./aio objectives add \"...\")")
+        typer.echo("(no objectives yet - add with: ./aio objectives add \"...\")")
         return
     for obj in data["objectives"]:
         mark = "x" if obj["done"] else " "
@@ -74,7 +74,7 @@ def _print_checklist(items: list[dict[str, Any]]) -> None:
     bar = f"[{'#' * filled}{'-' * (width - filled)}] {int(round(100 * done / total)) if total else 0}%"
     typer.echo(f"CHECKLIST  {bar}  {done}/{total}")
     if not items:
-        typer.echo("(empty — run an objective that creates follow-up tasks)")
+        typer.echo("(empty - run an objective that creates follow-up tasks)")
         return
     for item in items:
         mark = "x" if item["done"] else " "
@@ -467,7 +467,7 @@ def checklist_root(
         r.raise_for_status()
         _print_checklist(r.json())
     if not all_items:
-        typer.echo("(showing latest batch only — use ./aio checklist --all for history)")
+        typer.echo("(showing latest batch only - use ./aio checklist --all for history)")
 
 
 @checklist_app.command("done")
@@ -668,7 +668,7 @@ def demo(
 
         pending = [o for o in prog["objectives"] if not o["done"]]
         if not pending:
-            typer.echo("all objectives already done — add more with ./aio objectives add")
+            typer.echo("all objectives already done - add more with ./aio objectives add")
         else:
             first = pending[0]
             typer.echo(f"> run objective {first['id']}: {first['title']}")

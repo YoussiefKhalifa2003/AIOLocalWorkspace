@@ -1,4 +1,4 @@
-"""Short `!` command verbs — no LLM, board/ops only."""
+"""Short `!` command verbs - no LLM, board/ops only."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from app.services.seed import invite_user_by_email
 from app.services.work_requests import create_work_request
 from app.worker import drain_queue
 
-# IntentResult imported lazily-shaped from orchestrator to avoid cycles — use duck type
+# IntentResult imported lazily-shaped from orchestrator to avoid cycles - use duck type
 # Callers pass IntentResult constructor
 
 
@@ -56,7 +56,7 @@ Room
   !clear                   wipe this chat
   !help                    this list
 
-Private room: use /skills for AI (e.g. /code …). Board tab shows the board."""
+Private room: use /skills for AI (e.g. /code ...). Board tab shows the board."""
 
 
 def _progress_bar(done: int, total: int) -> str:
@@ -73,12 +73,12 @@ def _can_manage_objective(db: Session, auth: AuthContext, obj: Objective) -> boo
 
 
 def try_bang_command(db: Session, auth: AuthContext, chat: Chat, text: str, IntentResult, pending_coding: dict, run_agent_force):
-    """Parse `!verb …`. text may include leading !. Returns IntentResult or None."""
+    """Parse `!verb ...`. text may include leading !. Returns IntentResult or None."""
     raw = (text or "").strip()
     if raw.startswith("!"):
         raw = raw[1:].lstrip()
     if not raw:
-        return IntentResult(True, "Pick a command, e.g. `!add …` or `!help`.")
+        return IntentResult(True, "Pick a command, e.g. `!add ...` or `!help`.")
 
     lower = raw.lower()
     project_id = chat.project_id or 1
@@ -329,7 +329,7 @@ def try_bang_command(db: Session, auth: AuthContext, chat: Chat, text: str, Inte
         if lower.startswith("go "):
             pending = raw[3:].strip() or pending
         if not pending:
-            return IntentResult(True, "Nothing pending. Use /code … then !go if claims conflict.")
+            return IntentResult(True, "Nothing pending. Use /code ... then !go if claims conflict.")
         return run_agent_force(db, auth, chat, pending)
 
     m = re.match(r"issue\s+(.+)$", lower)
@@ -354,7 +354,7 @@ def try_bang_command(db: Session, auth: AuthContext, chat: Chat, text: str, Inte
         rows = issues_for_user(
             db, tenant_id=auth.tenant_id, project_id=project_id, user_id=auth.user_id
         )
-        lines = [f"! #{i.id} {i.title}" + (f" — {i.detail}" if i.detail else "") for i in rows] or [
+        lines = [f"! #{i.id} {i.title}" + (f" - {i.detail}" if i.detail else "") for i in rows] or [
             "(none)"
         ]
         return IntentResult(True, "ISSUES\n" + "\n".join(lines))
@@ -390,13 +390,19 @@ def try_bang_command(db: Session, auth: AuthContext, chat: Chat, text: str, Inte
                 inviter_user_id=auth.user_id,
                 email=email,
             )
-            key_line = f" They log in with that email + shared key `{result['api_key_issued']}`."
+            from app.config import get_settings
+
+            join_key = get_settings().workspace_join_key or get_settings().demo_api_key
             mail = result.get("email_detail") or ""
             mail_line = f"\nEmail: {mail}" if mail else ""
+            accept = result.get("accept_url") or ""
+            accept_line = f"\nAccept link: {accept}" if accept else ""
             return IntentResult(
                 True,
-                f"Invited {result['email']}.{key_line}{mail_line}\n"
-                "Join on LAN: open /app (use your LAN IP, not 127.0.0.1).",
+                f"Invited {result['email']}. They must click **Accept invite** in the email "
+                f"before they can log in.{mail_line}{accept_line}\n"
+                f"After accepting: email + shared key `{join_key}` on /app "
+                "(use LAN IP for friends, not 127.0.0.1).",
             )
         except ValueError as exc:
             return IntentResult(True, f"Invite failed: {exc}")

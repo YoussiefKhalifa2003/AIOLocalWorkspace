@@ -182,6 +182,7 @@ class AgentMetric(Base):
     success: Mapped[bool] = mapped_column(Boolean, default=True)
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -193,7 +194,7 @@ class AgentModelPref(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
-    agent_type: Mapped[str] = mapped_column(String(40), nullable=False)  # coding | code_review | …
+    agent_type: Mapped[str] = mapped_column(String(40), nullable=False)  # coding | code_review | ...
     model_id: Mapped[str] = mapped_column(String(120), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -264,7 +265,7 @@ class Invite(Base):
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    status: Mapped[str] = mapped_column(String(40), default="accepted")
+    status: Mapped[str] = mapped_column(String(40), default="pending")  # pending | accepted
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

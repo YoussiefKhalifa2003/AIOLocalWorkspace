@@ -29,7 +29,7 @@ def _boot(tmp_path, monkeypatch):
     return TestClient(app), info
 
 
-def test_invite_gmail_via_bang(tmp_path, monkeypatch):
+def test_invite_requires_accept_before_login(tmp_path, monkeypatch):
     client, info = _boot(tmp_path, monkeypatch)
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
     general = info["chat_general"]
@@ -41,13 +41,37 @@ def test_invite_gmail_via_bang(tmp_path, monkeypatch):
     assert r.status_code == 200
     body = r.json()["replies"][0]["body"]
     assert "Invited friend@gmail.com" in body
+    assert "Accept invite" in body
     assert "Invite failed" not in body
+
+    # Cannot log in before accepting
+    blocked = client.post(
+        "/auth/login",
+        json={"email": "friend@gmail.com", "api_key": "demo-key-a"},
+    )
+    assert blocked.status_code == 403
+    assert "accept" in blocked.json()["detail"].lower()
+
+    # Extract accept link from whisper (shown when SMTP missing)
+    accept_url = None
+    for line in body.splitlines():
+        if "Accept link:" in line:
+            accept_url = line.split("Accept link:", 1)[1].strip()
+            break
+    assert accept_url
+    token = accept_url.rstrip("/").split("/")[-1]
+
+    page = client.get(f"/invite/accept/{token}")
+    assert page.status_code == 200
+    assert "Invite accepted" in page.text or "already in" in page.text
+    assert "friend@gmail.com" in page.text
 
     login = client.post(
         "/auth/login",
         json={"email": "friend@gmail.com", "api_key": "demo-key-a"},
     )
     assert login.status_code == 200
+    assert login.json()["email"] == "friend@gmail.com"
 
 
 def test_no_mention_in_private(tmp_path, monkeypatch):

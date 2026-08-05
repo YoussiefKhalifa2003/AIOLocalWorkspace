@@ -1,4 +1,4 @@
-"""@people pings — channel/general only (never private rooms)."""
+"""@people pings - channel/general only (never private rooms)."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def record_mentions(
     body: str,
 ) -> list[ChatMention]:
     chat = db.query(Chat).filter(Chat.id == chat_id).one_or_none()
-    # Only notify for team channels (e.g. #general) — never private rooms
+    # Only notify for team channels (e.g. #general) - never private rooms
     if chat is None or (chat.kind or "channel") != "channel":
         return []
 

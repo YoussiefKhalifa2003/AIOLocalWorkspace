@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
     tts_dir: str = "data/tts"
     host_bind: str = "0.0.0.0"
-    # Optional invite email (Gmail: smtp.gmail.com + app password)
+    # Optional invite email (Outlook/M365: smtp.office365.com or smtp-mail.outlook.com)
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

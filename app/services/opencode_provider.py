@@ -2,7 +2,7 @@
 
 Free models (from OpenCode Zen) are selectable per agent in the UI.
 Calls go to https://opencode.ai/zen/v1/chat/completions when OPENCODE_API_KEY is set.
-Falls back to `opencode run --model …` when the CLI is installed and authenticated.
+Falls back to `opencode run --model ...` when the CLI is installed and authenticated.
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ class ChatResult:
     content: str
     backend: str
     model: str
+    tokens: int | None = None
 
 
 def normalize_model_id(model: str | None) -> str:
@@ -114,7 +115,10 @@ def chat_opencode_zen(
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMError(f"OpenCode Zen bad response: {data!r}") from exc
-    return ChatResult(content=content, backend="opencode_zen", model=mid)
+    from app.services.llm import _tokens_from_usage, estimate_tokens
+
+    tokens = _tokens_from_usage(data) or estimate_tokens(messages, content)
+    return ChatResult(content=content, backend="opencode_zen", model=mid, tokens=tokens)
 
 
 def chat_opencode_cli(

@@ -58,6 +58,8 @@ def _agent_chat(
     job.model_used = model
     settings = get_settings()
     force = (settings.agent_llm_backend or "auto").lower()
+    tokens: int | None = None
+    metric_backend = backend
 
     if force == "gemini":
         backend = "gemini"
@@ -68,65 +70,95 @@ def _agent_chat(
     elif force == "opencode":
         backend = "opencode"
 
-    if backend == "opencode":
-        try:
-            result = chat_with_model(
-                model=model, messages=messages, temperature=temperature, max_tokens=max_tokens
-            )
-            job.model_used = f"{result.backend}:{result.model}"
-            return result.content
-        except LLMError as exc:
-            if force == "opencode":
-                raise
-            # fall through to gemini
-            from app.services.model_tiers import resolve_model
+    try:
+        if backend == "opencode":
+            try:
+                result = chat_with_model(
+                    model=model, messages=messages, temperature=temperature, max_tokens=max_tokens
+                )
+                job.model_used = f"{result.backend}:{result.model}"
+                tokens = result.tokens
+                metric_backend = result.backend
+                content = result.content
+            except LLMError:
+                if force == "opencode":
+                    raise
+                from app.services.model_tiers import resolve_model
 
-            gem = resolve_model(parse_json(job.payload_json, {}).get("model_tier"), agent_type=agent_type)
-            job.model_used = f"gemini-fallback:{gem}"
-            return llm.chat(
-                model=gem,
+                gem = resolve_model(parse_json(job.payload_json, {}).get("model_tier"), agent_type=agent_type)
+                job.model_used = f"gemini-fallback:{gem}"
+                lr = llm.chat_result(
+                    model=gem,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    force_backend="gemini",
+                )
+                tokens = lr.tokens
+                metric_backend = lr.backend or "gemini"
+                content = lr.content
+        elif backend == "openrouter":
+            try:
+                lr = llm.chat_result(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    force_backend="openrouter",
+                )
+                job.model_used = f"openrouter:{model}"
+                tokens = lr.tokens
+                metric_backend = "openrouter"
+                content = lr.content
+            except LLMError:
+                if force == "openrouter":
+                    raise
+                from app.services.model_tiers import resolve_model
+
+                gem = resolve_model(parse_json(job.payload_json, {}).get("model_tier"), agent_type=agent_type)
+                job.model_used = f"gemini-fallback:{gem}"
+                lr = llm.chat_result(
+                    model=gem,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    force_backend="gemini",
+                )
+                tokens = lr.tokens
+                metric_backend = lr.backend or "gemini"
+                content = lr.content
+        else:
+            use_model = model if model != "gemini-env" else settings.agent_model
+            job.model_used = use_model
+            lr = llm.chat_result(
+                model=use_model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 force_backend="gemini",
             )
+            tokens = lr.tokens
+            metric_backend = lr.backend or "gemini"
+            content = lr.content
 
-    if backend == "openrouter":
-        try:
-            content = llm.chat(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                force_backend="openrouter",
-            )
-            job.model_used = f"openrouter:{model}"
-            return content
-        except LLMError:
-            if force == "openrouter":
-                raise
-            from app.services.model_tiers import resolve_model
-
-            gem = resolve_model(parse_json(job.payload_json, {}).get("model_tier"), agent_type=agent_type)
-            job.model_used = f"gemini-fallback:{gem}"
-            return llm.chat(
-                model=gem,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                force_backend="gemini",
-            )
-
-    # gemini
-    use_model = model if model != "gemini-env" else settings.agent_model
-    job.model_used = use_model
-    return llm.chat(
-        model=use_model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        force_backend="gemini",
-    )
+        record_metric(
+            db,
+            job=job,
+            backend=metric_backend,
+            model=job.model_used,
+            success=True,
+            tokens=tokens,
+        )
+        return content
+    except Exception:
+        record_metric(
+            db,
+            job=job,
+            backend=metric_backend or backend,
+            model=job.model_used,
+            success=False,
+        )
+        raise
 
 
 def _maybe_post_review_to_general(db: Session, job: Job, content: str) -> None:
@@ -139,7 +171,7 @@ def _maybe_post_review_to_general(db: Session, job: Job, content: str) -> None:
     title = payload.get("pr_title") or "PR review"
     pr_url = payload.get("pr_url") or ""
     body = (
-        f"**Code review** — {repo}\n"
+        f"**Code review** - {repo}\n"
         f"{title}\n"
         f"{pr_url}\n\n"
         f"{content}"
@@ -282,13 +314,6 @@ def run_coding(db: Session, job: Job, llm: LLMClient) -> None:
                 {"role": "user", "content": text},
             ],
         )
-        record_metric(
-            db,
-            job=job,
-            backend="opencode" if "opencode" in (job.model_used or "") else "llm",
-            model=job.model_used,
-            success=True,
-        )
     art = _save_artifact(db, job, "Code", content)
     post_agent_output(
         db,
@@ -378,7 +403,7 @@ def run_checklist(db: Session, job: Job, llm: LLMClient) -> None:
                 {
                     "role": "system",
                     "content": (
-                        'Return ONLY JSON {"tasks":["..."]} — short actionable follow-ups.'
+                        'Return ONLY JSON {"tasks":["..."]} - short actionable follow-ups.'
                     ),
                 },
                 {
@@ -471,7 +496,7 @@ def execute_job(db: Session, job: Job, llm: LLMClient | None = None) -> None:
         job.finished_at = utcnow()
         job.error = None
         enqueue_next_pipeline_job(db, job)
-    except Exception as exc:  # noqa: BLE001 — record any agent failure
+    except Exception as exc:  # noqa: BLE001 - record any agent failure
         job.status = "failed"
         job.finished_at = utcnow()
         job.error = str(exc)

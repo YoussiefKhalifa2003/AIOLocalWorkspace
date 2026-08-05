@@ -114,7 +114,7 @@ def format_user_status(
         lines.append("  (no open items)")
     lines.append(f"Open issues: {len(issues)}")
     for i in issues:
-        lines.append(f"  ! #{i.id} {i.title}" + (f" — {i.detail}" if i.detail else ""))
+        lines.append(f"  ! #{i.id} {i.title}" + (f" - {i.detail}" if i.detail else ""))
     if not issues:
         lines.append("  (none)")
     remaining = [o.title for o in objs if not o.done] + [c.title for c in open_checks[:5]]
@@ -123,7 +123,7 @@ def format_user_status(
     elif issues:
         lines.append("Summary: objectives/checklist clear; open issues need attention.")
     else:
-        lines.append("Summary: caught up — no remaining owned work or open issues.")
+        lines.append("Summary: caught up - no remaining owned work or open issues.")
     return "\n".join(lines)
 
 

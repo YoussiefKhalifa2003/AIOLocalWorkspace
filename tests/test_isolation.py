@@ -32,7 +32,7 @@ def test_cross_tenant_artifact_isolated(tmp_path, monkeypatch):
         title="secret",
         content="tenant A only",
     )
-    # job_id FK — create minimal job/request or disable: use raw insert without FK for sqlite?
+    # job_id FK - create minimal job/request or disable: use raw insert without FK for sqlite?
     # Better create proper request/job
     from app.db.models import Job, WorkRequest
 

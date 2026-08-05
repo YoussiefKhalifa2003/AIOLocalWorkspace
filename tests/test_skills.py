@@ -35,7 +35,7 @@ def test_skills_private_only(tmp_path, monkeypatch):
     priv = info["chat_private_omar"]
     general = info["chat_general"]
 
-    # Plain private note — no AI
+    # Plain private note - no AI
     quiet = client.post(
         f"/chats/{priv}/messages",
         headers=ho,
@@ -53,7 +53,7 @@ def test_skills_private_only(tmp_path, monkeypatch):
     assert skill.json()["replies"]
     assert "writing" in skill.json()["replies"][0]["body"].lower() or "OFFLINE" in skill.json()["replies"][0]["body"] or "Lead" in skill.json()["replies"][0]["body"]
 
-    # General slash — no AI
+    # General slash - no AI
     g = client.post(
         f"/chats/{general}/messages",
         headers=ho,

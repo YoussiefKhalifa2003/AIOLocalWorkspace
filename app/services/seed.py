@@ -100,6 +100,18 @@ def seed_demo_data(db: Session | None = None) -> dict:
         ensure_project_rooms(db, t1.id, p1.id)
         _ensure_member(db, t1.id, u1.id, role="owner")
 
+        # Second project in same workspace so the owner dashboard has a project picker
+        p1b = (
+            db.query(Project)
+            .filter_by(tenant_id=t1.id, name="ops")
+            .one_or_none()
+        )
+        if p1b is None:
+            p1b = Project(tenant_id=t1.id, name="ops", github_repo=None)
+            db.add(p1b)
+            db.flush()
+        ensure_project_rooms(db, t1.id, p1b.id)
+
         # Second member in same workspace for hybrid demos
         u_member = db.query(User).filter_by(email="omar@local.test").one_or_none()
         if u_member is None:
@@ -256,6 +268,7 @@ def seed_demo_data(db: Session | None = None) -> dict:
             "user_a": u1.id,
             "email_a": u1.email,
             "project_a": p1.id,
+            "project_ops": p1b.id,
             "api_key_a": u1.api_key,
             "chat_general": general.id,
             "chat_private_a": priv_a.id,
@@ -287,19 +300,83 @@ def invite_user_by_email(
     email: str,
     name: str | None = None,
 ) -> dict:
+    """Create a *pending* invite. User cannot log in until they accept the email link."""
+    from app.db.models import Invite
+    from app.services.invite_email import invite_public_base_url, send_invite_email
+
     email_norm = email.strip().lower()
-    # Strip wrapping punctuation from chat paste
     email_norm = email_norm.strip("<>\"'.,;:!?)(")
     if "@" not in email_norm or "." not in email_norm.split("@")[-1]:
-        raise ValueError("invalid email — use something like name@gmail.com")
-    join_key = get_settings().workspace_join_key or get_settings().demo_api_key
+        raise ValueError("invalid email - use something like name@gmail.com")
+
     inviter = db.query(User).filter(User.id == inviter_user_id).one_or_none()
     inviter_email = inviter.email if inviter else "a teammate"
 
+    existing = db.query(User).filter(User.email == email_norm).one_or_none()
+    if existing is not None:
+        member = (
+            db.query(WorkspaceMember)
+            .filter_by(tenant_id=tenant_id, user_id=existing.id)
+            .one_or_none()
+        )
+        if member is not None:
+            raise ValueError(f"{email_norm} is already in this workspace")
+
+    # Reuse pending invite for same email+tenant, or create a new one
+    invite = (
+        db.query(Invite)
+        .filter(
+            Invite.tenant_id == tenant_id,
+            Invite.email == email_norm,
+            Invite.status == "pending",
+        )
+        .order_by(Invite.id.desc())
+        .first()
+    )
+    token = secrets.token_urlsafe(18)
+    if invite is None:
+        invite = Invite(
+            tenant_id=tenant_id,
+            email=email_norm,
+            token=token,
+            status="pending",
+            created_by_user_id=inviter_user_id,
+        )
+        db.add(invite)
+    else:
+        invite.token = token
+        invite.created_by_user_id = inviter_user_id
+    db.flush()
+
+    accept_url = f"{invite_public_base_url()}/invite/accept/{invite.token}"
+    emailed, mail_detail = send_invite_email(
+        to_email=email_norm,
+        inviter_email=inviter_email,
+        accept_url=accept_url,
+    )
+    return {
+        "email": email_norm,
+        "name": name or email_norm.split("@")[0],
+        "status": "pending",
+        "token": invite.token,
+        "accept_url": accept_url,
+        "email_sent": emailed,
+        "email_detail": mail_detail,
+        "note": "They must click Accept invite in the email before they can log in.",
+    }
+
+
+def _provision_accepted_user(
+    db: Session,
+    *,
+    tenant_id: int,
+    email: str,
+    name: str | None = None,
+) -> tuple[User, int]:
+    """Create user + memberships + private room. Returns (user, private_chat_id)."""
+    email_norm = email.strip().lower()
     user = db.query(User).filter(User.email == email_norm).one_or_none()
-    is_new = False
     if user is None:
-        is_new = True
         user = User(
             tenant_id=tenant_id,
             name=name or email_norm.split("@")[0],
@@ -310,18 +387,9 @@ def invite_user_by_email(
         db.flush()
     elif user.tenant_id != tenant_id:
         user.tenant_id = tenant_id
+
     _ensure_member(db, tenant_id, user.id, role="member")
     db.flush()
-    from app.db.models import Invite
-
-    invite = Invite(
-        tenant_id=tenant_id,
-        email=email_norm,
-        token=secrets.token_urlsafe(12),
-        status="accepted",
-        created_by_user_id=inviter_user_id,
-    )
-    db.add(invite)
 
     project = (
         db.query(Project)
@@ -338,9 +406,8 @@ def invite_user_by_email(
         .first()
     )
     if general is None:
-        general = _ensure_general(db, tenant_id, project_id)
+        _ensure_general(db, tenant_id, project_id)
 
-    # Add invitee to all existing channels (idempotent)
     channels = (
         db.query(Chat)
         .filter(Chat.tenant_id == tenant_id, Chat.kind == "channel")
@@ -351,22 +418,117 @@ def invite_user_by_email(
 
     priv = ensure_private_room(db, tenant_id=tenant_id, project_id=project_id, user=user)
     db.flush()
+    return user, priv.id
 
-    from app.services.invite_email import send_invite_email
 
-    emailed, mail_detail = send_invite_email(
-        to_email=email_norm,
-        inviter_email=inviter_email,
-        join_key=join_key,
+def accept_invite_by_token(db: Session, token: str) -> dict:
+    """Accept a pending invite and provision the user. Idempotent if already accepted."""
+    from app.db.models import Invite
+
+    token = (token or "").strip()
+    if not token:
+        raise ValueError("missing invite token")
+
+    invite = db.query(Invite).filter(Invite.token == token).one_or_none()
+    if invite is None:
+        raise ValueError("invalid or expired invite link")
+
+    join_key = get_settings().workspace_join_key or get_settings().demo_api_key
+
+    if invite.status == "accepted":
+        user = db.query(User).filter(User.email == invite.email).one_or_none()
+        if user is None:
+            user, _ = _provision_accepted_user(
+                db, tenant_id=invite.tenant_id, email=invite.email
+            )
+        return {
+            "email": invite.email,
+            "name": user.name,
+            "user_id": user.id,
+            "join_key": join_key,
+            "status": "accepted",
+            "already_accepted": True,
+        }
+
+    if invite.status != "pending":
+        raise ValueError(f"invite is {invite.status}, not pending")
+
+    user, priv_id = _provision_accepted_user(
+        db, tenant_id=invite.tenant_id, email=invite.email
     )
+    invite.status = "accepted"
+    db.flush()
     return {
-        "user_id": user.id,
         "email": user.email,
         "name": user.name,
-        "api_key_issued": join_key,
-        "is_new": is_new,
-        "private_chat_id": priv.id,
-        "email_sent": emailed,
-        "email_detail": mail_detail,
-        "note": "They log in with their email + the shared workspace key.",
+        "user_id": user.id,
+        "join_key": join_key,
+        "private_chat_id": priv_id,
+        "status": "accepted",
+        "already_accepted": False,
     }
+
+
+def delete_user_by_email(db: Session, email: str) -> dict:
+    """Remove a user and related rows so they can be re-invited cleanly."""
+    from app.db.models import (
+        ChatMention,
+        ChatMessage,
+        FileClaim,
+        Invite,
+        Objective,
+        TaskItem,
+        WorkIssue,
+        WorkRequest,
+    )
+
+    email_norm = email.strip().lower()
+    user = db.query(User).filter(User.email == email_norm).one_or_none()
+    deleted_invite_rows = (
+        db.query(Invite).filter(Invite.email == email_norm).delete(synchronize_session=False)
+    )
+    if user is None:
+        return {"email": email_norm, "deleted": False, "invites_cleared": deleted_invite_rows}
+
+    uid = user.id
+
+    # Private rooms owned by this user
+    priv_chats = (
+        db.query(Chat)
+        .filter(Chat.owner_user_id == uid, Chat.kind == "private")
+        .all()
+    )
+    for ch in priv_chats:
+        db.query(ChatMention).filter(ChatMention.chat_id == ch.id).delete(synchronize_session=False)
+        db.query(ChatMessage).filter(ChatMessage.chat_id == ch.id).delete(synchronize_session=False)
+        db.query(ChatMember).filter(ChatMember.chat_id == ch.id).delete(synchronize_session=False)
+        db.query(WorkIssue).filter(WorkIssue.source_chat_id == ch.id).update(
+            {WorkIssue.source_chat_id: None}, synchronize_session=False
+        )
+        db.delete(ch)
+    db.flush()
+
+    db.query(ChatMention).filter(
+        (ChatMention.mentioned_user_id == uid) | (ChatMention.from_user_id == uid)
+    ).delete(synchronize_session=False)
+    db.query(ChatMessage).filter(ChatMessage.sender_user_id == uid).delete(synchronize_session=False)
+    db.query(ChatMessage).filter(ChatMessage.whisper_user_id == uid).update(
+        {ChatMessage.whisper_user_id: None}, synchronize_session=False
+    )
+    db.query(ChatMember).filter(ChatMember.user_id == uid).delete(synchronize_session=False)
+
+    db.query(FileClaim).filter(FileClaim.user_id == uid).delete(synchronize_session=False)
+    db.query(Objective).filter(
+        (Objective.user_id == uid) | (Objective.assignee_user_id == uid)
+    ).delete(synchronize_session=False)
+    db.query(WorkIssue).filter(WorkIssue.owner_user_id == uid).delete(synchronize_session=False)
+    db.query(TaskItem).filter(TaskItem.owner_user_id == uid).update(
+        {TaskItem.owner_user_id: None}, synchronize_session=False
+    )
+    db.query(WorkRequest).filter(WorkRequest.user_id == uid).delete(synchronize_session=False)
+    db.query(Invite).filter(Invite.created_by_user_id == uid).delete(synchronize_session=False)
+    db.query(WorkspaceMember).filter(WorkspaceMember.user_id == uid).delete(synchronize_session=False)
+
+    db.delete(user)
+    db.flush()
+    return {"email": email_norm, "deleted": True, "user_id": uid, "invites_cleared": deleted_invite_rows}

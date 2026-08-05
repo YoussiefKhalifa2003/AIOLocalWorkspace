@@ -77,7 +77,7 @@ def resolve_agent_model(
     model_tier: str | None = None,
     payload_model: str | None = None,
 ) -> tuple[str, str]:
-    """Return (model_id, backend) — backend is openrouter|gemini|opencode."""
+    """Return (model_id, backend) - backend is openrouter|gemini|opencode."""
     settings = get_settings()
 
     def from_id(mid: str) -> tuple[str, str]:

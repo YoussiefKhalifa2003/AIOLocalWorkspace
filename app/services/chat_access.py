@@ -31,7 +31,7 @@ def ensure_chat_member(db: Session, *, tenant_id: int, chat_id: int, user_id: in
     )
     if existing is None:
         db.add(ChatMember(tenant_id=tenant_id, chat_id=chat_id, user_id=user_id))
-        # Session uses autoflush=False — flush so later ensure_* calls see this row
+        # Session uses autoflush=False - flush so later ensure_* calls see this row
         db.flush()
 
 
@@ -64,7 +64,7 @@ def ensure_private_room(
     chat = Chat(
         tenant_id=tenant_id,
         project_id=project_id,
-        name=f"private · {user.email}",
+        name=f"private - {user.email}",
         kind="private",
         owner_user_id=user.id,
     )

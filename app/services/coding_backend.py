@@ -91,7 +91,15 @@ def record_metric(
     success: bool,
     duration_ms: int | None = None,
     tokens: int | None = None,
+    user_id: int | None = None,
 ) -> AgentMetric:
+    uid = user_id
+    if uid is None and job.request_id:
+        from app.db.models import WorkRequest
+
+        req = db.query(WorkRequest).filter(WorkRequest.id == job.request_id).one_or_none()
+        if req is not None:
+            uid = req.user_id
     row = AgentMetric(
         tenant_id=job.tenant_id,
         project_id=job.project_id,
@@ -101,6 +109,7 @@ def record_metric(
         success=success,
         duration_ms=duration_ms,
         tokens=tokens,
+        user_id=uid,
     )
     db.add(row)
     db.flush()

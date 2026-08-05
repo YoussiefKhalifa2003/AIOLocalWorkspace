@@ -1,4 +1,4 @@
-"""Elevation roadmap gates A–G."""
+"""Elevation roadmap gates A-G."""
 
 from __future__ import annotations
 
@@ -306,7 +306,10 @@ def test_gate_g_analytics_and_llm_backend(tmp_path, monkeypatch):
     assert r.status_code == 403
     r = client.get(f"/projects/{info['project_a']}/analytics", headers=ha)
     assert r.status_code == 200
-    assert "metrics_by_backend" in r.json()
+    body = r.json()
+    assert "summary" in body
+    assert "people" in body
+    assert "models" in body
 
     # coding writes a metric row
     priv = info["chat_private_a"]
@@ -316,7 +319,8 @@ def test_gate_g_analytics_and_llm_backend(tmp_path, monkeypatch):
         json={"body": "/code def add(a,b): return a+b", "speak": False},
     )
     data = client.get(f"/projects/{info['project_a']}/analytics", headers=ha).json()
-    assert data["jobs_total"] >= 1
+    assert data["summary"]["jobs_total"] >= 1
+    assert data["summary"]["tokens_total"] >= 0
 
 
 def test_file_claim_overlap_unit():

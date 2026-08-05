@@ -1,4 +1,4 @@
-"""Phase 7 acceptance — dual-user flows."""
+"""Phase 7 acceptance - dual-user flows."""
 
 from fastapi.testclient import TestClient
 

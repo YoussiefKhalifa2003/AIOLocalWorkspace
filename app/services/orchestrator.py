@@ -83,7 +83,7 @@ def _parse_mention(db: Session, auth: AuthContext, text: str) -> ParsedMention:
     user = resolve_member(db, auth.tenant_id, raw)
     if user is not None:
         return ParsedMention(kind="user", user=user, rest=rest)
-    # unknown @token — leave as plain text
+    # unknown @token - leave as plain text
     return ParsedMention(kind="none", rest=text.strip())
 
 
@@ -203,10 +203,14 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
                 inviter_user_id=auth.user_id,
                 email=email,
             )
-            key_line = f" They log in with that email + shared key `{result['api_key_issued']}`."
+            mail = result.get("email_detail") or ""
+            accept = result.get("accept_url") or ""
             return IntentResult(
                 True,
-                f"Invited {result['email']}.{key_line}\nJoin on LAN: open /app (use your LAN IP, not 127.0.0.1).",
+                f"Invited {result['email']}. They must Accept invite in the email first."
+                f"{(' Email: ' + mail) if mail else ''}"
+                f"{(' Link: ' + accept) if accept else ''}\n"
+                "Then log in on /app with that email + shared join key.",
             )
         except ValueError as exc:
             return IntentResult(True, f"Invite failed: {exc}")
@@ -440,7 +444,7 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
         elif lower.startswith("proceed ") and lower != "proceed":
             pending = text[len("proceed ") :].strip() or pending
         if not pending:
-            return IntentResult(True, "Nothing pending to proceed. Use @Code … or force code <request>.")
+            return IntentResult(True, "Nothing pending to proceed. Use @Code ... or force code <request>.")
         return _run_agent_branch(db, auth, chat, pending, forced_agent="coding", force=True)
     if lower in ("show objectives", "list objectives", "objectives", "show all objectives"):
         from app.services.status import objectives_for_user
@@ -662,7 +666,7 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
             rows = issues_for_user(
                 db, tenant_id=auth.tenant_id, project_id=project_id, user_id=auth.user_id
             )
-        lines = [f"! #{i.id} {i.title}" + (f" — {i.detail}" if i.detail else "") for i in rows] or [
+        lines = [f"! #{i.id} {i.title}" + (f" - {i.detail}" if i.detail else "") for i in rows] or [
             "(none)"
         ]
         return IntentResult(True, "ISSUES\n" + "\n".join(lines))
@@ -715,14 +719,14 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
             True,
             "Commands:\n"
             "- In TEAM chats: type board/ops commands bare "
-            "(e.g. `add objective …`, `board`, `claim path …`)\n"
+            "(e.g. `add objective ...`, `board`, `claim path ...`)\n"
             "- In TEAM chats: start with `/` only to wake AI "
             "(e.g. `/help`, `/@Omar status`, `/@Research one tip`)\n"
             "- Plain non-command messages in TEAM are human-only (no AI)\n"
             "- In MY ROOM: AI always listens (no `/` needed); commands work bare too\n"
             "- add objective <text> / show objectives / run objective <id>\n"
             "- remove objective <id> / remove checklist <id>\n"
-            "- clear / clear chat — wipe messages in this chat\n"
+            "- clear / clear chat - wipe messages in this chat\n"
             "- board / set objective <id> todo|doing|blocked|done|agent_backlog\n"
             "- assign objective <id> to <name> (owner)\n"
             "- link objective <id> pr <url> / link objective <id> branch <name>\n"
@@ -731,7 +735,7 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
             "- log issue <text> / show issues / resolve issue <id>\n"
             "- invite <email>\n"
             "- create chat <name> / list chats / delete chat [id]\n"
-            "- @Research / @Writing / @Code / @Review / @Checklist …\n"
+            "- @Research / @Writing / @Code / @Review / @Checklist ...\n"
             "- After agent work: Yes/No on objectives, or yes <id> / no <id>\n"
             "- @Omar status / status for Omar (owner: others; anyone: self)\n"
             "- @team report / team status (owner)\n"
@@ -831,12 +835,12 @@ def _run_agent_branch(
         if collisions:
             _PENDING_CODING[(auth.user_id, chat.id)] = text
             lines = [
-                "WARNING: file claim conflict — coding not started.",
+                "WARNING: file claim conflict - coding not started.",
                 "Claimed by others:",
             ]
             for c in collisions:
                 lines.append(f"- `{c.path_pattern}` (user_id={c.user_id})")
-            lines.append("Say `proceed` or `force code …` to run anyway.")
+            lines.append("Say `proceed` or `force code ...` to run anyway.")
             return IntentResult(True, "\n".join(lines), "lead")
 
     # only run first agent synchronously for chat snappiness; handoffs drained
@@ -891,7 +895,7 @@ def handle_chat_message(
 ) -> tuple[list[ChatMessage], int | None, int | None, bool]:
     """Process a user chat message.
 
-    - `!…` commands: no LLM; whisper in team channels.
+    - `!...` commands: no LLM; whisper in team channels.
     - Team channels: plain text is human-only; `/` does not wake AI (skills are private-only).
     - Private rooms: until skills phase, non-! still routes to agents (Phase 5 tightens this).
     """
@@ -902,7 +906,7 @@ def handle_chat_message(
     is_channel = (chat.kind or "channel") == "channel"
     whisper = False
 
-    # Bang commands — always available
+    # Bang commands - always available
     if raw_body.startswith("!"):
         if is_channel:
             mark_whisper(user_message, auth.user_id)
@@ -959,5 +963,5 @@ def handle_chat_message(
             db, auth=auth, chat=chat, result=result, speak=speak, whisper=False
         )
 
-    # Plain notes — no LLM
+    # Plain notes - no LLM
     return [], None, None, False

@@ -116,7 +116,7 @@ def add_chat_member(
     if user is None or user.tenant_id != auth.tenant_id:
         raise HTTPException(
             status_code=404,
-            detail="user not found in workspace — invite them first",
+            detail="user not found in workspace - invite them first",
         )
     ensure_chat_member(db, tenant_id=auth.tenant_id, chat_id=chat.id, user_id=user.id)
     db.commit()

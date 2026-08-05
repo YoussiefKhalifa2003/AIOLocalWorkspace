@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aio-workspace"
 version = "0.1.0"
-description = "AIO Agent Workspace — metal multi-agent pipeline"
+description = "AIO Agent Workspace - metal multi-agent pipeline"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",

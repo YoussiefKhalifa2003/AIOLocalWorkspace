@@ -1,4 +1,4 @@
-"""Private-room /skills — humans never @ agents."""
+"""Private-room /skills - humans never @ agents."""
 
 from __future__ import annotations
 

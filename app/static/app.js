@@ -13,7 +13,8 @@
     members: [],
     chats: [],
     tab: "chat",
-    projectId: 1,
+    projectId: Number(localStorage.getItem("aio_project") || 0) || 1,
+    projects: [],
     isOwner: false,
     unreadMentions: 0,
     mentionRows: [],
@@ -160,7 +161,7 @@
     checklist: "Checklist",
   };
 
-  // Dry coworker notes — no callsigns / units / marketing bios
+  // Dry coworker notes - no callsigns / units / marketing bios
   const AGENT_PROFILES = {
     research: {
       mention: "/research",
@@ -241,7 +242,7 @@
       (data.models || []).forEach((m) => {
         const opt = document.createElement("option");
         opt.value = m.id;
-        opt.textContent = m.free ? `${m.label} · free` : m.label;
+        opt.textContent = m.free ? `${m.label} - free` : m.label;
         if ((data.prefs || {})[agent] === m.id) opt.selected = true;
         sel.appendChild(opt);
       });
@@ -334,7 +335,7 @@
         c.draggable = canDragCard(card);
         c.dataset.id = card.id;
         c.innerHTML = `<div class="t">${escapeHtml(card.title)}</div>
-          <div class="meta">${escapeHtml(card.owner_email || "")} · ${card.progress_percent || 0}%</div>`;
+          <div class="meta">${escapeHtml(card.owner_email || "")} - ${card.progress_percent || 0}%</div>`;
         if (card.open_issue_count) {
           const b = document.createElement("span");
           b.className = "badge";
@@ -394,24 +395,174 @@
 
   async function loadAnalytics() {
     const body = $("analyticsBody");
+    if (!state.isOwner) {
+      body.innerHTML = `<p class="dash-muted">Owner only.</p>`;
+      return;
+    }
     try {
+      const projects = await api("/projects");
+      state.projects = projects || [];
+      if (!state.projects.length) {
+        body.innerHTML = `<p class="dash-muted">No projects yet.</p>`;
+        return;
+      }
+      if (!state.projects.some((p) => Number(p.id) === Number(state.projectId))) {
+        state.projectId = state.projects[0].id;
+      }
+      localStorage.setItem("aio_project", String(state.projectId));
       const data = await api(`/projects/${state.projectId}/analytics`);
-      const rows = (data.metrics_by_backend || [])
+      const s = data.summary || {};
+      const fmt = (n) => Number(n || 0).toLocaleString();
+      const peopleRows = (data.people || [])
+        .map((p) => {
+          const models = (p.models || []).slice(0, 4).map(escapeHtml).join(", ")
+            + ((p.models || []).length > 4 ? ` +${p.models.length - 4}` : "");
+          return `<tr>
+            <td>${escapeHtml(p.name || p.email)}<div class="dash-sub">${escapeHtml(p.email)} - ${escapeHtml(p.role)}</div></td>
+            <td class="num">${fmt(p.jobs)}</td>
+            <td class="num">${fmt(p.tokens)}</td>
+            <td class="models-cell">${models || "n/a"}</td>
+          </tr>`;
+        })
+        .join("");
+      const modelRows = (data.models || [])
         .map(
-          (r) =>
-            `<tr><td>${escapeHtml(r.backend)}</td><td>${escapeHtml(r.model || "")}</td>` +
-            `<td>${r.total}</td><td>${r.success}</td><td>${r.fail}</td></tr>`
+          (m) => `<tr>
+            <td>${escapeHtml(m.model)}<div class="dash-sub">${escapeHtml(m.backend || "")}</div></td>
+            <td class="num">${fmt(m.runs)}</td>
+            <td class="num">${fmt(m.tokens)}</td>
+            <td class="num">${fmt(m.success)}/${fmt(m.fail)}</td>
+          </tr>`
         )
         .join("");
+      const taskRows = (data.open_tasks || [])
+        .map(
+          (t) => `<tr>
+            <td>#${t.id} ${escapeHtml(t.title)}</td>
+            <td>${escapeHtml(t.status)}</td>
+            <td>${escapeHtml(t.assignee_email || "unassigned")}</td>
+          </tr>`
+        )
+        .join("");
+      const memberOpts = (state.members || [])
+        .map((m) => `<option value="${m.user_id}">${escapeHtml(m.email)}</option>`)
+        .join("");
+      const projectOpts = state.projects
+        .map((p) => {
+          const sel = Number(p.id) === Number(state.projectId) ? " selected" : "";
+          return `<option value="${p.id}"${sel}>${escapeHtml(p.name)}</option>`;
+        })
+        .join("");
+      const current = state.projects.find((p) => Number(p.id) === Number(state.projectId));
+
       body.innerHTML = `
-        <h2>Jobs</h2>
-        <p>total ${data.jobs_total} · done ${data.jobs_done} · failed ${data.jobs_failed}</p>
-        <h2>Metrics by backend</h2>
-        <table>
-          <tr><th>backend</th><th>model</th><th>total</th><th>ok</th><th>fail</th></tr>
-          ${rows || "<tr><td colspan=5>(none yet)</td></tr>"}
-        </table>
+        <div class="dash">
+          <header class="dash-head">
+            <div>
+              <h2>Dashboard</h2>
+              <p class="dash-muted">Project manager view - numbers only.</p>
+            </div>
+            <div class="dash-project-wrap">
+              <label class="dash-project">
+                <span>Project</span>
+                <select id="dashProjectSelect">${projectOpts}</select>
+              </label>
+              <button type="button" id="dashNewProjectBtn" title="new project">+</button>
+            </div>
+          </header>
+          <div class="dash-stats">
+            <div class="dash-stat"><div class="n">${fmt(s.members)}</div><div class="l">people</div></div>
+            <div class="dash-stat"><div class="n">${fmt(s.open_tasks)}</div><div class="l">open tasks</div></div>
+            <div class="dash-stat"><div class="n">${fmt(s.jobs_done)}</div><div class="l">jobs done</div></div>
+            <div class="dash-stat"><div class="n">${fmt(s.jobs_failed)}</div><div class="l">failed</div></div>
+            <div class="dash-stat accent"><div class="n">${fmt(s.tokens_total)}</div><div class="l">tokens</div></div>
+            <div class="dash-stat"><div class="n">${fmt(s.model_count)}</div><div class="l">models</div></div>
+          </div>
+
+          <section class="dash-section">
+            <h3>Assign task${current ? ` - ${escapeHtml(current.name)}` : ""}</h3>
+            <form id="dashAssignForm" class="dash-assign">
+              <input id="dashAssignTitle" type="text" placeholder="task title" required maxlength="255" />
+              <select id="dashAssignUser" required>${memberOpts}</select>
+              <button type="submit">assign</button>
+            </form>
+            <pre id="dashAssignStatus" class="dash-status"></pre>
+          </section>
+
+          <section class="dash-section">
+            <h3>People</h3>
+            <table class="dash-table">
+              <thead><tr><th>person</th><th class="num">jobs</th><th class="num">tokens</th><th>models</th></tr></thead>
+              <tbody>${peopleRows || `<tr><td colspan="4" class="dash-muted">no usage yet</td></tr>`}</tbody>
+            </table>
+          </section>
+
+          <section class="dash-section">
+            <h3>Models</h3>
+            <table class="dash-table">
+              <thead><tr><th>model</th><th class="num">runs</th><th class="num">tokens</th><th class="num">ok/fail</th></tr></thead>
+              <tbody>${modelRows || `<tr><td colspan="4" class="dash-muted">no model runs yet</td></tr>`}</tbody>
+            </table>
+          </section>
+
+          <section class="dash-section">
+            <h3>Open tasks</h3>
+            <table class="dash-table">
+              <thead><tr><th>task</th><th>status</th><th>assignee</th></tr></thead>
+              <tbody>${taskRows || `<tr><td colspan="3" class="dash-muted">nothing open</td></tr>`}</tbody>
+            </table>
+          </section>
+        </div>
       `;
+
+      const projSelect = $("dashProjectSelect");
+      if (projSelect) {
+        projSelect.onchange = () => {
+          state.projectId = Number(projSelect.value);
+          localStorage.setItem("aio_project", String(state.projectId));
+          void loadAnalytics();
+        };
+      }
+      const newProjBtn = $("dashNewProjectBtn");
+      if (newProjBtn) {
+        newProjBtn.onclick = async () => {
+          const name = (window.prompt("New project name") || "").trim();
+          if (!name) return;
+          try {
+            const created = await api("/projects", {
+              method: "POST",
+              body: JSON.stringify({ name }),
+            });
+            state.projectId = created.id;
+            localStorage.setItem("aio_project", String(state.projectId));
+            await loadAnalytics();
+          } catch (e) {
+            window.alert(e.message || String(e));
+          }
+        };
+      }
+
+      const form = $("dashAssignForm");
+      if (form) {
+        form.onsubmit = async (ev) => {
+          ev.preventDefault();
+          const status = $("dashAssignStatus");
+          const title = $("dashAssignTitle").value.trim();
+          const assignee_user_id = Number($("dashAssignUser").value);
+          status.textContent = "...";
+          try {
+            const out = await api(`/projects/${state.projectId}/dashboard/assign`, {
+              method: "POST",
+              body: JSON.stringify({ title, assignee_user_id }),
+            });
+            status.textContent = `assigned #${out.id} to ${out.assignee_email}`;
+            $("dashAssignTitle").value = "";
+            await loadAnalytics();
+          } catch (e) {
+            status.textContent = e.message || String(e);
+          }
+        };
+      }
     } catch (e) {
       body.innerHTML = `<p class="err">${escapeHtml(e.message || e)}</p>`;
     }
@@ -536,7 +687,7 @@
       const color = colorForMessage(m);
       div.style.borderLeftColor = color;
       const who = m.agent ? `@${m.agent}` : (m.sender || "user");
-      const whisperTag = m.visibility === "whisper" ? " · only you" : "";
+      const whisperTag = m.visibility === "whisper" ? " - only you" : "";
       let bodyText = m.body || "";
       const confirmMatch = bodyText.match(/\[\[confirm:([0-9,\s]+)\]\]/);
       const confirmIds = confirmMatch
@@ -544,7 +695,7 @@
         : [];
       bodyText = bodyText.replace(/\n?\[\[confirm:[0-9,\s]+\]\]\s*$/, "").trimEnd();
       div.innerHTML =
-        `<div class="meta"><span class="who"></span>${whisperTag} <span class="msg-id">· #${m.id}</span></div><div class="body"></div>`;
+        `<div class="meta"><span class="who"></span>${whisperTag} <span class="msg-id"> - #${m.id}</span></div><div class="body"></div>`;
       const whoEl = div.querySelector(".who");
       whoEl.textContent = who;
       whoEl.style.color = color;
@@ -597,9 +748,9 @@
     $("chatTitle").textContent = title;
     const input = $("input");
     if (meta && meta.kind === "private") {
-      input.placeholder = "/skills · !commands · notes stay quiet";
+      input.placeholder = "/skills - !commands - notes stay quiet";
     } else {
-      input.placeholder = "chat · @people · !commands (only you see)";
+      input.placeholder = "chat - @people - !commands (only you see)";
     }
     document.querySelectorAll("#teamList li, #myRoomList li").forEach((li) => {
       li.classList.toggle("active", Number(li.dataset.id) === Number(id));
@@ -686,7 +837,7 @@
       btn.innerHTML =
         `<div class="mp-from"></div><div class="mp-where"></div><div class="mp-snip"></div>`;
       btn.querySelector(".mp-from").textContent = m.from || "someone";
-      btn.querySelector(".mp-where").textContent = `#${m.chat_name || m.chat_id} · msg #${m.message_id}`;
+      btn.querySelector(".mp-where").textContent = `#${m.chat_name || m.chat_id} - msg #${m.message_id}`;
       btn.querySelector(".mp-snip").textContent = m.snippet || "";
       btn.onclick = () => void openMention(m);
       panel.appendChild(btn);
@@ -702,7 +853,7 @@
         body: JSON.stringify({ ids: [m.id] }),
       });
     } catch (_) {
-      // older API marks all — still fine
+      // older API marks all - still fine
       try {
         await api("/workspace/mentions/read", { method: "POST", body: "{}" });
       } catch (_) { /* ignore */ }
@@ -717,7 +868,7 @@
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       setTimeout(() => el.classList.remove("highlight-ping"), 3500);
     } else {
-      setVoiceStatus(`opened #${m.chat_name || m.chat_id} — message #${m.message_id}`);
+      setVoiceStatus(`opened #${m.chat_name || m.chat_id} - message #${m.message_id}`);
     }
     await refreshMentions();
   }
@@ -822,11 +973,11 @@
 
   async function startRecording() {
     if (state.recording || !$("voiceToggle").checked) return;
-    setVoiceStatus("requesting mic…");
+    setVoiceStatus("requesting mic...");
     try {
       state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
-      setVoiceStatus("mic blocked — allow microphone access");
+      setVoiceStatus("mic blocked - allow microphone access");
       return;
     }
     state.chunks = [];
@@ -848,7 +999,7 @@
     state.recording = true;
     $("micBtn").classList.add("recording");
     $("micBtn").textContent = "stop";
-    setVoiceStatus("listening… click stop when done");
+    setVoiceStatus("listening... click stop when done");
   }
 
   function stopRecording(transcribe = true) {
@@ -878,14 +1029,14 @@
       setVoiceStatus("no audio captured");
       return;
     }
-    setVoiceStatus("transcribing…");
+    setVoiceStatus("transcribing...");
     try {
       const form = new FormData();
       form.append("file", blob, "voice.webm");
       const data = await api("/stt", { method: "POST", body: form });
       const text = (data.text || "").trim();
       if (!text) {
-        setVoiceStatus("empty transcript — try again");
+        setVoiceStatus("empty transcript - try again");
         return;
       }
       $("input").value = text;

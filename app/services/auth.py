@@ -42,6 +42,6 @@ def get_auth(
     if user is None:
         raise HTTPException(
             status_code=401,
-            detail="invalid API key — log in again with your email + demo-key-a",
+            detail="invalid API key - log in again with your email + demo-key-a",
         )
     return AuthContext(user=user, tenant_id=user.tenant_id, user_id=user.id)
