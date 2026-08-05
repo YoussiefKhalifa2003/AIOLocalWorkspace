@@ -288,9 +288,14 @@ def invite_user_by_email(
     name: str | None = None,
 ) -> dict:
     email_norm = email.strip().lower()
-    if "@" not in email_norm:
-        raise ValueError("invalid email")
+    # Strip wrapping punctuation from chat paste
+    email_norm = email_norm.strip("<>\"'.,;:!?)(")
+    if "@" not in email_norm or "." not in email_norm.split("@")[-1]:
+        raise ValueError("invalid email — use something like name@gmail.com")
     join_key = get_settings().workspace_join_key or get_settings().demo_api_key
+    inviter = db.query(User).filter(User.id == inviter_user_id).one_or_none()
+    inviter_email = inviter.email if inviter else "a teammate"
+
     user = db.query(User).filter(User.email == email_norm).one_or_none()
     is_new = False
     if user is None:
@@ -306,6 +311,7 @@ def invite_user_by_email(
     elif user.tenant_id != tenant_id:
         user.tenant_id = tenant_id
     _ensure_member(db, tenant_id, user.id, role="member")
+    db.flush()
     from app.db.models import Invite
 
     invite = Invite(
@@ -333,10 +339,8 @@ def invite_user_by_email(
     )
     if general is None:
         general = _ensure_general(db, tenant_id, project_id)
-    else:
-        ensure_channel_membership(db, general)
 
-    # Add invitee to all existing channels
+    # Add invitee to all existing channels (idempotent)
     channels = (
         db.query(Chat)
         .filter(Chat.tenant_id == tenant_id, Chat.kind == "channel")
@@ -347,6 +351,14 @@ def invite_user_by_email(
 
     priv = ensure_private_room(db, tenant_id=tenant_id, project_id=project_id, user=user)
     db.flush()
+
+    from app.services.invite_email import send_invite_email
+
+    emailed, mail_detail = send_invite_email(
+        to_email=email_norm,
+        inviter_email=inviter_email,
+        join_key=join_key,
+    )
     return {
         "user_id": user.id,
         "email": user.email,
@@ -354,5 +366,7 @@ def invite_user_by_email(
         "api_key_issued": join_key,
         "is_new": is_new,
         "private_chat_id": priv.id,
+        "email_sent": emailed,
+        "email_detail": mail_detail,
         "note": "They log in with their email + the shared workspace key.",
     }

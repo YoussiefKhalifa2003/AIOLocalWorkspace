@@ -16,6 +16,8 @@ from app.services.chat_access import (
     require_chat_access,
 )
 from app.services.orchestrator import handle_chat_message
+from app.services.chat_visibility import message_to_dict, visible_messages_filter
+from app.services.mentions import record_mentions
 
 router = APIRouter(tags=["chats"])
 
@@ -161,28 +163,13 @@ def list_messages(
             ChatMessage.chat_id == chat_id,
             ChatMessage.tenant_id == auth.tenant_id,
             ChatMessage.id > after_id,
+            visible_messages_filter(auth.user_id),
         )
         .order_by(ChatMessage.id.asc())
         .limit(min(limit, 200))
     )
     rows = q.all()
-    out = []
-    for m in rows:
-        sender = None
-        if m.sender_user_id:
-            u = db.query(User).filter(User.id == m.sender_user_id).one_or_none()
-            sender = u.email if u else str(m.sender_user_id)
-        out.append(
-            {
-                "id": m.id,
-                "sender": sender,
-                "agent": m.agent_slug,
-                "body": m.body,
-                "audio_url": m.audio_url,
-                "created_at": m.created_at.isoformat() if m.created_at else None,
-            }
-        )
-    return out
+    return [message_to_dict(db, m) for m in rows]
 
 
 @router.post("/chats/{chat_id}/messages")
@@ -199,6 +186,7 @@ def post_message(
         sender_user_id=auth.user_id,
         agent_slug=None,
         body=body.body.strip(),
+        visibility="public",
     )
     db.add(user_msg)
     db.flush()
@@ -209,6 +197,15 @@ def post_message(
         user_message=user_msg,
         speak=body.speak,
     )
+    if (user_msg.visibility or "public") == "public" and not cleared:
+        record_mentions(
+            db,
+            tenant_id=auth.tenant_id,
+            chat_id=chat_id,
+            message_id=user_msg.id,
+            from_user_id=auth.user_id,
+            body=user_msg.body,
+        )
     db.commit()
     return {
         "user_message_id": None if deleted_chat_id == chat_id or cleared else user_msg.id,
@@ -221,6 +218,7 @@ def post_message(
                 "agent": r.agent_slug,
                 "body": r.body,
                 "audio_url": r.audio_url,
+                "visibility": getattr(r, "visibility", None) or "public",
             }
             for r in replies
         ],

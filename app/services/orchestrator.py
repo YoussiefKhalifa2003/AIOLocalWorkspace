@@ -714,9 +714,12 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
         return IntentResult(
             True,
             "Commands:\n"
-            "- In TEAM chats: start with `/` to talk to AI (e.g. `/help`, `/@Omar status`)\n"
-            "- Plain messages in TEAM are human-only (no AI)\n"
-            "- In MY ROOM: AI always listens (no `/` needed)\n"
+            "- In TEAM chats: type board/ops commands bare "
+            "(e.g. `add objective …`, `board`, `claim path …`)\n"
+            "- In TEAM chats: start with `/` only to wake AI "
+            "(e.g. `/help`, `/@Omar status`, `/@Research one tip`)\n"
+            "- Plain non-command messages in TEAM are human-only (no AI)\n"
+            "- In MY ROOM: AI always listens (no `/` needed); commands work bare too\n"
             "- add objective <text> / show objectives / run objective <id>\n"
             "- remove objective <id> / remove checklist <id>\n"
             "- clear / clear chat — wipe messages in this chat\n"
@@ -736,6 +739,60 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
         )
 
     return None
+
+
+def _post_lead_reply(
+    db: Session,
+    *,
+    auth: AuthContext,
+    chat: Chat,
+    result: IntentResult,
+    speak: bool,
+    whisper: bool = False,
+) -> tuple[list[ChatMessage], int | None, int | None, bool]:
+    from app.services.chat_visibility import mark_whisper
+
+    if result.deleted_chat_id and result.deleted_chat_id == chat.id:
+        return [], result.created_chat_id, result.deleted_chat_id, False
+
+    if result.cleared_chat:
+        reply = ChatMessage(
+            tenant_id=auth.tenant_id,
+            chat_id=chat.id,
+            sender_user_id=None,
+            agent_slug="lead",
+            body=result.reply or "Chat cleared.",
+            audio_url=None,
+            visibility="public",
+        )
+        if whisper:
+            mark_whisper(reply, auth.user_id)
+        db.add(reply)
+        db.flush()
+        return [reply], result.created_chat_id, result.deleted_chat_id, True
+
+    audio_url = None
+    if speak and result.reply:
+        try:
+            path = synthesize_speech(result.reply[:800])
+            audio_url = f"/media/tts/{path.name}"
+        except TTSError:
+            audio_url = None
+
+    reply = ChatMessage(
+        tenant_id=auth.tenant_id,
+        chat_id=chat.id,
+        sender_user_id=None,
+        agent_slug=result.agent_slug or "lead",
+        body=result.reply,
+        audio_url=audio_url,
+        visibility="public",
+    )
+    if whisper:
+        mark_whisper(reply, auth.user_id)
+    db.add(reply)
+    db.flush()
+    return [reply], result.created_chat_id, result.deleted_chat_id, False
 
 
 def _run_agent_branch(
@@ -832,105 +889,75 @@ def handle_chat_message(
     user_message: ChatMessage,
     speak: bool = False,
 ) -> tuple[list[ChatMessage], int | None, int | None, bool]:
-    """Process a user chat message; return replies, created/deleted chat ids, cleared flag.
+    """Process a user chat message.
 
-    In team channels (kind=channel), AI only runs when the message starts with '/'.
-    Private rooms still auto-route every message as before.
+    - `!…` commands: no LLM; whisper in team channels.
+    - Team channels: plain text is human-only; `/` does not wake AI (skills are private-only).
+    - Private rooms: until skills phase, non-! still routes to agents (Phase 5 tightens this).
     """
+    from app.services.bang_commands import try_bang_command
+    from app.services.chat_visibility import mark_whisper
+
     raw_body = (user_message.body or "").strip()
     is_channel = (chat.kind or "channel") == "channel"
+    whisper = False
 
-    if is_channel and not raw_body.startswith("/"):
-        # Human talk only — no agent reply
+    # Bang commands — always available
+    if raw_body.startswith("!"):
+        if is_channel:
+            mark_whisper(user_message, auth.user_id)
+            whisper = True
+
+        def _force(db_, auth_, chat_, pending):
+            return _run_agent_branch(db_, auth_, chat_, pending, forced_agent="coding", force=True)
+
+        result = try_bang_command(
+            db,
+            auth,
+            chat,
+            raw_body,
+            IntentResult,
+            _PENDING_CODING,
+            _force,
+        )
+        if result is None:
+            result = IntentResult(True, "Unknown command. Try `!help`.")
+        return _post_lead_reply(
+            db, auth=auth, chat=chat, result=result, speak=speak, whisper=whisper
+        )
+
+    # Team channel: no bare commands, no slash-AI
+    if is_channel:
         return [], None, None, False
 
-    # Strip the AI-activate prefix in team chats
-    body_for_ai = raw_body[1:].lstrip() if is_channel and raw_body.startswith("/") else raw_body
-    if is_channel and not body_for_ai:
-        reply = ChatMessage(
-            tenant_id=auth.tenant_id,
-            chat_id=chat.id,
-            sender_user_id=None,
-            agent_slug="lead",
-            body="Type `/` then your request, e.g. `/help` or `/@Research one tip`.",
-            audio_url=None,
+    # Private room: /skills only for AI; plain text = notes
+    from app.services.skills import parse_skill, recent_private_context
+
+    if raw_body.startswith("/"):
+        parsed = parse_skill(raw_body)
+        if parsed.hint and not parsed.agent:
+            return _post_lead_reply(
+                db,
+                auth=auth,
+                chat=chat,
+                result=IntentResult(True, parsed.hint),
+                speak=speak,
+                whisper=False,
+            )
+        ask = parsed.rest.strip() or parsed.skill or "help"
+        ctx = recent_private_context(db, chat=chat, user_id=auth.user_id)
+        prompt = ask
+        if ctx:
+            prompt = (
+                f"Private room context (recent):\n{ctx}\n\n"
+                f"Skill=/{parsed.skill}. User ask:\n{ask}"
+            )
+        result = _run_agent_branch(
+            db, auth, chat, prompt, forced_agent=parsed.agent
         )
-        db.add(reply)
-        db.flush()
-        return [reply], None, None, False
-
-    parsed = _parse_mention(db, auth, body_for_ai)
-    text = parsed.rest or body_for_ai.strip()
-    project_id = chat.project_id or 1
-
-    result: IntentResult | None = None
-
-    if parsed.kind == "team":
-        if not is_workspace_owner(db, auth):
-            result = IntentResult(True, "Team report is for workspace owners.")
-        else:
-            from app.services.status import format_team_report
-
-            result = IntentResult(
-                True, format_team_report(db, tenant_id=auth.tenant_id, project_id=project_id)
-            )
-    elif parsed.kind == "user" and parsed.user is not None:
-        from app.services.status import can_view_user_status, format_user_status
-
-        if not can_view_user_status(db, auth, parsed.user.id):
-            result = IntentResult(
-                True, "Only the workspace owner can view another member's status."
-            )
-        else:
-            body = format_user_status(
-                db, tenant_id=auth.tenant_id, project_id=project_id, user=parsed.user
-            )
-            if text:
-                body += f"\n\n(Your note: {text})"
-            result = IntentResult(True, body)
-    elif parsed.kind == "agent" and parsed.agent_slug and parsed.agent_slug != "lead":
-        result = _run_agent_branch(db, auth, chat, text, forced_agent=parsed.agent_slug)
-    else:
-        cmd = try_nl_command(db, auth, chat, text)
-        if cmd is not None:
-            result = cmd
-            if result.deleted_chat_id and result.deleted_chat_id == chat.id:
-                return [], result.created_chat_id, result.deleted_chat_id, False
-        else:
-            result = _run_agent_branch(db, auth, chat, text, forced_agent=None)
-
-    assert result is not None
-
-    if result.cleared_chat:
-        # user_message already deleted with the wipe; post a single notice
-        reply = ChatMessage(
-            tenant_id=auth.tenant_id,
-            chat_id=chat.id,
-            sender_user_id=None,
-            agent_slug="lead",
-            body=result.reply or "Chat cleared.",
-            audio_url=None,
+        return _post_lead_reply(
+            db, auth=auth, chat=chat, result=result, speak=speak, whisper=False
         )
-        db.add(reply)
-        db.flush()
-        return [reply], result.created_chat_id, result.deleted_chat_id, True
 
-    audio_url = None
-    if speak and result.reply:
-        try:
-            path = synthesize_speech(result.reply[:800])
-            audio_url = f"/media/tts/{path.name}"
-        except TTSError:
-            audio_url = None
-
-    reply = ChatMessage(
-        tenant_id=auth.tenant_id,
-        chat_id=chat.id,
-        sender_user_id=None,
-        agent_slug=result.agent_slug or "lead",
-        body=result.reply,
-        audio_url=audio_url,
-    )
-    db.add(reply)
-    db.flush()
-    return [reply], result.created_chat_id, result.deleted_chat_id, False
+    # Plain notes — no LLM
+    return [], None, None, False

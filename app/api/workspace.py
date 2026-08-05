@@ -71,6 +71,9 @@ def invite(
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"invite failed: {exc}") from exc
 
 
 @router.get("/workspace/members")
@@ -98,10 +101,41 @@ def members(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)
 
 
 @router.get("/auth/me")
-def me(auth: AuthContext = Depends(get_auth)):
+def me(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)):
+    from app.services.mentions import unread_mentions
+
+    mentions = unread_mentions(db, auth, limit=20)
     return {
         "user_id": auth.user_id,
         "tenant_id": auth.tenant_id,
         "email": auth.user.email,
         "name": auth.user.name,
+        "unread_mentions": len(mentions),
+        "mentions": mentions,
     }
+
+
+@router.get("/workspace/mentions")
+def list_mentions(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)):
+    from app.services.mentions import unread_mentions
+
+    rows = unread_mentions(db, auth)
+    return {"unread": len(rows), "mentions": rows}
+
+
+class MentionsReadIn(BaseModel):
+    ids: list[int] | None = None
+
+
+@router.post("/workspace/mentions/read")
+def read_mentions(
+    body: MentionsReadIn | None = None,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    from app.services.mentions import mark_mentions_read
+
+    ids = body.ids if body else None
+    n = mark_mentions_read(db, auth, ids)
+    db.commit()
+    return {"status": "ok", "marked": n}

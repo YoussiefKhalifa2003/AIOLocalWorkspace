@@ -2,46 +2,35 @@
 # Owner: a@local.test / demo-key-a
 # Member: omar@local.test / demo-key-a
 
-# In MY ROOM (Omar)
-add objective Finish station notes
-log issue Missing map PDF
-show objectives
-board
-set objective 1 doing
-claim path app/api/chats.py
-show issues
-@Research one metro tip
+# #general — chat + @people + !commands (whispers)
+hey team, standup in 5
+@Omar can you take login?
+!add Finish station notes
+!set 1 doing
+!claim app/api/chats.py
+!issue Missing map PDF
+!help
 
-# Models tab (OpenRouter free / Gemini)
-# Set OPENROUTER_API_KEY in .env from https://openrouter.ai/keys
+# MY ROOM — /skills for AI, !commands, plain notes stay quiet
+thinking out loud about auth
+/code harden login validation
+/write short release note
+!list
 
-# Board / GitHub
-link objective 1 pr https://github.com/example/demo-project/pull/1
-link objective 1 branch feat/x
-set objective 1 agent_backlog
+# Models / Agents tab — brains behind skills
+# OPENROUTER_API_KEY in .env
 
-# As owner in #general (use / to activate AI)
-/@Omar status
-/@team report
-/board
-/invite teammate@local.test
-/help
+# Board tab — drag cards; or !set <id> doing|done
 
-# Plain team talk (no AI)
-hey everyone, standup in 5
+# Owner catch-up
+!status Omar
+!team
 
-# Team chat
-create chat design
-list chats
-
-# Simulate GitHub
+# GitHub
+!link 1 branch feat/x
 ./aio webhook-sim --title "Ship #obj-1" --action opened
 ./aio drain
-./aio webhook-sim --title "Ship #obj-1" --action closed --merged
 
-# Voice: enable voice input → mic → speak → stop
-# Speak replies: checkbox for TTS
-
-# Reset DB
+# Reset
 rm -f aio.db && ./aio seed
 uvicorn app.main:app --host 0.0.0.0 --port 8000

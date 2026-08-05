@@ -21,6 +21,8 @@
   <div id="app" class="screen hidden">
     <header>
       <span id="who"></span>
+      <button type="button" id="mentionsBtn" class="mentions-btn hidden" title="mentions">@0</button>
+      <div id="mentionsPanel" class="mentions-panel hidden"></div>
       <nav class="tabs" id="mainTabs">
         <button type="button" data-tab="chat" class="tab active">Chat</button>
         <button type="button" data-tab="board" class="tab">Board</button>
@@ -53,7 +55,7 @@
         <div id="messages" class="messages"></div>
         <form id="composer">
           <div class="composer-wrap">
-            <input id="input" type="text" autocomplete="off" placeholder="team: /help · room: just type · @ to mention" />
+            <input id="input" type="text" autocomplete="off" placeholder="chat · @people · !commands" />
             <ul id="mentionBox" class="mention-box hidden"></ul>
           </div>
           <button id="micBtn" type="button" title="hold to speak / click to stop" disabled>mic</button>
@@ -75,7 +77,7 @@
         <div class="roster-top">
           <div>
             <h2>Agents</h2>
-            <p class="hint" id="modelsHint">Who answers which @mention, and which model they use.</p>
+            <p class="hint" id="modelsHint">Models power /skills — not @mentions.</p>
           </div>
           <div class="roster-save">
             <button type="button" id="modelsSaveBtn">save</button>

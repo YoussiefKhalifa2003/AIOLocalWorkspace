@@ -14,6 +14,7 @@ def _boot(tmp_path, monkeypatch, **env):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "dev-secret")
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("GITHUB_TOKEN", env.pop("GITHUB_TOKEN", ""))
     monkeypatch.setenv("OPENCODE_API_KEY", env.pop("OPENCODE_API_KEY", ""))
     for k, v in env.items():
@@ -160,7 +161,7 @@ def test_gate_b_github_link_and_merge_confirm(tmp_path, monkeypatch):
     r = client.post(
         f"/chats/{info['chat_general']}/messages",
         headers=ha,
-        json={"body": f"/yes {oid}", "speak": False},
+        json={"body": f"!done {oid}", "speak": False},
     )
     assert "Marked objective" in r.json()["replies"][0]["body"]
 
@@ -214,14 +215,14 @@ def test_gate_d_file_claims(tmp_path, monkeypatch):
     r = client.post(
         f"/chats/{priv_o}/messages",
         headers=ho,
-        json={"body": "claim path app/api/chats.py", "speak": False},
+        json={"body": "!claim app/api/chats.py", "speak": False},
     )
     assert "Claimed" in r.json()["replies"][0]["body"]
 
     r = client.post(
         f"/chats/{priv_s}/messages",
         headers=hs,
-        json={"body": "@Code fix app/api/chats.py please", "speak": False},
+        json={"body": "/code fix app/api/chats.py please", "speak": False},
     )
     body = r.json()["replies"][0]["body"]
     assert "WARNING" in body or "conflict" in body.lower()
@@ -230,7 +231,7 @@ def test_gate_d_file_claims(tmp_path, monkeypatch):
     r = client.post(
         f"/chats/{priv_s}/messages",
         headers=hs,
-        json={"body": "proceed", "speak": False},
+        json={"body": "!go", "speak": False},
     )
     assert "Lead routed" in r.json()["replies"][0]["body"] or "coding" in r.json()["replies"][0]["body"].lower()
 
@@ -287,7 +288,7 @@ def test_gate_f_model_tiers_and_summary(tmp_path, monkeypatch):
     client.post(
         f"/chats/{priv}/messages",
         headers=ha,
-        json={"body": "@Code write a python function that returns 1", "speak": False},
+        json={"body": "/code write a python function that returns 1", "speak": False},
     )
     summary = client.get(f"/projects/{info['project_a']}/jobs/summary", headers=ha).json()
     assert "by_model" in summary
@@ -312,7 +313,7 @@ def test_gate_g_analytics_and_llm_backend(tmp_path, monkeypatch):
     client.post(
         f"/chats/{priv}/messages",
         headers=ha,
-        json={"body": "@Code def add(a,b): return a+b", "speak": False},
+        json={"body": "/code def add(a,b): return a+b", "speak": False},
     )
     data = client.get(f"/projects/{info['project_a']}/analytics", headers=ha).json()
     assert data["jobs_total"] >= 1

@@ -26,14 +26,14 @@ LAN: http://YOUR_LAN_IP:8000/app
 
 ## How it works
 
-- **TEAM** chats (e.g. `#general`) — everyone can see messages; **plain text = human only**. Start with `/` to call AI (`/help`, `/@Omar status`)
-- **MY ROOM** — private agent work; AI always listens (no `/` needed)
-- **Board** tab — drag objectives across status columns (own cards only; Lead can drag all)
+- **`#general`** — normal team chat. `@Omar` / `@team` ping people. `!add …` and other `!` commands are **only visible to you**.
+- **MY ROOM** — type `/` for skills (`/code`, `/write`, `/research`…). Plain notes do not wake AI. Same `!` commands work here.
+- **Board** tab — see and drag objectives (or `!set <id> doing`).
+- **Agents** tab — pick which model powers each skill’s brain.
 - **Analytics** tab (owner) — job/metric tables
-- **Same agents** for everyone (`@Research`, `@Writing`, `@Code`, `@Review`, `@Checklist`)
-- After agent work: **Yes/No** on matching open objectives (or type `yes 7` / `no 7`)
-- **Lead catch-up** (owner): `@Omar status`, `@team report` — structured objectives / checklist / issues only (not private prompts)
-- GitHub: project PAT (`GITHUB_TOKEN`) + `Project.github_repo`; `./aio webhook-sim` for LAN demos
+- After skill work: **Yes/No** on matching objectives (`!done` / `!keep`)
+- **Lead catch-up** (owner): `!status Omar`, `!team`
+- GitHub: `GITHUB_TOKEN` + `GITHUB_REPO`; `./aio webhook-sim` for LAN demos
 
 ### Optional env
 
@@ -50,17 +50,23 @@ LAN: http://YOUR_LAN_IP:8000/app
 
 ### Models tab
 
-Header **Models** — pick OpenRouter `:free` models or **Gemini (.env)** per agent. Set `OPENROUTER_API_KEY` from [openrouter.ai/keys](https://openrouter.ai/keys). Without it, use Gemini. OpenCode free models appear only if `OPENCODE_API_KEY` is set.
+Header **Agents** — pick OpenRouter `:free` models or **Gemini (.env)** per skill brain. Set `OPENROUTER_API_KEY` from [openrouter.ai/keys](https://openrouter.ai/keys).
 
 ## Demo walkthrough (~2 min)
 
-1. Login as `omar@local.test` / `demo-key-a` → open **my private room**
-2. `add objective Finish station notes` · `log issue Missing map PDF`
-3. Open **Board** — see Omar’s card + blocker badge; drag own card
-4. Logout; login as `a@local.test` / `demo-key-a`
-5. In `#general` type `/@Omar status` → see remaining work + issue
-6. `./aio webhook-sim --title "fix #obj-1"` then `./aio drain` → review in `#general`
+1. Login as `omar@local.test` / `demo-key-a` → open **#general**
+2. `!add Finish station notes` · `!issue Missing map PDF` (only you see replies)
+3. Open **Board** — see Omar’s card; drag own card
+4. Open **MY ROOM** → `/write one metro tip`
+5. Logout; login as `a@local.test` / `demo-key-a`
+6. In `#general` type `!status Omar` → remaining work + issue
 7. Invite a friend: MEMBERS **+** → they use email + `demo-key-a` on your LAN IP
+
+## Mental model (one sentence each)
+
+- `@` — ping people
+- `/` — AI skills in your private room only
+- `!` — board/ops commands (whisper in general)
 
 ## Voice
 
@@ -70,4 +76,4 @@ Header **Models** — pick OpenRouter `:free` models or **Gemini (.env)** per ag
 ## vs Buzz
 
 Buzz: @mention agents in shared chat.  
-AIO: private agent rooms per teammate + shared team channel + Board + Lead @people status catch-up.
+AIO: `#general` for people (`@` pings), private `/skills` for AI, `!` whisper commands, Board tab.

@@ -302,4 +302,20 @@ class ChatMessage(Base):
     agent_slug: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     audio_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # public = everyone in chat; whisper = only whisper_user_id
+    visibility: Mapped[str] = mapped_column(String(20), default="public", nullable=False)
+    whisper_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ChatMention(Base):
+    __tablename__ = "chat_mentions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id"), nullable=False, index=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("chat_messages.id"), nullable=False, index=True)
+    mentioned_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    from_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -89,10 +89,36 @@ def test_chat_help_and_invite(tmp_path, monkeypatch):
     r = client.post(
         f"/chats/{general}/messages",
         headers=headers,
-        json={"body": "/help", "speak": False},
+        json={"body": "!help", "speak": False},
     )
     assert r.status_code == 200
-    assert "add objective" in r.json()["replies"][0]["body"]
+    help_body = r.json()["replies"][0]["body"]
+    assert "!add" in help_body
+
+    added = client.post(
+        f"/chats/{general}/messages",
+        headers=headers,
+        json={"body": "!add Team board card", "speak": False},
+    )
+    assert added.status_code == 200
+    assert "Added objective" in added.json()["replies"][0]["body"]
+
+    # Plain talk still quiet
+    hi = client.post(
+        f"/chats/{general}/messages",
+        headers=headers,
+        json={"body": "just saying hi to the team", "speak": False},
+    )
+    assert hi.status_code == 200
+    assert hi.json()["replies"] == []
+
+    # Bare old commands do nothing in general
+    bare = client.post(
+        f"/chats/{general}/messages",
+        headers=headers,
+        json={"body": "add objective nope", "speak": False},
+    )
+    assert bare.json()["replies"] == []
 
     inv = client.post(
         "/workspace/invite",
@@ -103,7 +129,6 @@ def test_chat_help_and_invite(tmp_path, monkeypatch):
     assert inv.json()["api_key_issued"] == "demo-key-a"
     assert inv.json().get("private_chat_id")
 
-    # Colleague logs in with join key
     login = client.post(
         "/auth/login",
         json={"email": "colleague@local.test", "api_key": "demo-key-a"},
@@ -114,13 +139,12 @@ def test_chat_help_and_invite(tmp_path, monkeypatch):
     col_chats = client.get("/chats", headers=col_headers).json()
     assert any(c["kind"] == "channel" and c["name"] == "general" for c in col_chats)
     assert any(c["kind"] == "private" for c in col_chats)
-    # cannot see owner's private
     assert client.get(f"/chats/{info['chat_private_a']}/messages", headers=col_headers).status_code == 403
 
     created = client.post(
         f"/chats/{general}/messages",
         headers=headers,
-        json={"body": "/create chat design-room", "speak": False},
+        json={"body": "!newchat design-room", "speak": False},
     )
     assert created.status_code == 200
     assert created.json()["created_chat_id"]

@@ -36,11 +36,10 @@ def test_owned_objectives_and_issues_and_status(tmp_path, monkeypatch):
     priv_s = info["chat_private_sara"]
     general = info["chat_general"]
 
-    # Omar adds objective + issue in private room
     r = client.post(
-        f"/chats/{priv_o}/messages",
+        f"/chats/{general}/messages",
         headers=ho,
-        json={"body": "add objective Ship metro research", "speak": False},
+        json={"body": "!add General lane card", "speak": False},
     )
     assert r.status_code == 200
     assert "Added objective" in r.json()["replies"][0]["body"]
@@ -48,43 +47,47 @@ def test_owned_objectives_and_issues_and_status(tmp_path, monkeypatch):
     r = client.post(
         f"/chats/{priv_o}/messages",
         headers=ho,
-        json={"body": "log issue API auth blocked", "speak": False},
+        json={"body": "!add Ship metro research", "speak": False},
+    )
+    assert r.status_code == 200
+    assert "Added objective" in r.json()["replies"][0]["body"]
+
+    r = client.post(
+        f"/chats/{priv_o}/messages",
+        headers=ho,
+        json={"body": "!issue API auth blocked", "speak": False},
     )
     assert r.status_code == 200
     assert "Logged issue" in r.json()["replies"][0]["body"]
 
-    # Sara cannot see Omar's objectives
     r = client.post(
         f"/chats/{priv_s}/messages",
         headers=hs,
-        json={"body": "show objectives", "speak": False},
+        json={"body": "!list", "speak": False},
     )
     assert "(none)" in r.json()["replies"][0]["body"] or "YOUR OBJECTIVES" in r.json()["replies"][0]["body"]
     assert "Ship metro" not in r.json()["replies"][0]["body"]
 
-    # Sara cannot view Omar status
     r = client.post(
         f"/chats/{priv_s}/messages",
         headers=hs,
-        json={"body": "@Omar status", "speak": False},
+        json={"body": "!status Omar", "speak": False},
     )
     assert "owner" in r.json()["replies"][0]["body"].lower()
 
-    # Owner can catch up on Omar
     r = client.post(
         f"/chats/{general}/messages",
         headers=ha,
-        json={"body": "/@Omar status", "speak": False},
+        json={"body": "!status Omar", "speak": False},
     )
     body = r.json()["replies"][0]["body"]
     assert "Ship metro" in body
     assert "API auth" in body
 
-    # Team report owner-only
     r = client.post(
         f"/chats/{general}/messages",
         headers=ha,
-        json={"body": "/@team report", "speak": False},
+        json={"body": "!team", "speak": False},
     )
     assert "TEAM REPORT" in r.json()["replies"][0]["body"]
     assert "omar@" in r.json()["replies"][0]["body"].lower() or "Omar" in r.json()["replies"][0]["body"]
@@ -92,14 +95,13 @@ def test_owned_objectives_and_issues_and_status(tmp_path, monkeypatch):
     r = client.post(
         f"/chats/{priv_s}/messages",
         headers=hs,
-        json={"body": "team status", "speak": False},
+        json={"body": "!team", "speak": False},
     )
     assert "owner" in r.json()["replies"][0]["body"].lower()
 
-    # Resolve issue
     r = client.post(
         f"/chats/{priv_o}/messages",
         headers=ho,
-        json={"body": "show issues", "speak": False},
+        json={"body": "!issues", "speak": False},
     )
     assert "#" in r.json()["replies"][0]["body"]

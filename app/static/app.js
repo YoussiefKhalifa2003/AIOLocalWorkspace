@@ -15,6 +15,8 @@
     tab: "chat",
     projectId: 1,
     isOwner: false,
+    unreadMentions: 0,
+    mentionRows: [],
   };
 
   // Distinct side-rail colors per person (stable by email)
@@ -121,6 +123,7 @@
       $("who").textContent = `${data.name} <${data.email}>`;
       showApp(true);
       await refreshSidebar();
+      await refreshMentions();
       if (state.chatId) await selectChat(state.chatId);
     } catch (e) {
       localStorage.removeItem("aio_email");
@@ -160,31 +163,31 @@
   // Dry coworker notes — no callsigns / units / marketing bios
   const AGENT_PROFILES = {
     research: {
-      mention: "@Research",
+      mention: "/research",
       job: "looks things up",
       line: "I keep digging until the answer stops wiggling. If I can’t find it, I say that out loud.",
       accent: "#4a9",
     },
     writing: {
-      mention: "@Writing",
+      mention: "/write",
       job: "writes it down",
       line: "I cut fluff first. Goal is something a tired teammate can skim once.",
       accent: "#a84",
     },
     coding: {
-      mention: "@Code",
+      mention: "/code",
       job: "builds it",
       line: "Smallest change that runs. I won’t rewrite your whole file unless you ask.",
       accent: "#4af",
     },
     code_review: {
-      mention: "@Review",
+      mention: "/review",
       job: "checks the diff",
       line: "I read the patch like it’s already live. Secrets and sharp edges get called early.",
       accent: "#48a",
     },
     checklist: {
-      mention: "@Checklist",
+      mention: "/checklist",
       job: "breaks work into ticks",
       line: "I turn a foggy ask into numbered boxes. Boring on purpose.",
       accent: "#a6a",
@@ -528,16 +531,23 @@
     if (!append) box.innerHTML = "";
     rows.forEach((m) => {
       const div = document.createElement("div");
-      div.className = "msg" + (m.agent ? " agent" : " user");
-      div.style.borderLeftColor = colorForMessage(m);
+      div.className = "msg" + (m.agent ? " agent" : " user") + (m.visibility === "whisper" ? " whisper" : "");
+      div.dataset.msgId = String(m.id);
+      const color = colorForMessage(m);
+      div.style.borderLeftColor = color;
       const who = m.agent ? `@${m.agent}` : (m.sender || "user");
+      const whisperTag = m.visibility === "whisper" ? " · only you" : "";
       let bodyText = m.body || "";
       const confirmMatch = bodyText.match(/\[\[confirm:([0-9,\s]+)\]\]/);
       const confirmIds = confirmMatch
         ? confirmMatch[1].split(",").map((s) => s.trim()).filter(Boolean)
         : [];
       bodyText = bodyText.replace(/\n?\[\[confirm:[0-9,\s]+\]\]\s*$/, "").trimEnd();
-      div.innerHTML = `<div class="meta">${who} · #${m.id}</div><div class="body"></div>`;
+      div.innerHTML =
+        `<div class="meta"><span class="who"></span>${whisperTag} <span class="msg-id">· #${m.id}</span></div><div class="body"></div>`;
+      const whoEl = div.querySelector(".who");
+      whoEl.textContent = who;
+      whoEl.style.color = color;
       div.querySelector(".body").textContent = bodyText;
       if (confirmIds.length) {
         const actions = document.createElement("div");
@@ -550,11 +560,11 @@
           const yes = document.createElement("button");
           yes.type = "button";
           yes.textContent = "Yes";
-          yes.onclick = () => void sendBody(`yes ${id}`);
+          yes.onclick = () => void sendBody(`!done ${id}`);
           const no = document.createElement("button");
           no.type = "button";
           no.textContent = "No";
-          no.onclick = () => void sendBody(`no ${id}`);
+          no.onclick = () => void sendBody(`!keep ${id}`);
           row.appendChild(label);
           row.appendChild(yes);
           row.appendChild(no);
@@ -585,6 +595,12 @@
       ? (meta.kind === "private" ? "my private room" : `team #${meta.name}`)
       : `chat #${id}`;
     $("chatTitle").textContent = title;
+    const input = $("input");
+    if (meta && meta.kind === "private") {
+      input.placeholder = "/skills · !commands · notes stay quiet";
+    } else {
+      input.placeholder = "chat · @people · !commands (only you see)";
+    }
     document.querySelectorAll("#teamList li, #myRoomList li").forEach((li) => {
       li.classList.toggle("active", Number(li.dataset.id) === Number(id));
     });
@@ -592,11 +608,126 @@
     renderMessages(rows, false);
   }
 
+  async function refreshMentions() {
+    const btn = $("mentionsBtn");
+    const panel = $("mentionsPanel");
+    if (!btn) return;
+    try {
+      const data = await api("/workspace/mentions");
+      const n = data.unread || 0;
+      const prev = state.unreadMentions || 0;
+      state.unreadMentions = n;
+      state.mentionRows = data.mentions || [];
+      if (n > prev && n > 0) playPingSound();
+      if (n > 0) {
+        btn.textContent = `@${n}`;
+        btn.classList.remove("hidden");
+      } else {
+        btn.classList.add("hidden");
+        btn.textContent = "@0";
+        if (panel) panel.classList.add("hidden");
+      }
+    } catch (_) {
+      btn.classList.add("hidden");
+    }
+  }
+
+  function playPingSound() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(880, ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.08);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.start();
+      o.stop(ctx.currentTime + 0.25);
+      setTimeout(() => ctx.close().catch(() => {}), 400);
+    } catch (_) { /* ignore */ }
+  }
+
+  function renderMentionsPanel() {
+    const panel = $("mentionsPanel");
+    if (!panel) return;
+    const rows = state.mentionRows || [];
+    panel.innerHTML = "";
+    const head = document.createElement("div");
+    head.className = "mp-head";
+    head.innerHTML = `<span>Mentions</span>`;
+    const mark = document.createElement("button");
+    mark.type = "button";
+    mark.textContent = "mark all read";
+    mark.onclick = async (ev) => {
+      ev.stopPropagation();
+      await api("/workspace/mentions/read", { method: "POST", body: "{}" });
+      panel.classList.add("hidden");
+      await refreshMentions();
+    };
+    head.appendChild(mark);
+    panel.appendChild(head);
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "mp-item";
+      empty.textContent = "No unread mentions";
+      panel.appendChild(empty);
+      return;
+    }
+    rows.forEach((m) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mp-item";
+      btn.innerHTML =
+        `<div class="mp-from"></div><div class="mp-where"></div><div class="mp-snip"></div>`;
+      btn.querySelector(".mp-from").textContent = m.from || "someone";
+      btn.querySelector(".mp-where").textContent = `#${m.chat_name || m.chat_id} · msg #${m.message_id}`;
+      btn.querySelector(".mp-snip").textContent = m.snippet || "";
+      btn.onclick = () => void openMention(m);
+      panel.appendChild(btn);
+    });
+  }
+
+  async function openMention(m) {
+    const panel = $("mentionsPanel");
+    if (panel) panel.classList.add("hidden");
+    try {
+      await api("/workspace/mentions/read", {
+        method: "POST",
+        body: JSON.stringify({ ids: [m.id] }),
+      });
+    } catch (_) {
+      // older API marks all — still fine
+      try {
+        await api("/workspace/mentions/read", { method: "POST", body: "{}" });
+      } catch (_) { /* ignore */ }
+    }
+    setTab("chat");
+    await refreshSidebar();
+    await selectChat(m.chat_id);
+    // scroll/highlight target message
+    const el = document.querySelector(`.msg[data-msg-id="${m.message_id}"]`);
+    if (el) {
+      el.classList.add("highlight-ping");
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => el.classList.remove("highlight-ping"), 3500);
+    } else {
+      setVoiceStatus(`opened #${m.chat_name || m.chat_id} — message #${m.message_id}`);
+    }
+    await refreshMentions();
+  }
+
   async function poll() {
     if (!state.chatId || !state.apiKey) return;
     try {
       const rows = await api(`/chats/${state.chatId}/messages?after_id=${state.lastMsgId}`);
       if (rows.length) renderMessages(rows, true);
+      await refreshMentions();
     } catch (_) { /* ignore transient */ }
   }
 
@@ -790,23 +921,88 @@
   });
   $("boardPanelClose").onclick = () => $("boardPanel").classList.add("hidden");
   $("modelsSaveBtn").onclick = () => void saveModels();
+  const mentionsBtn = $("mentionsBtn");
+  if (mentionsBtn) {
+    mentionsBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      const panel = $("mentionsPanel");
+      if (!panel) return;
+      const open = panel.classList.contains("hidden");
+      if (open) {
+        renderMentionsPanel();
+        panel.classList.remove("hidden");
+      } else {
+        panel.classList.add("hidden");
+      }
+    };
+  }
+  document.addEventListener("click", (ev) => {
+    const panel = $("mentionsPanel");
+    const btn = $("mentionsBtn");
+    if (!panel || panel.classList.contains("hidden")) return;
+    if (panel.contains(ev.target) || (btn && btn.contains(ev.target))) return;
+    panel.classList.add("hidden");
+  });
 
-  const AGENTS = ["Lead", "Research", "Writing", "Code", "Review", "Checklist", "team"];
+  const COMMAND_CATALOG = [
+    { insert: "!add ", label: "!add", blurb: "new board card" },
+    { insert: "!list", label: "!list", blurb: "show my cards" },
+    { insert: "!set ", label: "!set", blurb: "move card status" },
+    { insert: "!done ", label: "!done", blurb: "mark card done" },
+    { insert: "!remove ", label: "!remove", blurb: "delete a card" },
+    { insert: "!assign ", label: "!assign", blurb: "give card away" },
+    { insert: "!link ", label: "!link", blurb: "attach branch/PR" },
+    { insert: "!claim ", label: "!claim", blurb: "lock a file" },
+    { insert: "!release ", label: "!release", blurb: "free a file" },
+    { insert: "!go", label: "!go", blurb: "run despite claim" },
+    { insert: "!issue ", label: "!issue", blurb: "log a blocker" },
+    { insert: "!issues", label: "!issues", blurb: "show blockers" },
+    { insert: "!resolve ", label: "!resolve", blurb: "close blocker" },
+    { insert: "!invite ", label: "!invite", blurb: "add teammate" },
+    { insert: "!status ", label: "!status", blurb: "member catch-up" },
+    { insert: "!clear", label: "!clear", blurb: "wipe this chat" },
+    { insert: "!help", label: "!help", blurb: "list commands" },
+  ];
 
-  function mentionCandidates(prefix) {
+  const SKILL_CATALOG = [
+    { insert: "/research ", label: "/research", blurb: "dig facts & sources" },
+    { insert: "/web ", label: "/web", blurb: "look things up" },
+    { insert: "/code ", label: "/code", blurb: "build or patch" },
+    { insert: "/write ", label: "/write", blurb: "draft clear prose" },
+    { insert: "/review ", label: "/review", blurb: "check the diff" },
+    { insert: "/checklist ", label: "/checklist", blurb: "break into ticks" },
+  ];
+
+  function currentChatMeta() {
+    return (state.chats || []).find((c) => Number(c.id) === Number(state.chatId));
+  }
+
+  function peopleCandidates(prefix) {
     const p = (prefix || "").toLowerCase();
     const out = [];
-    AGENTS.forEach((a) => {
-      if (!p || a.toLowerCase().startsWith(p)) out.push({ label: `@${a}`, insert: `@${a} ` });
-    });
+    if (!p || "team".startsWith(p)) {
+      out.push({ label: "@team", blurb: "ping whole team", insert: "@team " });
+    }
     (state.members || []).forEach((m) => {
       const local = (m.email || "").split("@")[0];
       const name = m.name || local;
       if (!p || local.toLowerCase().startsWith(p) || name.toLowerCase().startsWith(p)) {
-        out.push({ label: `@${local} (${m.email})`, insert: `@${local} ` });
+        out.push({
+          label: `@${local}`,
+          blurb: m.email || "ping this person",
+          insert: `@${local} `,
+        });
       }
     });
     return out.slice(0, 12);
+  }
+
+  function filterCatalog(catalog, prefix) {
+    const p = (prefix || "").toLowerCase();
+    return catalog.filter((c) => {
+      const token = c.label.slice(1).toLowerCase();
+      return !p || token.startsWith(p) || c.label.toLowerCase().includes(p);
+    }).slice(0, 16);
   }
 
   function hideMentions() {
@@ -814,7 +1010,7 @@
     $("mentionBox").innerHTML = "";
   }
 
-  function showMentions(items) {
+  function showPicker(items, triggerIndex, triggerChar) {
     const box = $("mentionBox");
     box.innerHTML = "";
     if (!items.length) {
@@ -823,12 +1019,19 @@
     }
     items.forEach((it) => {
       const li = document.createElement("li");
-      li.textContent = it.label;
+      li.className = "picker-item";
+      const main = document.createElement("span");
+      main.className = "picker-label";
+      main.textContent = it.label;
+      const blurb = document.createElement("span");
+      blurb.className = "picker-blurb";
+      blurb.textContent = it.blurb || "";
+      li.appendChild(main);
+      if (it.blurb) li.appendChild(blurb);
       li.onclick = () => {
         const input = $("input");
         const v = input.value;
-        const at = v.lastIndexOf("@");
-        input.value = (at >= 0 ? v.slice(0, at) : v) + it.insert;
+        input.value = (triggerIndex >= 0 ? v.slice(0, triggerIndex) : v) + it.insert;
         hideMentions();
         input.focus();
       };
@@ -837,19 +1040,44 @@
     box.classList.remove("hidden");
   }
 
+  function activePrefix(v) {
+    const at = v.lastIndexOf("@");
+    const bang = v.lastIndexOf("!");
+    const slash = v.lastIndexOf("/");
+    const idx = Math.max(at, bang, slash);
+    if (idx < 0) return null;
+    const after = v.slice(idx + 1);
+    if (/\s/.test(after)) return null;
+    // Don't treat emails like a@b as @-picker mid-token after space rules already handle
+    const ch = v[idx];
+    return { ch, idx, after };
+  }
+
   $("input").addEventListener("input", () => {
     const v = $("input").value;
-    const at = v.lastIndexOf("@");
-    if (at < 0) {
+    const hit = activePrefix(v);
+    if (!hit) {
       hideMentions();
       return;
     }
-    const after = v.slice(at + 1);
-    if (/\s/.test(after)) {
-      hideMentions();
+    const meta = currentChatMeta();
+    if (hit.ch === "@") {
+      showPicker(peopleCandidates(hit.after), hit.idx, "@");
       return;
     }
-    showMentions(mentionCandidates(after));
+    if (hit.ch === "!") {
+      showPicker(filterCatalog(COMMAND_CATALOG, hit.after), hit.idx, "!");
+      return;
+    }
+    if (hit.ch === "/") {
+      if (!meta || meta.kind !== "private") {
+        hideMentions();
+        setVoiceStatus("skills (/) only work in your private room");
+        return;
+      }
+      setVoiceStatus("");
+      showPicker(filterCatalog(SKILL_CATALOG, hit.after), hit.idx, "/");
+    }
   });
   $("input").addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") hideMentions();

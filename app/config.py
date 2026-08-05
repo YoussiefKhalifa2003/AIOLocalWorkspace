@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
     tts_dir: str = "data/tts"
     host_bind: str = "0.0.0.0"
+    # Optional invite email (Gmail: smtp.gmail.com + app password)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_ssl: bool = False
+    invite_app_url: str = ""
 
     def resolve_gemini_key(self) -> str:
         return (self.gemini_api_key or "").strip()
