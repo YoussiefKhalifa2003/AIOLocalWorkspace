@@ -89,7 +89,7 @@ def unread_mentions(db: Session, auth: AuthContext, *, limit: int = 50) -> list[
         frm = None
         if r.from_user_id:
             u = db.query(User).filter(User.id == r.from_user_id).one_or_none()
-            frm = u.email if u else str(r.from_user_id)
+            frm = ((u.name or "").strip() or u.email) if u else str(r.from_user_id)
         msg = db.query(ChatMessage).filter(ChatMessage.id == r.message_id).one_or_none()
         snippet = (msg.body or "")[:160] if msg else ""
         out.append(

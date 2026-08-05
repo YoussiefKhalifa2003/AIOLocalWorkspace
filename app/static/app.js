@@ -64,7 +64,7 @@
       const key = String(m.agent).toLowerCase();
       return AGENT_COLORS[key] || "#6a6";
     }
-    return colorForMember(m.sender);
+    return colorForMember(m.sender_email || m.sender);
   }
 
   function headers(json = true) {
@@ -104,12 +104,12 @@
   async function login() {
     $("loginErr").textContent = "";
     const email = $("email").value.trim();
-    const api_key = $("apiKey").value.trim();
+    const password = $("password").value;
     try {
       const data = await fetch("/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, api_key }),
+        body: JSON.stringify({ email, password }),
       }).then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.detail || "login failed");
@@ -134,8 +134,8 @@
       showApp(false);
       $("loginErr").textContent =
         String(e.message || e) +
-        "\nUse email + demo-key-a (e.g. a@local.test / demo-key-a).";
-      $("apiKey").value = "demo-key-a";
+        "\nUse email + password (demo: a@local.test / demo).";
+      $("password").value = "demo";
     }
   }
 
@@ -400,16 +400,15 @@
       return;
     }
     try {
-      const projects = await api("/projects");
-      state.projects = projects || [];
-      if (!state.projects.length) {
-        body.innerHTML = `<p class="dash-muted">No projects yet.</p>`;
+      if (!state.projectId) {
+        const chats = state.chats || [];
+        const withProj = chats.find((c) => c.project_id);
+        if (withProj) state.projectId = withProj.project_id;
+      }
+      if (!state.projectId) {
+        body.innerHTML = `<p class="dash-muted">No project yet.</p>`;
         return;
       }
-      if (!state.projects.some((p) => Number(p.id) === Number(state.projectId))) {
-        state.projectId = state.projects[0].id;
-      }
-      localStorage.setItem("aio_project", String(state.projectId));
       const data = await api(`/projects/${state.projectId}/analytics`);
       const s = data.summary || {};
       const fmt = (n) => Number(n || 0).toLocaleString();
@@ -447,13 +446,13 @@
       const memberOpts = (state.members || [])
         .map((m) => `<option value="${m.user_id}">${escapeHtml(m.email)}</option>`)
         .join("");
-      const projectOpts = state.projects
-        .map((p) => {
-          const sel = Number(p.id) === Number(state.projectId) ? " selected" : "";
-          return `<option value="${p.id}"${sel}>${escapeHtml(p.name)}</option>`;
+      const taskList = data.all_tasks || data.open_tasks || [];
+      const taskOpts = taskList
+        .map((t) => {
+          const who = t.assignee_email ? ` (${t.assignee_email})` : "";
+          return `<option value="${t.id}">#${t.id} ${escapeHtml(t.title)}${escapeHtml(who)} - ${escapeHtml(t.status)}</option>`;
         })
         .join("");
-      const current = state.projects.find((p) => Number(p.id) === Number(state.projectId));
 
       body.innerHTML = `
         <div class="dash">
@@ -461,13 +460,6 @@
             <div>
               <h2>Dashboard</h2>
               <p class="dash-muted">Project manager view - numbers only.</p>
-            </div>
-            <div class="dash-project-wrap">
-              <label class="dash-project">
-                <span>Project</span>
-                <select id="dashProjectSelect">${projectOpts}</select>
-              </label>
-              <button type="button" id="dashNewProjectBtn" title="new project">+</button>
             </div>
           </header>
           <div class="dash-stats">
@@ -480,11 +472,13 @@
           </div>
 
           <section class="dash-section">
-            <h3>Assign task${current ? ` - ${escapeHtml(current.name)}` : ""}</h3>
+            <h3>Assign task</h3>
             <form id="dashAssignForm" class="dash-assign">
-              <input id="dashAssignTitle" type="text" placeholder="task title" required maxlength="255" />
+              <select id="dashAssignTask" required ${taskOpts ? "" : "disabled"}>
+                ${taskOpts || `<option value="">no tasks yet</option>`}
+              </select>
               <select id="dashAssignUser" required>${memberOpts}</select>
-              <button type="submit">assign</button>
+              <button type="submit" ${taskOpts ? "" : "disabled"}>assign</button>
             </form>
             <pre id="dashAssignStatus" class="dash-status"></pre>
           </section>
@@ -515,48 +509,24 @@
         </div>
       `;
 
-      const projSelect = $("dashProjectSelect");
-      if (projSelect) {
-        projSelect.onchange = () => {
-          state.projectId = Number(projSelect.value);
-          localStorage.setItem("aio_project", String(state.projectId));
-          void loadAnalytics();
-        };
-      }
-      const newProjBtn = $("dashNewProjectBtn");
-      if (newProjBtn) {
-        newProjBtn.onclick = async () => {
-          const name = (window.prompt("New project name") || "").trim();
-          if (!name) return;
-          try {
-            const created = await api("/projects", {
-              method: "POST",
-              body: JSON.stringify({ name }),
-            });
-            state.projectId = created.id;
-            localStorage.setItem("aio_project", String(state.projectId));
-            await loadAnalytics();
-          } catch (e) {
-            window.alert(e.message || String(e));
-          }
-        };
-      }
-
       const form = $("dashAssignForm");
       if (form) {
         form.onsubmit = async (ev) => {
           ev.preventDefault();
           const status = $("dashAssignStatus");
-          const title = $("dashAssignTitle").value.trim();
+          const objective_id = Number($("dashAssignTask").value);
           const assignee_user_id = Number($("dashAssignUser").value);
+          if (!objective_id) {
+            status.textContent = "pick a task";
+            return;
+          }
           status.textContent = "...";
           try {
             const out = await api(`/projects/${state.projectId}/dashboard/assign`, {
               method: "POST",
-              body: JSON.stringify({ title, assignee_user_id }),
+              body: JSON.stringify({ objective_id, assignee_user_id }),
             });
             status.textContent = `assigned #${out.id} to ${out.assignee_email}`;
-            $("dashAssignTitle").value = "";
             await loadAnalytics();
           } catch (e) {
             status.textContent = e.message || String(e);
@@ -644,7 +614,8 @@
       swatch.style.background = colorForMember(m.email);
       const label = document.createElement("span");
       label.className = "label";
-      label.textContent = `${m.email} (${m.role})`;
+      label.textContent = `${m.name || m.email} (${m.role})`;
+      label.title = m.email || "";
       li.appendChild(swatch);
       li.appendChild(label);
       memberList.appendChild(li);
@@ -661,19 +632,35 @@
     return `${window.location.protocol}//${host}${port ? ":" + port : ""}/app`;
   }
 
-  function showLoginCard(email, apiKey) {
-    const url = lanAppUrl();
-    const msg =
-      `Added ${email}\n\n` +
-      `They only need:\n` +
-      `URL: ${url}\n` +
-      `email: ${email}\n` +
-      `api key: ${apiKey}\n\n` +
-      `Api key is always the same for everyone.`;
-    window.alert(msg);
-    setVoiceStatus(`added ${email}`);
+  function setMessageBody(el, text) {
+    el.textContent = "";
+    const parts = String(text || "").split(/(https?:\/\/\S+|mailto:[^\s]+)/g);
+    parts.forEach((part) => {
+      if (/^https?:\/\//.test(part)) {
+        const a = document.createElement("a");
+        a.href = part;
+        a.textContent = part;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        el.appendChild(a);
+      } else if (/^mailto:/i.test(part)) {
+        const a = document.createElement("a");
+        a.href = part;
+        a.textContent = part.replace(/^mailto:/i, "");
+        el.appendChild(a);
+      } else if (part) {
+        el.appendChild(document.createTextNode(part));
+      }
+    });
+  }
+
+  function showInviteLink(url) {
+    window.alert(
+      `Single-use invite link (one person).\nAfter they register, run !invitation or click + again for the next person.\n\n${url}`
+    );
+    setVoiceStatus("invite link ready");
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(`URL: ${url}\nemail: ${email}\napi key: ${apiKey}`).catch(() => {});
+      navigator.clipboard.writeText(url).catch(() => {});
     }
   }
 
@@ -699,7 +686,7 @@
       const whoEl = div.querySelector(".who");
       whoEl.textContent = who;
       whoEl.style.color = color;
-      div.querySelector(".body").textContent = bodyText;
+      setMessageBody(div.querySelector(".body"), bodyText);
       if (confirmIds.length) {
         const actions = document.createElement("div");
         actions.className = "confirm-actions";
@@ -957,15 +944,10 @@
   }
 
   async function inviteMember() {
-    const email = window.prompt("Invite email (workspace)");
-    if (!email) return;
     try {
-      const data = await api("/workspace/invite", {
-        method: "POST",
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      await refreshSidebar();
-      showLoginCard(data.email, data.api_key_issued);
+      const data = await api("/workspace/invite-link");
+      if (data.invite_url) showInviteLink(data.invite_url);
+      else setVoiceStatus("no invite link");
     } catch (e) {
       setVoiceStatus(String(e.message || e));
     }
@@ -1109,7 +1091,7 @@
     { insert: "!issue ", label: "!issue", blurb: "log a blocker" },
     { insert: "!issues", label: "!issues", blurb: "show blockers" },
     { insert: "!resolve ", label: "!resolve", blurb: "close blocker" },
-    { insert: "!invite ", label: "!invite", blurb: "add teammate" },
+    { insert: "!invitation", label: "!invitation", blurb: "new single-use invite" },
     { insert: "!status ", label: "!status", blurb: "member catch-up" },
     { insert: "!clear", label: "!clear", blurb: "wipe this chat" },
     { insert: "!help", label: "!help", blurb: "list commands" },
@@ -1135,13 +1117,13 @@
       out.push({ label: "@team", blurb: "ping whole team", insert: "@team " });
     }
     (state.members || []).forEach((m) => {
-      const local = (m.email || "").split("@")[0];
-      const name = m.name || local;
-      if (!p || local.toLowerCase().startsWith(p) || name.toLowerCase().startsWith(p)) {
+      const handle = (m.name || "").trim() || (m.email || "").split("@")[0];
+      if (!handle) return;
+      if (!p || handle.toLowerCase().startsWith(p)) {
         out.push({
-          label: `@${local}`,
+          label: `@${handle}`,
           blurb: m.email || "ping this person",
-          insert: `@${local} `,
+          insert: `@${handle} `,
         });
       }
     });
@@ -1238,8 +1220,20 @@
 
   if (state.email && state.apiKey) {
     $("email").value = state.email;
-    $("apiKey").value = state.apiKey;
-    login();
+    // Session restore: already have api key from prior login / register
+    showApp(true);
+    $("who").textContent = state.email;
+    refreshSidebar()
+      .then(() => refreshMentions())
+      .then(() => (state.chatId ? selectChat(state.chatId) : null))
+      .catch((e) => {
+        localStorage.removeItem("aio_email");
+        localStorage.removeItem("aio_key");
+        localStorage.removeItem("aio_uid");
+        state.apiKey = "";
+        showApp(false);
+        $("loginErr").textContent = String(e.message || e);
+      });
   }
   state.timer = setInterval(poll, 1500);
 })();

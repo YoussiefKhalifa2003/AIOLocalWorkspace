@@ -120,18 +120,21 @@ def test_chat_help_and_invite(tmp_path, monkeypatch):
     )
     assert bare.json()["replies"] == []
 
-    inv = client.post(
-        "/workspace/invite",
-        headers=headers,
-        json={"email": "colleague@local.test"},
-    )
+    inv = client.get("/workspace/invite-link", headers=headers)
     assert inv.status_code == 200
-    assert inv.json()["api_key_issued"] == "demo-key-a"
-    assert inv.json().get("private_chat_id")
+    token = inv.json()["token"]
+    assert token
+
+    reg = client.post(
+        f"/join/{token}/register.json",
+        json={"email": "colleague@local.test", "password": "secret1", "name": "Colleague"},
+    )
+    assert reg.status_code == 200
+    assert reg.json()["api_key"].startswith("u_")
 
     login = client.post(
         "/auth/login",
-        json={"email": "colleague@local.test", "api_key": "demo-key-a"},
+        json={"email": "colleague@local.test", "password": "secret1"},
     )
     assert login.status_code == 200
     col_key = login.json()["api_key"]

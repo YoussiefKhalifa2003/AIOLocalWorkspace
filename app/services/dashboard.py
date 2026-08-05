@@ -133,15 +133,19 @@ def build_owner_dashboard(db: Session, auth: AuthContext, *, project_id: int) ->
     tokens_total = sum(int(m.tokens or 0) for m in metrics)
     email_by_id = {u.id: u.email for u in user_by_id.values()}
 
-    open_tasks = [
-        {
+    def _task_row(o: Objective) -> dict:
+        return {
             "id": o.id,
             "title": o.title,
             "status": o.status or ("done" if o.done else "todo"),
             "assignee_user_id": owner_id(o),
             "assignee_email": email_by_id.get(owner_id(o) or -1),
         }
-        for o in open_objs[:40]
+
+    open_tasks = [_task_row(o) for o in open_objs[:40]]
+    # Full list for the assign dropdown (open first, then the rest)
+    all_tasks = [_task_row(o) for o in open_objs] + [
+        _task_row(o) for o in objectives if o not in open_objs
     ]
 
     return {
@@ -158,4 +162,5 @@ def build_owner_dashboard(db: Session, auth: AuthContext, *, project_id: int) ->
         "people": people,
         "models": models,
         "open_tasks": open_tasks,
+        "all_tasks": all_tasks,
     }

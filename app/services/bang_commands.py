@@ -14,13 +14,14 @@ from app.db.models import (
     Job,
     Objective,
     TaskItem,
+    Tenant,
     User,
     WorkIssue,
     utcnow,
 )
 from app.services.auth import AuthContext
 from app.services.chat_access import ensure_channel_membership, is_workspace_owner, list_visible_chats
-from app.services.seed import invite_user_by_email
+from app.services.workspace_invite import mint_invite_link
 from app.services.work_requests import create_work_request
 from app.worker import drain_queue
 
@@ -51,7 +52,7 @@ Issues
   !resolve <id>            close blocker
 
 Room
-  !invite <email>          add teammate
+  !invite / !invitation    mint a single-use invite link
   !status <name>           member catch-up (owner/self)
   !clear                   wipe this chat
   !help                    this list
@@ -379,35 +380,18 @@ def try_bang_command(db: Session, auth: AuthContext, chat: Chat, text: str, Inte
         issue.resolved_at = utcnow()
         return IntentResult(True, f"Resolved issue #{iid}.")
 
-    m = re.match(r"invite\s+(\S+@\S+)", lower, re.I)
-    if m:
-        # Preserve original casing/domain from raw (gmail etc.)
-        email = raw[m.start(1) : m.end(1)].strip().strip("<>\"'")
+    if lower in ("invite", "invitation") or lower.startswith("invite ") or lower.startswith("invitation"):
         try:
-            result = invite_user_by_email(
-                db,
-                tenant_id=auth.tenant_id,
-                inviter_user_id=auth.user_id,
-                email=email,
-            )
-            from app.config import get_settings
-
-            join_key = get_settings().workspace_join_key or get_settings().demo_api_key
-            mail = result.get("email_detail") or ""
-            mail_line = f"\nEmail: {mail}" if mail else ""
-            accept = result.get("accept_url") or ""
-            accept_line = f"\nAccept link: {accept}" if accept else ""
+            tenant = db.query(Tenant).filter(Tenant.id == auth.tenant_id).one()
+            data = mint_invite_link(db, tenant)
             return IntentResult(
                 True,
-                f"Invited {result['email']}. They must click **Accept invite** in the email "
-                f"before they can log in.{mail_line}{accept_line}\n"
-                f"After accepting: email + shared key `{join_key}` on /app "
-                "(use LAN IP for friends, not 127.0.0.1).",
+                "Single-use invite link (one person only). After they register it dies — "
+                "run !invitation again for the next person:\n"
+                f"{data['invite_url']}",
             )
-        except ValueError as exc:
-            return IntentResult(True, f"Invite failed: {exc}")
         except Exception as exc:  # noqa: BLE001
-            return IntentResult(True, f"Invite failed: {exc}")
+            return IntentResult(True, f"Invite link failed: {exc}")
 
     m = re.match(r"status\s+(\S+)$", lower)
     if m:

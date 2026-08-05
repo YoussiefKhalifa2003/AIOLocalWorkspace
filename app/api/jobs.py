@@ -88,7 +88,7 @@ def analytics(
 
 
 class AssignTaskIn(BaseModel):
-    title: str
+    objective_id: int
     assignee_user_id: int
 
 
@@ -99,7 +99,7 @@ def dashboard_assign(
     auth: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
 ):
-    """Owner-only: create a board card and assign it to a teammate."""
+    """Owner-only: reassign an existing board card to a teammate."""
     from app.db.models import Objective, User, WorkspaceMember
     from app.services.audit import write_audit
     from app.services.chat_access import is_workspace_owner
@@ -112,9 +112,17 @@ def dashboard_assign(
     if not is_workspace_owner(db, auth):
         raise HTTPException(status_code=403, detail="owner only")
 
-    title = (body.title or "").strip()
-    if not title:
-        raise HTTPException(status_code=400, detail="title required")
+    obj = (
+        db.query(Objective)
+        .filter(
+            Objective.id == body.objective_id,
+            Objective.tenant_id == auth.tenant_id,
+            Objective.project_id == project_id,
+        )
+        .one_or_none()
+    )
+    if obj is None:
+        raise HTTPException(status_code=404, detail="task not found")
 
     member = (
         db.query(WorkspaceMember)
@@ -125,23 +133,7 @@ def dashboard_assign(
     if member is None or user is None:
         raise HTTPException(status_code=404, detail="assignee not in workspace")
 
-    max_order = (
-        db.query(Objective)
-        .filter(Objective.tenant_id == auth.tenant_id, Objective.project_id == project_id)
-        .count()
-    )
-    obj = Objective(
-        tenant_id=auth.tenant_id,
-        project_id=project_id,
-        user_id=auth.user_id,
-        assignee_user_id=user.id,
-        title=title[:255],
-        done=False,
-        status="todo",
-        sort_order=max_order + 1,
-    )
-    db.add(obj)
-    db.flush()
+    obj.assignee_user_id = user.id
     write_audit(
         db,
         tenant_id=auth.tenant_id,
@@ -153,7 +145,7 @@ def dashboard_assign(
     return {
         "id": obj.id,
         "title": obj.title,
-        "status": obj.status,
+        "status": obj.status or ("done" if obj.done else "todo"),
         "assignee_user_id": user.id,
         "assignee_email": user.email,
     }

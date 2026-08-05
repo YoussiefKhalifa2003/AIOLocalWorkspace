@@ -8,7 +8,7 @@ from app.services.chat_access import is_workspace_owner
 
 
 def resolve_member(db: Session, tenant_id: int, token: str) -> User | None:
-    """Resolve @Omar / email local-part / email / name to a workspace user."""
+    """Resolve @Name to a workspace user (signup name is the @handle)."""
     raw = (token or "").strip().lower()
     if not raw:
         return None
@@ -18,17 +18,21 @@ def resolve_member(db: Session, tenant_id: int, token: str) -> User | None:
         .filter(WorkspaceMember.tenant_id == tenant_id)
         .all()
     )
+    # Prefer exact display name (case-insensitive)
     for u in members:
-        local = u.email.split("@")[0].lower()
-        if u.email.lower() == raw or local == raw or u.name.lower() == raw:
+        if (u.name or "").lower() == raw:
             return u
-    # unique prefix match on local part / name
-    hits = []
+    # Fallback: email / local-part for legacy demo users
     for u in members:
         local = u.email.split("@")[0].lower()
-        if local.startswith(raw) or u.name.lower().startswith(raw):
-            hits.append(u)
-    return hits[0] if len(hits) == 1 else None
+        if u.email.lower() == raw or local == raw:
+            return u
+    # Unique prefix on name, then email local
+    name_hits = [u for u in members if (u.name or "").lower().startswith(raw)]
+    if len(name_hits) == 1:
+        return name_hits[0]
+    local_hits = [u for u in members if u.email.split("@")[0].lower().startswith(raw)]
+    return local_hits[0] if len(local_hits) == 1 else None
 
 
 def objectives_for_user(

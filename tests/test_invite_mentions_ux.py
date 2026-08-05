@@ -6,6 +6,7 @@ def _boot(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("INVITE_APP_URL", "http://127.0.0.1:8000")
     from app.config import get_settings
 
     get_settings.cache_clear()
@@ -29,49 +30,82 @@ def _boot(tmp_path, monkeypatch):
     return TestClient(app), info
 
 
-def test_invite_requires_accept_before_login(tmp_path, monkeypatch):
+def test_invite_link_register_and_login(tmp_path, monkeypatch):
     client, info = _boot(tmp_path, monkeypatch)
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
     general = info["chat_general"]
-    r = client.post(
+
+    ok = client.post(
         f"/chats/{general}/messages",
         headers=ha,
-        json={"body": "!invite friend@gmail.com", "speak": False},
+        json={"body": "!invitation", "speak": False},
     )
-    assert r.status_code == 200
-    body = r.json()["replies"][0]["body"]
-    assert "Invited friend@gmail.com" in body
-    assert "Accept invite" in body
-    assert "Invite failed" not in body
+    body = ok.json()["replies"][0]["body"]
+    assert "Single-use invite link" in body
+    assert "/join/" in body
 
-    # Cannot log in before accepting
-    blocked = client.post(
-        "/auth/login",
-        json={"email": "friend@gmail.com", "api_key": "demo-key-a"},
-    )
-    assert blocked.status_code == 403
-    assert "accept" in blocked.json()["detail"].lower()
+    link = client.get("/workspace/invite-link", headers=ha)
+    assert link.status_code == 200
+    token = link.json()["token"]
+    assert link.json().get("single_use") is True
 
-    # Extract accept link from whisper (shown when SMTP missing)
-    accept_url = None
-    for line in body.splitlines():
-        if "Accept link:" in line:
-            accept_url = line.split("Accept link:", 1)[1].strip()
-            break
-    assert accept_url
-    token = accept_url.rstrip("/").split("/")[-1]
-
-    page = client.get(f"/invite/accept/{token}")
+    page = client.get(f"/join/{token}")
     assert page.status_code == 200
-    assert "Invite accepted" in page.text or "already in" in page.text
-    assert "friend@gmail.com" in page.text
+    assert "Join AIO" in page.text
+
+    reg = client.post(
+        f"/join/{token}/register.json",
+        json={"email": "newbie@example.com", "password": "secret1", "name": "Newbie"},
+    )
+    assert reg.status_code == 200, reg.text
+    assert reg.json()["email"] == "newbie@example.com"
+
+    # Same link cannot be reused
+    again = client.post(
+        f"/join/{token}/register.json",
+        json={"email": "other@example.com", "password": "secret1", "name": "Other"},
+    )
+    assert again.status_code == 400
+    dead = client.get(f"/join/{token}")
+    assert dead.status_code == 400
+
+    # Mint a fresh link for the next person
+    link2 = client.post("/workspace/invite-link", headers=ha)
+    assert link2.status_code == 200
+    token2 = link2.json()["token"]
+    assert token2 != token
+    reg2 = client.post(
+        f"/join/{token2}/register.json",
+        json={"email": "second@example.com", "password": "secret2", "name": "Second"},
+    )
+    assert reg2.status_code == 200
+
+    # Name required
+    link3 = client.post("/workspace/invite-link", headers=ha)
+    token3 = link3.json()["token"]
+    no_name = client.post(
+        f"/join/{token3}/register.json",
+        json={"email": "noname@example.com", "password": "secret3", "name": ""},
+    )
+    assert no_name.status_code == 422 or no_name.status_code == 400
+
+    spaced = client.post(
+        f"/join/{token3}/register.json",
+        json={"email": "spaced@example.com", "password": "secret3", "name": "Two Words"},
+    )
+    assert spaced.status_code == 400
 
     login = client.post(
         "/auth/login",
-        json={"email": "friend@gmail.com", "api_key": "demo-key-a"},
+        json={"email": "newbie@example.com", "password": "secret1"},
     )
     assert login.status_code == 200
-    assert login.json()["email"] == "friend@gmail.com"
+
+    demo = client.post(
+        "/auth/login",
+        json={"email": "a@local.test", "password": "demo"},
+    )
+    assert demo.status_code == 200
 
 
 def test_no_mention_in_private(tmp_path, monkeypatch):

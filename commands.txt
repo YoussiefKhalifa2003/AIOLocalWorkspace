@@ -9,11 +9,11 @@ hey team, standup in 5
 !set 1 doing
 !claim app/api/chats.py
 !issue Missing map PDF
-!invite friend@gmail.com
+!invite colleague@tatweermea.com
 !help
 
-# Invite: friend gets email → click Accept invite → then login with email + demo-key-a
-# Set INVITE_APP_URL=http://YOUR_LAN_IP:8000 so the Accept link works off your machine
+# Invite: only @tatweermea.com - no email. They log in with email + demo-key-a on LAN /app
+# INVITE_APP_URL=http://YOUR_LAN_IP:8000
 
 # MY ROOM - /skills for AI, !commands, plain notes stay quiet
 thinking out loud about auth

@@ -27,13 +27,19 @@ def message_to_dict(db: Session, m: ChatMessage) -> dict:
     from app.db.models import User
 
     sender = None
+    sender_email = None
     if m.sender_user_id:
         u = db.query(User).filter(User.id == m.sender_user_id).one_or_none()
-        sender = u.email if u else str(m.sender_user_id)
+        if u is not None:
+            sender = (u.name or "").strip() or u.email
+            sender_email = u.email
+        else:
+            sender = str(m.sender_user_id)
     vis = m.visibility or "public"
     return {
         "id": m.id,
         "sender": sender,
+        "sender_email": sender_email,
         "agent": m.agent_slug,
         "body": m.body,
         "audio_url": m.audio_url,

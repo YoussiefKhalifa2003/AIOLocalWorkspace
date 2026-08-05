@@ -522,7 +522,7 @@ header .tab.active { color: #eee; border-color: #888; background: #1a1a1a; }
 .models-cell { color: #9a9a9a; font-size: 12px; max-width: 280px; }
 .dash-assign {
   display: grid;
-  grid-template-columns: 1fr minmax(160px, 220px) auto;
+  grid-template-columns: minmax(0, 1.4fr) minmax(140px, 220px) auto;
   gap: 8px;
   align-items: center;
 }

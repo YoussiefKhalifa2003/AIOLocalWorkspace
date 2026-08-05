@@ -13,7 +13,8 @@ from app.services.chat_access import (
     is_workspace_owner,
     list_visible_chats,
 )
-from app.services.seed import invite_user_by_email
+from app.db.models import Tenant
+from app.services.workspace_invite import mint_invite_link
 from app.services.tts import TTSError, synthesize_speech
 from app.services.work_requests import create_work_request
 from app.worker import drain_queue
@@ -192,28 +193,19 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
             f"Kept objective #{oid} open: {obj.title}. Say what still needs fixing and I'll continue.",
         )
 
-    # invite
-    m = re.match(r"invite\s+(\S+@\S+)", lower)
-    if m:
-        email = m.group(1)
+    # invite — mint a new single-use workspace link
+    if lower in ("invite", "invitation") or lower.startswith("invite ") or lower.startswith("invitation"):
         try:
-            result = invite_user_by_email(
-                db,
-                tenant_id=auth.tenant_id,
-                inviter_user_id=auth.user_id,
-                email=email,
-            )
-            mail = result.get("email_detail") or ""
-            accept = result.get("accept_url") or ""
+            tenant = db.query(Tenant).filter(Tenant.id == auth.tenant_id).one()
+            data = mint_invite_link(db, tenant)
             return IntentResult(
                 True,
-                f"Invited {result['email']}. They must Accept invite in the email first."
-                f"{(' Email: ' + mail) if mail else ''}"
-                f"{(' Link: ' + accept) if accept else ''}\n"
-                "Then log in on /app with that email + shared join key.",
+                "Single-use invite link (one person only). After they register it dies — "
+                "run !invitation again for the next person:\n"
+                f"{data['invite_url']}",
             )
-        except ValueError as exc:
-            return IntentResult(True, f"Invite failed: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            return IntentResult(True, f"Invite link failed: {exc}")
 
     m = re.match(r"(?:create(?:\s+a)?(?:\s+new)?|new)\s+chat(?:\s+(.+))?$", lower)
     if m:
@@ -733,7 +725,7 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
             "- claim path <file> / release claim <file> / proceed\n"
             "- show checklist / checklist done <id> / clear checklist\n"
             "- log issue <text> / show issues / resolve issue <id>\n"
-            "- invite <email>\n"
+            "- invite / invitation\n"
             "- create chat <name> / list chats / delete chat [id]\n"
             "- @Research / @Writing / @Code / @Review / @Checklist ...\n"
             "- After agent work: Yes/No on objectives, or yes <id> / no <id>\n"

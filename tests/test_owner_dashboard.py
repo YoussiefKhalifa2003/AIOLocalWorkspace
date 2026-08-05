@@ -48,19 +48,11 @@ def test_owner_dashboard_and_assign(tmp_path, monkeypatch):
     assert info["email_omar"] in emails
 
     projects = client.get("/projects", headers=ha).json()
-    assert len(projects) >= 2
-    names = {p["name"] for p in projects}
-    assert "demo-project" in names
-    assert "ops" in names
-
-    created = client.post("/projects", headers=ha, json={"name": "mobile"})
-    assert created.status_code == 200
-    assert created.json()["name"] == "mobile"
-    assert client.post("/projects", headers=ho, json={"name": "nope"}).status_code == 403
+    assert len(projects) >= 1
 
     # Seed a metric row attributed to Omar
     from app.db.session import SessionLocal
-    from app.db.models import AgentMetric, WorkRequest, Job
+    from app.db.models import AgentMetric, WorkRequest, Job, Objective
 
     db = SessionLocal()
     try:
@@ -97,11 +89,20 @@ def test_owner_dashboard_and_assign(tmp_path, monkeypatch):
             )
         )
         db.commit()
+        obj = (
+            db.query(Objective)
+            .filter(Objective.tenant_id == info["tenant_a"], Objective.project_id == pid)
+            .order_by(Objective.id.asc())
+            .first()
+        )
+        assert obj is not None
+        objective_id = obj.id
     finally:
         db.close()
 
     data = client.get(f"/projects/{pid}/analytics", headers=ha).json()
     assert data["summary"]["tokens_total"] >= 1234
+    assert data["all_tasks"]
     omar = next(p for p in data["people"] if p["email"] == info["email_omar"])
     assert omar["tokens"] >= 1234
     assert any("test/model" in m for m in omar["models"])
@@ -109,16 +110,16 @@ def test_owner_dashboard_and_assign(tmp_path, monkeypatch):
     assigned = client.post(
         f"/projects/{pid}/dashboard/assign",
         headers=ha,
-        json={"title": "Ship dashboard polish", "assignee_user_id": info["user_omar"]},
+        json={"objective_id": objective_id, "assignee_user_id": info["user_omar"]},
     )
     assert assigned.status_code == 200
     body = assigned.json()
     assert body["assignee_email"] == info["email_omar"]
-    assert "Ship dashboard polish" in body["title"]
+    assert body["id"] == objective_id
 
     blocked = client.post(
         f"/projects/{pid}/dashboard/assign",
         headers=ho,
-        json={"title": "nope", "assignee_user_id": info["user_a"]},
+        json={"objective_id": objective_id, "assignee_user_id": info["user_a"]},
     )
     assert blocked.status_code == 403
