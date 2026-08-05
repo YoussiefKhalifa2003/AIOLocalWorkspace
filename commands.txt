@@ -1,0 +1,47 @@
+# Hybrid AIO (http://127.0.0.1:8000/app)
+# Owner: a@local.test / demo-key-a
+# Member: omar@local.test / demo-key-a
+
+# In MY ROOM (Omar)
+add objective Finish station notes
+log issue Missing map PDF
+show objectives
+board
+set objective 1 doing
+claim path app/api/chats.py
+show issues
+@Research one metro tip
+
+# Models tab (OpenRouter free / Gemini)
+# Set OPENROUTER_API_KEY in .env from https://openrouter.ai/keys
+
+# Board / GitHub
+link objective 1 pr https://github.com/example/demo-project/pull/1
+link objective 1 branch feat/x
+set objective 1 agent_backlog
+
+# As owner in #general (use / to activate AI)
+/@Omar status
+/@team report
+/board
+/invite teammate@local.test
+/help
+
+# Plain team talk (no AI)
+hey everyone, standup in 5
+
+# Team chat
+create chat design
+list chats
+
+# Simulate GitHub
+./aio webhook-sim --title "Ship #obj-1" --action opened
+./aio drain
+./aio webhook-sim --title "Ship #obj-1" --action closed --merged
+
+# Voice: enable voice input → mic → speak → stop
+# Speak replies: checkbox for TTS
+
+# Reset DB
+rm -f aio.db && ./aio seed
+uvicorn app.main:app --host 0.0.0.0 --port 8000

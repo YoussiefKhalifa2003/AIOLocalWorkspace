@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AIO</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="login" class="screen">
+    <div class="panel">
+      <div class="title">AIO LOGIN</div>
+      <label>email <input id="email" type="text" value="a@local.test" /></label>
+      <label>api key <input id="apiKey" type="password" value="demo-key-a" /></label>
+      <p class="hint" style="margin:8px 0 0;color:#888">Everyone uses join key <code>demo-key-a</code></p>
+      <button id="loginBtn" type="button">enter</button>
+      <pre id="loginErr" class="err"></pre>
+    </div>
+  </div>
+
+  <div id="app" class="screen hidden">
+    <header>
+      <span id="who"></span>
+      <nav class="tabs" id="mainTabs">
+        <button type="button" data-tab="chat" class="tab active">Chat</button>
+        <button type="button" data-tab="board" class="tab">Board</button>
+        <button type="button" data-tab="models" class="tab">Models</button>
+        <button type="button" data-tab="analytics" class="tab" id="analyticsTab">Analytics</button>
+      </nav>
+      <label class="speak"><input type="checkbox" id="speakToggle" /> speak replies</label>
+      <label class="speak"><input type="checkbox" id="voiceToggle" /> voice input</label>
+      <button id="logoutBtn" type="button">logout</button>
+    </header>
+    <div class="layout" id="chatView">
+      <aside>
+        <div class="aside-head">
+          <div class="aside-title">TEAM</div>
+          <button id="newChatBtn" type="button" title="new team chat">+</button>
+        </div>
+        <ul id="teamList"></ul>
+        <div class="aside-head">
+          <div class="aside-title">MY ROOM</div>
+        </div>
+        <ul id="myRoomList"></ul>
+        <div class="aside-head">
+          <div class="aside-title">MEMBERS</div>
+          <button id="inviteBtn" type="button" title="invite to workspace">+</button>
+        </div>
+        <ul id="memberList"></ul>
+      </aside>
+      <main>
+        <div id="chatTitle" class="chat-title"></div>
+        <div id="messages" class="messages"></div>
+        <form id="composer">
+          <div class="composer-wrap">
+            <input id="input" type="text" autocomplete="off" placeholder="team: /help · room: just type · @ to mention" />
+            <ul id="mentionBox" class="mention-box hidden"></ul>
+          </div>
+          <button id="micBtn" type="button" title="hold to speak / click to stop" disabled>mic</button>
+          <button type="submit">send</button>
+        </form>
+        <div id="voiceStatus" class="voice-status"></div>
+      </main>
+    </div>
+    <div id="boardView" class="board-view hidden">
+      <div id="boardColumns" class="board-columns"></div>
+      <aside id="boardPanel" class="board-panel hidden">
+        <button type="button" id="boardPanelClose">close</button>
+        <div id="boardPanelBody"></div>
+      </aside>
+      <div id="boardFooter" class="board-footer"></div>
+    </div>
+    <div id="modelsView" class="models-view hidden">
+      <div class="models-body">
+        <h2>Agent models</h2>
+        <p class="hint" id="modelsHint">Pick an OpenCode free model (or Gemini) for each agent.</p>
+        <div id="modelsForm"></div>
+        <button type="button" id="modelsSaveBtn">save</button>
+        <pre id="modelsStatus" class="voice-status"></pre>
+      </div>
+    </div>
+    <div id="analyticsView" class="analytics-view hidden">
+      <div id="analyticsBody" class="analytics-body"></div>
+    </div>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
