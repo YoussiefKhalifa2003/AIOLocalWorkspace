@@ -8,3 +8,5 @@ pydantic-settings>=2.0.0
 python-multipart>=0.0.9
 pytest>=8.0.0
 pypdf>=5.0.0
+rich>=13.0.0
+textual>=1.0.0

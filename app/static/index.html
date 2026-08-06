@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AIO</title>
-  <link rel="stylesheet" href="/static/styles.css?v=boardlive3" />
+  <link rel="stylesheet" href="/static/styles.css?v=merge1" />
 </head>
 <body>
   <div id="login" class="screen">
@@ -89,6 +89,18 @@
       </aside>
       <div id="boardFooter" class="board-footer"></div>
     </div>
+    <div id="mergeModal" class="modal-backdrop hidden">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mergeModalTitle">
+        <h3 id="mergeModalTitle">Merge &amp; done</h3>
+        <div id="mergeModalBody"></div>
+        <p class="modal-warn">Merging into the default branch cannot be easily undone.</p>
+        <div id="mergeModalStatus" class="modal-status" hidden></div>
+        <div class="modal-actions">
+          <button type="button" id="mergeCancel">Cancel</button>
+          <button type="button" id="mergeConfirm" class="danger">Merge &amp; move to done</button>
+        </div>
+      </div>
+    </div>
     <div id="modelsView" class="models-view hidden">
       <div class="models-body">
         <div class="roster-top">
@@ -108,6 +120,6 @@
       <div id="analyticsBody" class="analytics-body"></div>
     </div>
   </div>
-  <script src="/static/app.js?v=boardlive3"></script>
+  <script src="/static/app.js?v=merge1"></script>
 </body>
 </html>

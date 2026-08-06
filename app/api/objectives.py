@@ -37,6 +37,7 @@ class ObjectiveOut(BaseModel):
     github_pr_url: str | None = None
     github_branch: str | None = None
     github_pr_number: int | None = None
+    github_merged_at: str | None = None
 
 
 class ObjectivePatch(BaseModel):
@@ -44,6 +45,7 @@ class ObjectivePatch(BaseModel):
     assignee_user_id: int | None = None
     title: str | None = None
     description: str | None = None
+    coding_runner: str | None = None
 
 
 class ObjectiveSetupIn(BaseModel):
@@ -65,6 +67,9 @@ def _obj_out(obj: Objective) -> ObjectiveOut:
         github_pr_url=obj.github_pr_url,
         github_branch=obj.github_branch,
         github_pr_number=obj.github_pr_number,
+        github_merged_at=(
+            obj.github_merged_at.isoformat() if obj.github_merged_at else None
+        ),
     )
 
 
@@ -251,8 +256,15 @@ def patch_objective(
 
         if obj.status == "agent_backlog" and prev_status != "agent_backlog":
             from app.services.agent_backlog import enqueue_agent_backlog
+            from app.services.coding_backend import CODING_RUNNERS
 
-            enqueue_agent_backlog(db, auth, obj)
+            runner = (body.coding_runner or "").strip().lower()
+            if runner and runner not in CODING_RUNNERS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"unknown coding runner {runner!r}; use one of {', '.join(CODING_RUNNERS)}",
+                )
+            enqueue_agent_backlog(db, auth, obj, coding_runner=runner)
 
     write_audit(
         db,
@@ -263,6 +275,117 @@ def patch_objective(
     )
     db.commit()
     return _obj_out(obj)
+
+
+class MergeIn(BaseModel):
+    confirm: bool = False
+    merge_method: str | None = None
+    delete_branch: bool = True
+
+
+@router.post("/projects/{project_id}/objectives/{objective_id}/merge")
+def merge_objective(
+    project_id: int,
+    objective_id: int,
+    body: MergeIn,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """Owner-only: merge the objective's PR, then move the card to done."""
+    from app.services.chat_access import is_workspace_owner
+    from app.services.github_notify import post_general
+    from app.services.github_pr import delete_remote_branch, merge_pull_request
+
+    try:
+        project = get_project_for_tenant(db, auth.tenant_id, project_id)
+        obj = _get_objective(db, auth.tenant_id, project_id, objective_id)
+    except IsolationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not is_workspace_owner(db, auth):
+        raise HTTPException(status_code=403, detail="only the workspace owner can merge")
+
+    if body.confirm is not True:
+        raise HTTPException(
+            status_code=400,
+            detail="confirmation required: merging into the default branch cannot be undone",
+        )
+
+    status = obj.status or ("done" if obj.done else "todo")
+    if status != "in_review":
+        raise HTTPException(
+            status_code=400,
+            detail=f"objective must be in_review to merge (currently {status})",
+        )
+    if not obj.github_pr_number:
+        raise HTTPException(status_code=400, detail="objective has no linked pull request")
+
+    result = merge_pull_request(
+        project=project,
+        pr_number=int(obj.github_pr_number),
+        commit_title=f"[AIO #{obj.id}] {obj.title}"[:250],
+        commit_message=f"Merged from AIO objective #{obj.id}.",
+        merge_method=body.merge_method or "",
+    )
+
+    if not result.get("ok"):
+        write_audit(
+            db,
+            tenant_id=auth.tenant_id,
+            project_id=project_id,
+            event_type="objective_merge_failed",
+            message=f"objective {obj.id} pr={obj.github_pr_number} reason={result.get('reason_code')}",
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=result.get("message") or "GitHub refused the merge",
+        )
+
+    base = result.get("base") or "main"
+    obj.github_merged_at = utcnow()
+    set_objective_status(obj, "done")
+    release_claims_for_objective(db, obj.id)
+
+    branch_note = ""
+    if body.delete_branch and obj.github_branch:
+        deleted = delete_remote_branch(project=project, branch=obj.github_branch)
+        branch_note = (
+            f" Branch `{obj.github_branch}` deleted."
+            if deleted.get("ok")
+            else f" Branch `{obj.github_branch}` left in place."
+        )
+
+    post_general(
+        db,
+        tenant_id=auth.tenant_id,
+        project_id=project_id,
+        body=(
+            f"Merged PR #{obj.github_pr_number} for objective #{obj.id} into `{base}`. "
+            f"Card moved to done.{branch_note}\n{obj.github_pr_url or ''}"
+        ),
+        agent_slug="lead",
+    )
+    write_audit(
+        db,
+        tenant_id=auth.tenant_id,
+        project_id=project_id,
+        event_type="objective_merged",
+        message=(
+            f"objective {obj.id} pr={obj.github_pr_number} base={base} "
+            f"method={result.get('merge_method')} sha={result.get('sha')}"
+        ),
+    )
+    db.commit()
+    return {
+        "ok": True,
+        "objective": _obj_out(obj).model_dump(),
+        "merged": True,
+        "sha": result.get("sha"),
+        "base": base,
+        "merge_method": result.get("merge_method"),
+        "message": result.get("message"),
+    }
 
 
 def _clear_setup_markers(db: Session, *, tenant_id: int, objective_id: int) -> int:

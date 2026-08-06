@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.db.models import Job, Objective, Project, User, WebhookEvent, WorkRequest
 from app.db.session import get_db
 from app.services.audit import write_audit
-from app.services.github_notify import confirm_footer_for_objective, post_general
+from app.services.github_notify import post_general
 from app.services.model_tiers import infer_tier
 from app.services.rooms import ensure_project_rooms
 
@@ -206,18 +206,26 @@ async def github_webhook(
                 .one_or_none()
             )
         if merged:
-            body = f"PR merged: **{title}**\n{pr_url}"
-            if obj is not None:
-                body += confirm_footer_for_objective(obj)
-            post_general(
-                db,
-                tenant_id=project.tenant_id,
-                project_id=project.id,
-                body=body,
-                agent_slug="lead",
-            )
+            # AIO-initiated merges already announced themselves; don't double-post.
+            already_ours = obj is not None and obj.github_merged_at is not None
+            if not already_ours:
+                body = f"PR merged on GitHub: **{title}**\n{pr_url}"
+                if obj is not None:
+                    body += (
+                        f"\nObjective #{obj.id} ({obj.title}) is still "
+                        f"{obj.status or 'open'} - run Merge and done in AIO, "
+                        "or mark it done manually."
+                    )
+                post_general(
+                    db,
+                    tenant_id=project.tenant_id,
+                    project_id=project.id,
+                    body=body,
+                    agent_slug="lead",
+                )
             result["status"] = "merge_notified"
             result["objective_id"] = obj.id if obj else None
+            result["deduped"] = bool(already_ours)
         else:
             post_general(
                 db,

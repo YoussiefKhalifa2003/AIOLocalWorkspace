@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Chat, ChatMessage, Objective
+from app.db.models import Chat, ChatMessage
 
 
 def get_general_chat(db: Session, *, tenant_id: int, project_id: int) -> Chat | None:
@@ -40,11 +40,3 @@ def post_general(
     db.add(msg)
     db.flush()
     return msg
-
-
-def confirm_footer_for_objective(obj: Objective) -> str:
-    return (
-        f"\n\nLinked objective #{obj.id}: {obj.title}\n"
-        f"[[confirm:{obj.id}]]\n"
-        f"Click Yes to mark done, or type: yes {obj.id}"
-    )

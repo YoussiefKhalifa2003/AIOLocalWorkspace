@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import Artifact, Job, TaskItem, utcnow
 from app.services.audit import write_audit
-from app.services.coding_backend import get_coding_backend, record_metric
+from app.services.coding_backend import record_metric
 from app.services.handoff import enqueue_next_pipeline_job, parse_json
 from app.services.llm import LLMClient, LLMError
 from app.services.rooms import post_agent_output
+
+logger = logging.getLogger(__name__)
 
 CHAT_MARKDOWN = (
     "Format for chat readability: short sections, ## headings sparingly, "
@@ -236,39 +239,203 @@ def run_ask(db: Session, job: Job, llm: LLMClient) -> None:
     )
 
 
-_DEEPRESEARCH_SYSTEM = (
-    "You are DeepResearch, a rigorous workplace research analyst. "
-    "Produce a thorough, insightful briefing the user can act on.\n\n"
+_DEEPRESEARCH_SHAPE = (
     "Required shape (markdown):\n"
     "1) Title + 3-6 sentence executive summary\n"
     "2) Key findings (bullets with concrete claims)\n"
-    "3) At least one markdown table comparing options, metrics, risks, or timelines "
-    "(use real columns; invent plausible illustrative numbers only if labeled as estimates)\n"
+    "3) At least one markdown table comparing options, metrics, risks, or timelines\n"
     "4) Deeper analysis: drivers, tradeoffs, edge cases\n"
-    "5) Optional ASCII chart or bar sketch in a fenced code block when numbers help "
-    "(no images; keep it plain text)\n"
+    "5) Optional ASCII chart in a fenced code block when numbers help (no images)\n"
     "6) Recommendations / next steps\n"
-    "7) Open questions / what would change the answer\n\n"
-    "Be specific. Prefer structure over fluff. Call out uncertainty. "
-    "If ATTACHED FILES are present, treat them as primary evidence."
+    "7) Open questions / what would change the answer\n"
+)
+
+_DEEPRESEARCH_SYSTEM = (
+    "You are DeepResearch, a rigorous workplace research analyst.\n\n"
+    + _DEEPRESEARCH_SHAPE
+    + "\nEvidence rules (non-negotiable):\n"
+    "- Use ONLY the numbered EVIDENCE block below as external fact material.\n"
+    "- Cite every non-obvious claim inline with its evidence number, like [2].\n"
+    "- Never output a URL that does not appear in the EVIDENCE block.\n"
+    "- Never invent papers, organisations, quotes, dates, or statistics. "
+    "If a number is not in the evidence, either omit it or clearly mark it as "
+    "'estimate (not from sources)'.\n"
+    "- If the evidence does not support part of the question, say so plainly and "
+    "list what is missing under 'Open questions'.\n"
+    "- Do not write the Sources section yourself; it is appended automatically.\n"
+    "If ATTACHED FILES are present, treat them as primary evidence and cite them as [file]."
+)
+
+_DEEPRESEARCH_NO_SOURCES_SYSTEM = (
+    "You are DeepResearch, a rigorous workplace research analyst working OFFLINE "
+    "with no web access and no retrieved sources.\n\n"
+    + _DEEPRESEARCH_SHAPE
+    + "\nEvidence rules (non-negotiable):\n"
+    "- You have NO sources. Do not output any URL, citation, paper title, or "
+    "specific statistic presented as fact.\n"
+    "- Write from general reasoning only, and label it as unverified.\n"
+    "- Be explicit about what would need to be checked against real sources.\n"
+    "If ATTACHED FILES are present, treat them as the only evidence."
+)
+
+_NO_SOURCES_BANNER = (
+    "> **NO LIVE SOURCES:** `TAVILY_API_KEY` is not configured, so this briefing is "
+    "unverified, contains no citations, and must not be treated as researched fact.\n"
 )
 
 
+def _drop_model_sources_section(text: str) -> str:
+    """The Sources section is generated from real docs, so drop the model's version."""
+    import re as _re
+
+    return _re.split(r"\n#{1,3}\s*sources\b.*", text or "", maxsplit=1, flags=_re.I)[0].rstrip()
+
+
+def _research_queries(db: Session, job: Job, llm: LLMClient, text: str) -> list[str]:
+    """1-3 search queries for the request, falling back to the raw text."""
+    fallback = [(text or "").strip()[:300]] if (text or "").strip() else []
+    try:
+        raw = _agent_chat(
+            db,
+            job,
+            llm,
+            agent_type="deepresearch",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Turn the user's research request into 1-3 web search queries. "
+                        'Reply with JSON only: {"queries": ["...", "..."]}. '
+                        "No prose, no markdown fences."
+                    ),
+                },
+                {"role": "user", "content": text[:4000]},
+            ],
+            max_tokens=200,
+            temperature=0.0,
+        )
+    except LLMError:
+        return fallback
+    body = (raw or "").strip()
+    if body.startswith("```"):
+        body = body.strip("`")
+        body = body.split("\n", 1)[-1] if "\n" in body else body
+    start, end = body.find("{"), body.rfind("}")
+    if start >= 0 and end > start:
+        body = body[start : end + 1]
+    try:
+        queries = json.loads(body).get("queries") or []
+    except (ValueError, AttributeError):
+        return fallback
+    cleaned = [str(q).strip() for q in queries if str(q).strip()][:3]
+    return cleaned or fallback
+
+
 def run_deepresearch(db: Session, job: Job, llm: LLMClient) -> None:
+    from app.services.research import (
+        build_evidence_block,
+        fetch_documents,
+        get_search_provider,
+        scrub_unverified_urls,
+        sources_markdown,
+        strip_all_urls,
+    )
+
     payload = parse_json(job.payload_json, {})
     text = payload.get("text") or payload.get("source_text") or ""
-    content = _agent_chat(
-        db,
-        job,
-        llm,
-        agent_type="deepresearch",
-        messages=[
-            {"role": "system", "content": _sys(_DEEPRESEARCH_SYSTEM)},
-            {"role": "user", "content": text},
-        ],
-        max_tokens=4096,
-        temperature=0.35,
-    )
+    settings = get_settings()
+    provider = get_search_provider()
+
+    if provider is None:
+        body = _agent_chat(
+            db,
+            job,
+            llm,
+            agent_type="deepresearch",
+            messages=[
+                {"role": "system", "content": _sys(_DEEPRESEARCH_NO_SOURCES_SYSTEM)},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=4096,
+            temperature=0.35,
+        )
+        content = f"{_NO_SOURCES_BANNER}\n{strip_all_urls(body)}\n\n## Sources\n\nNone - no live search provider configured.\n"
+        write_audit(
+            db,
+            tenant_id=job.tenant_id,
+            project_id=job.project_id,
+            request_id=job.request_id,
+            job_id=job.id,
+            event_type="deepresearch_sources",
+            message="0 sources (no search provider configured)",
+        )
+    else:
+        queries = _research_queries(db, job, llm, text)
+        hits: list = []
+        seen: set[str] = set()
+        for q in queries:
+            for hit in provider.search(q, settings.research_max_results):
+                if hit.url in seen:
+                    continue
+                seen.add(hit.url)
+                hits.append(hit)
+        docs = fetch_documents(hits[: settings.research_max_results * 2])
+        good = [d for d in docs if d.ok and d.text][: settings.research_max_results]
+        evidence = build_evidence_block(good)
+
+        if not good:
+            body = _agent_chat(
+                db,
+                job,
+                llm,
+                agent_type="deepresearch",
+                messages=[
+                    {"role": "system", "content": _sys(_DEEPRESEARCH_NO_SOURCES_SYSTEM)},
+                    {"role": "user", "content": text},
+                ],
+                max_tokens=4096,
+                temperature=0.35,
+            )
+            content = (
+                "> **NO LIVE SOURCES:** search returned nothing usable for this request, "
+                "so the briefing below is unverified and uncited.\n\n"
+                f"{strip_all_urls(body)}\n\n## Sources\n\nNone retrieved.\n"
+            )
+        else:
+            body = _agent_chat(
+                db,
+                job,
+                llm,
+                agent_type="deepresearch",
+                messages=[
+                    {"role": "system", "content": _sys(_DEEPRESEARCH_SYSTEM)},
+                    {
+                        "role": "user",
+                        "content": f"RESEARCH REQUEST\n{text}\n\n{evidence}",
+                    },
+                ],
+                max_tokens=4096,
+                temperature=0.35,
+            )
+            cleaned = scrub_unverified_urls(body, good)
+            cleaned = _drop_model_sources_section(cleaned)
+            content = f"{cleaned.rstrip()}\n\n{sources_markdown(good)}"
+
+        from app.services.research import allowed_domains
+
+        write_audit(
+            db,
+            tenant_id=job.tenant_id,
+            project_id=job.project_id,
+            request_id=job.request_id,
+            job_id=job.id,
+            event_type="deepresearch_sources",
+            message=(
+                f"{len(good)} sources from {len(queries)} queries: "
+                f"{', '.join(sorted(allowed_domains(good))) or 'none'}"
+            ),
+        )
+
     art = _save_artifact(db, job, "Deep research", content)
     post_agent_output(
         db,
@@ -341,15 +508,53 @@ def run_writing(db: Session, job: Job, llm: LLMClient) -> None:
     )
 
 
+def _workspace_for_job(payload: dict) -> str:
+    """The objective's checkout, when it already exists on disk."""
+    from app.services.agent_workspace import is_workspace_ready, workspace_path
+
+    objective_id = payload.get("objective_id")
+    if not objective_id:
+        return ""
+    path = workspace_path(int(objective_id))
+    return str(path) if is_workspace_ready(path) else ""
+
+
 def run_coding(db: Session, job: Job, llm: LLMClient) -> None:
+    from app.services.coding_backend import WORKSPACE_BACKENDS, get_coding_backend_for
+
     payload = parse_json(job.payload_json, {})
     text = payload.get("text") or payload.get("source_text") or ""
     model, backend = _model_for(db, job, "coding")
-    # Prefer OpenCode/LLM chat path for selected models; legacy shell only if coding_backend=opencode AND gemini
     settings = get_settings()
-    if (settings.coding_backend or "llm").lower() == "opencode" and backend == "gemini":
+    runner = (payload.get("coding_runner") or settings.coding_backend or "llm").strip().lower()
+
+    if runner in WORKSPACE_BACKENDS:
+        workspace = _workspace_for_job(payload)
+        coding = get_coding_backend_for(runner)
+        job.model_used = f"{runner}:{model}"
+        try:
+            result = coding.run(prompt=text, model=model, llm=llm, workspace=workspace or None)
+        except LLMError as exc:
+            logger.warning("coding runner %s failed (%s); falling back to LLM", runner, exc)
+            record_metric(db, job=job, backend=runner, model=model, success=False)
+            result = None
+        if result is not None:
+            record_metric(
+                db,
+                job=job,
+                backend=result.backend,
+                model=result.model,
+                success=result.success,
+                duration_ms=result.duration_ms,
+            )
+            _finish_coding_job(db, job, result.content)
+            return
         job.model_used = model
-        coding = get_coding_backend()
+
+    # Prefer OpenCode/LLM chat path for selected models; legacy shell only if coding_backend=opencode AND gemini
+    if runner == "opencode" and backend == "gemini":
+        job.model_used = model
+        coding = get_coding_backend_for("opencode")
         try:
             result = coding.run(prompt=text, model=model, llm=llm)
             record_metric(
@@ -362,7 +567,7 @@ def run_coding(db: Session, job: Job, llm: LLMClient) -> None:
             )
             content = result.content
         except LLMError:
-            record_metric(db, job=job, backend=settings.coding_backend, model=model, success=False)
+            record_metric(db, job=job, backend=runner, model=model, success=False)
             raise
     else:
         content = _agent_chat(
@@ -382,6 +587,10 @@ def run_coding(db: Session, job: Job, llm: LLMClient) -> None:
                 {"role": "user", "content": text},
             ],
         )
+    _finish_coding_job(db, job, content)
+
+
+def _finish_coding_job(db: Session, job: Job, content: str) -> None:
     art = _save_artifact(db, job, "Code", content)
     post_agent_output(
         db,

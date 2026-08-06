@@ -16,6 +16,7 @@ def _boot(tmp_path, monkeypatch, **env):
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("GITHUB_TOKEN", env.pop("GITHUB_TOKEN", ""))
+    monkeypatch.setenv("GITHUB_REPO", env.pop("GITHUB_REPO", ""))
     monkeypatch.setenv("OPENCODE_API_KEY", env.pop("OPENCODE_API_KEY", ""))
     for k, v in env.items():
         monkeypatch.setenv(k, v)
@@ -136,7 +137,7 @@ def test_gate_b_github_link_and_merge_confirm(tmp_path, monkeypatch):
     body, headers = _signed(bad, "del-bad")
     assert client.post("/webhooks/github", content=body, headers=headers).json()["status"] == "ignored"
 
-    # merge → confirm footer, not auto-done
+    # merge → plain notice, not auto-done and not a confirm prompt
     merged = {
         "action": "closed",
         "repository": {"full_name": "example/demo-project"},
@@ -151,7 +152,9 @@ def test_gate_b_github_link_and_merge_confirm(tmp_path, monkeypatch):
     r = client.post("/webhooks/github", content=body, headers=headers)
     assert r.json()["status"] == "merge_notified"
     msgs = client.get(f"/chats/{info['chat_general']}/messages?after_id=0", headers=ha).json()
-    assert any(f"[[confirm:{oid}]]" in m["body"] for m in msgs)
+    assert any("PR merged on GitHub" in m["body"] for m in msgs)
+    assert not any("[[confirm:" in m["body"] for m in msgs)
+    assert any(f"Objective #{oid}" in m["body"] for m in msgs)
 
     board2 = client.get(f"/projects/{pid}/board", headers=ha).json()
     card2 = next(c for col in board2["columns"] for c in col["cards"] if c["id"] == oid)
@@ -240,9 +243,25 @@ def test_gate_e_agent_backlog_manual_pr(tmp_path, monkeypatch):
     client, info = _boot(tmp_path, monkeypatch, GITHUB_TOKEN="")
     # ensure settings ignore host .env token
     monkeypatch.setenv("GITHUB_TOKEN", "")
+    monkeypatch.setenv("AGENT_WORK_ROOT", str(tmp_path / "workspaces"))
     from app.config import get_settings
 
     get_settings.cache_clear()
+
+    def _no_workspace(project, objective_id, branch):
+        return {
+            "ok": False,
+            "path": str(tmp_path / "workspaces" / f"obj-{objective_id}"),
+            "branch": branch,
+            "default_branch": "main",
+            "error": "test: skip local workspace",
+        }
+
+    monkeypatch.setattr(
+        "app.services.agent_workspace.prepare_workspace",
+        _no_workspace,
+    )
+
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
     pid = info["project_a"]
     # create objective without github token → manual path

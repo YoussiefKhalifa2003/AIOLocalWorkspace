@@ -91,6 +91,8 @@ class LLMClient:
             topic = user[:120].replace("\n", " ")
             return (
                 f"# Deep research (offline)\n\n"
+                "**No live model and no retrieved sources.** Nothing below is verified, "
+                "and no citations or links are available.\n\n"
                 f"**Executive summary.** Stub briefing for: {topic}\n\n"
                 "## Key findings\n"
                 "- Finding A: illustrative only (no live model)\n"
@@ -107,7 +109,7 @@ class LLMClient:
                 "        |##########| high\n"
                 "```\n\n"
                 "## Recommendations\n"
-                "1. Re-run with a live LLM key for real analysis.\n"
+                "1. Re-run with a live LLM key and TAVILY_API_KEY for cited analysis.\n"
             )
         if "status analyst" in system.lower() or "catch-up" in system.lower():
             # Echo key evidence so tests can assert board facts survived the LLM path
