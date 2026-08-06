@@ -57,7 +57,7 @@ Room
   !clear                   clear this chat (channels: only for you)
   !help                    this list
 
-Private room: use /skills for AI (e.g. /code ..., /status Omar). Board tab shows the board."""
+Private room: use /skills for AI (e.g. /ask ..., /code ..., /status Omar). Board tab shows the board."""
 
 
 def _parse_invite_uses(raw: str) -> int:

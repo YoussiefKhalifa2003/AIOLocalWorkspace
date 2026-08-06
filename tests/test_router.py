@@ -1,11 +1,11 @@
 from app.router.classify import classify_request, _keyword_fallback
 
 
-def test_keyword_research_writing_checklist():
+def test_keyword_ask_writing_checklist():
     plan = _keyword_fallback(
         "Research competitor pricing and draft a one-page report, then add follow-up tasks."
     )
-    assert plan.agents == ["research", "writing", "checklist"]
+    assert plan.agents == ["ask", "writing", "checklist"]
 
 
 def test_keyword_code_review():
@@ -25,5 +25,5 @@ def test_classify_falls_back_without_key(monkeypatch):
 
     get_settings.cache_clear()
     plan = classify_request("Research the market briefly")
-    assert "research" in plan.agents
+    assert "ask" in plan.agents
     assert plan.used_llm is False

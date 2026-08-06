@@ -13,7 +13,7 @@ def resolve_model(tier: str | None, *, agent_type: str = "") -> str:
     if t == "strong":
         return strong
     # defaults by agent
-    if agent_type in ("code_review", "research", "writing"):
+    if agent_type in ("code_review", "ask", "writing"):
         return strong
     if agent_type == "coding":
         return fast
@@ -26,7 +26,7 @@ def infer_tier(agent_type: str, text: str) -> str:
     t = (text or "").lower()
     if agent_type == "code_review":
         return "strong"
-    if agent_type in ("research", "writing"):
+    if agent_type in ("ask", "writing"):
         return "strong"
     if agent_type == "coding":
         if len(text or "") > 800 or "architecture" in t or "refactor" in t:

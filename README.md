@@ -57,7 +57,7 @@ Password for all seeded users: **`demo`**
 | Prefix | Where | What it does |
 |--------|-------|----------------|
 | `@` | `#general` | Ping people (`@Omar`, `@team`) |
-| `/` | **MY ROOM** (mostly) | AI skills — `/code`, `/web`, `/status`, … |
+| `/` | **MY ROOM** (mostly) | AI skills — `/ask`, `/code`, `/status`, … |
 | `!` | Anywhere | Board / ops commands — **whisper** in channels (only you see them) |
 
 One line: **people in `#general`, agents in your private room, board via `!` or the Board tab.**
@@ -78,8 +78,8 @@ One line: **people in `#general`, agents in your private room, board via `!` or 
 ### AI skills (private room)
 | Skill | Purpose |
 |-------|---------|
+| `/ask` | General Q&A (attach a file and ask what it is) |
 | `/code` | Build or patch |
-| `/research` `/web` | Dig facts / look things up |
 | `/write` | Draft prose |
 | `/review` | Check a diff |
 | `/checklist` | Break work into ticks |
@@ -153,7 +153,7 @@ Copy `.env.example` → `.env`. Useful keys:
 1. Login as `omar@local.test` / `demo`
 2. **#general** → `!add Finish station notes` · `!issue Missing map PDF`
 3. **Board** — see Omar’s card; drag it
-4. **MY ROOM** → attach a PDF if you want → `/web summarize this` or `/write one metro tip`
+4. **MY ROOM** → attach a PDF if you want → `/ask summarize this` or `/write one metro tip`
 5. Edit an older ask — later replies vanish and the skill re-runs
 6. Logout → `a@local.test` / `demo`
 7. `/status Omar` — remaining work + private-room activity

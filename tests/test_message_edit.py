@@ -109,7 +109,7 @@ def test_delete_removes_following_agent_replies(tmp_path, monkeypatch):
     ask = client.post(
         f"/chats/{g}/messages",
         headers=ha,
-        json={"body": "/web research about xyz", "speak": False},
+        json={"body": "/ask research about xyz", "speak": False},
     ).json()["user_message_id"]
 
     # Simulate LLM reply + a later human message that must survive
@@ -122,8 +122,8 @@ def test_delete_removes_following_agent_replies(tmp_path, monkeypatch):
             tenant_id=tenant_id,
             chat_id=g,
             sender_user_id=None,
-            agent_slug="research",
-            body="here is research about xyz",
+            agent_slug="ask",
+            body="here is an answer about xyz",
             visibility="public",
         )
         later = ChatMessage(

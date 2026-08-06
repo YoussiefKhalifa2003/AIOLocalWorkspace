@@ -37,6 +37,7 @@
   ];
   const AGENT_COLORS = {
     lead: "#6a6",
+    ask: "#4a9",
     research: "#4a9",
     writing: "#a84",
     coding: "#4af",
@@ -159,7 +160,8 @@
   }
 
   const AGENT_LABELS = {
-    research: "Research",
+    ask: "Ask",
+    research: "Ask",
     writing: "Writing",
     coding: "Code",
     code_review: "Review",
@@ -169,10 +171,10 @@
 
   // Dry coworker notes - no callsigns / units / marketing bios
   const AGENT_PROFILES = {
-    research: {
-      mention: "/research",
-      job: "looks things up",
-      line: "I keep digging until the answer stops wiggling. If I can’t find it, I say that out loud.",
+    ask: {
+      mention: "/ask",
+      job: "answers questions",
+      line: "Plain answers, no ceremony. Attach a file and ask what it is — I’ll read it.",
       accent: "#4a9",
     },
     writing: {
@@ -1740,9 +1742,9 @@
 
   function skillNameFromBody(body) {
     const t = String(body || "").trim();
-    const m = t.match(/^\/(code|research|write|web|review|checklist|status)\b/i);
+    const m = t.match(/^\/(ask|code|research|write|web|review|checklist|status)\b/i);
     if (m) return m[1].toLowerCase();
-    const m2 = t.match(/^(?:force\s+)?(code|research|write|review)\b/i);
+    const m2 = t.match(/^(?:force\s+)?(code|ask|research|write|review)\b/i);
     return m2 ? m2[1].toLowerCase() : "";
   }
 
@@ -1752,8 +1754,8 @@
     if (/^\/clear\b/i.test(t) || /^!clear\b/i.test(t)) return false;
     // /status works in any room; other skills are private-only
     if (/^\/status\b/i.test(t)) return true;
-    if (/^\/(code|research|write|web|review|checklist)\b/i.test(t)) return true;
-    if (/^(force\s+)?(code|research|write|review)\b/i.test(t)) return true;
+    if (/^\/(ask|code|research|write|web|review|checklist)\b/i.test(t)) return true;
+    if (/^(force\s+)?(code|ask|research|write|review)\b/i.test(t)) return true;
     const meta = currentChatMeta();
     if (meta && meta.kind === "private" && t.startsWith("/")) return true;
     return false;
@@ -1782,7 +1784,7 @@
   function estimateWaitMs(body) {
     const skill = skillNameFromBody(body);
     if (skill === "code") return 120000;
-    if (skill === "research" || skill === "web" || skill === "review") return 90000;
+    if (skill === "ask" || skill === "research" || skill === "web" || skill === "review") return 90000;
     return 60000;
   }
 
@@ -2100,8 +2102,7 @@
   ];
 
   const SKILL_CATALOG = [
-    { insert: "/research ", label: "/research", blurb: "dig facts & sources", args: ["<ask>"] },
-    { insert: "/web ", label: "/web", blurb: "look things up", args: ["<ask>"] },
+    { insert: "/ask ", label: "/ask", blurb: "just ask anything", args: ["<ask>"] },
     { insert: "/code ", label: "/code", blurb: "build or patch", args: ["<ask>"] },
     { insert: "/write ", label: "/write", blurb: "draft clear prose", args: ["<ask>"] },
     { insert: "/review ", label: "/review", blurb: "check the diff", args: ["<ask>"] },

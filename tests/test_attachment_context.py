@@ -115,7 +115,7 @@ def test_extract_txt_and_pdf(tmp_path, monkeypatch):
         f"/chats/{chat}/messages",
         headers=ha,
         json={
-            "body": "/web can you tell me what this is",
+            "body": "/ask can you tell me what this is",
             "speak": False,
             "attachment_ids": [txt["id"], pdf["id"]],
         },
@@ -158,7 +158,7 @@ def test_image_attachment_marked_in_block(tmp_path, monkeypatch):
             tenant_id=info["tenant_a"],
             chat_id=info["chat_private_a"],
             sender_user_id=info["user_a"],
-            body="/web what is this",
+            body="/ask what is this",
             visibility="public",
         )
         db.add(msg)

@@ -5,7 +5,8 @@ from app.db.models import Room, RoomMessage
 from app.services.audit import write_audit
 
 AGENT_ROOM = {
-    "research": "research",
+    "ask": "ask",
+    "research": "ask",  # legacy
     "writing": "writing",
     "coding": "coding",
     "code_review": "review",
@@ -15,7 +16,8 @@ AGENT_ROOM = {
 
 DEFAULT_ROOMS = [
     ("general", "General"),
-    ("research", "Research"),
+    ("ask", "Ask"),
+    ("research", "Ask"),  # legacy slug still creatable / readable
     ("writing", "Writing"),
     ("coding", "Coding"),
     ("review", "Code Review"),

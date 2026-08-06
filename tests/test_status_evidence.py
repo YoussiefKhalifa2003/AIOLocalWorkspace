@@ -47,7 +47,7 @@ def test_evidence_includes_private_room_help_ask(tmp_path, monkeypatch):
             .one()
         )
         ask = (
-            "/web i seem to be having an issue with fixing app/api/chats.py "
+            "/ask i seem to be having an issue with fixing app/api/chats.py "
             "so can you give me more information on that"
         )
         db.add(
@@ -65,7 +65,7 @@ def test_evidence_includes_private_room_help_ask(tmp_path, monkeypatch):
                 tenant_id=info["tenant_a"],
                 chat_id=priv.id,
                 sender_user_id=None,
-                agent_slug="research",
+                agent_slug="ask",
                 body="## app/api/chats.py — Auth Edge Case Help\nHere is diagnostic guidance…",
                 visibility="public",
             )
@@ -81,7 +81,7 @@ def test_evidence_includes_private_room_help_ask(tmp_path, monkeypatch):
         assert "Private-room activity" in pack
         assert "app/api/chats.py" in pack
         assert "having an issue" in pack
-        assert "agent:research" in pack
+        assert "agent:ask" in pack
         assert "Auth Edge Case Help" in pack
     finally:
         db.close()

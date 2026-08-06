@@ -1,6 +1,6 @@
 # Hybrid AIO (http://127.0.0.1:8000/app)
-# Owner: a@local.test / demo-key-a
-# Member: omar@local.test / demo-key-a
+# Owner: a@local.test / demo
+# Member: omar@local.test / demo
 
 # #general - chat + @people + !commands (whispers)
 hey team, standup in 5
@@ -12,11 +12,12 @@ hey team, standup in 5
 !invite colleague@tatweermea.com
 !help
 
-# Invite: only @tatweermea.com - no email. They log in with email + demo-key-a on LAN /app
+# Invite: only @tatweermea.com - no email. They log in with email + password on LAN /app
 # INVITE_APP_URL=http://YOUR_LAN_IP:8000
 
 # MY ROOM - /skills for AI, !commands, plain notes stay quiet
 thinking out loud about auth
+/ask what is the simplest way to harden login?
 /code harden login validation
 /write short release note
 !list
@@ -26,11 +27,9 @@ thinking out loud about auth
 
 # Board tab - drag cards; or !set <id> doing|done
 # Chat - paperclip/attach button for screenshots & PDFs (png/jpeg/pdf/txt/md)
-# Attach + /web|/code|/research so the agent can read the file (PDF/text extracted)
+# Attach + /ask|/code so the agent can read the file (PDF/text extracted)
 
 # Owner catch-up
-!status Omar
-!team
 /status Omar
 
 # GitHub
