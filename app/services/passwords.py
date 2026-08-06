@@ -1,4 +1,4 @@
-"""Password hashing (stdlib scrypt — no extra deps)."""
+"""Password hashing (stdlib scrypt - no extra deps)."""
 
 from __future__ import annotations
 

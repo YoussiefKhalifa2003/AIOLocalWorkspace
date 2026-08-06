@@ -57,7 +57,7 @@ Room
   !clear                   clear this chat (channels: only for you)
   !help                    this list
 
-Private room: use /skills for AI (e.g. /ask ..., /code ..., /status Omar). Board tab shows the board."""
+Private room: use /skills for AI (e.g. /ask ..., /deepresearch ..., /code ..., /status Omar). Board tab shows the board."""
 
 
 def _parse_invite_uses(raw: str) -> int:
@@ -78,7 +78,7 @@ def _invite_reply(data: dict) -> str:
     url = data["invite_url"]
     if uses <= 1:
         msg = (
-            "Invite link (1 use). After someone registers it expires — "
+            "Invite link (1 use). After someone registers it expires - "
             "run `!invite` or `!invite 5` for more seats:\n"
             f"{url}"
         )

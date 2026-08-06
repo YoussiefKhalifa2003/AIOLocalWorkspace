@@ -30,7 +30,7 @@ def _boot(tmp_path, monkeypatch):
     return TestClient(app), info
 
 
-def test_owner_can_patch_and_delete_member(tmp_path, monkeypatch):
+def test_owner_can_delete_member_rename_disabled(tmp_path, monkeypatch):
     client, info = _boot(tmp_path, monkeypatch)
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
     ho = {"X-API-Key": info["api_key_omar"], "X-User-Email": info["email_omar"]}
@@ -46,8 +46,7 @@ def test_owner_can_patch_and_delete_member(tmp_path, monkeypatch):
         headers=ha,
         json={"name": "OmarX"},
     )
-    assert renamed.status_code == 200, renamed.text
-    assert renamed.json()["name"] == "OmarX"
+    assert renamed.status_code == 403
 
     kicked = client.delete(f"/workspace/members/{info['user_sara']}", headers=ha)
     assert kicked.status_code == 200, kicked.text

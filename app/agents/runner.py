@@ -236,6 +236,59 @@ def run_ask(db: Session, job: Job, llm: LLMClient) -> None:
     )
 
 
+_DEEPRESEARCH_SYSTEM = (
+    "You are DeepResearch, a rigorous workplace research analyst. "
+    "Produce a thorough, insightful briefing the user can act on.\n\n"
+    "Required shape (markdown):\n"
+    "1) Title + 3-6 sentence executive summary\n"
+    "2) Key findings (bullets with concrete claims)\n"
+    "3) At least one markdown table comparing options, metrics, risks, or timelines "
+    "(use real columns; invent plausible illustrative numbers only if labeled as estimates)\n"
+    "4) Deeper analysis: drivers, tradeoffs, edge cases\n"
+    "5) Optional ASCII chart or bar sketch in a fenced code block when numbers help "
+    "(no images; keep it plain text)\n"
+    "6) Recommendations / next steps\n"
+    "7) Open questions / what would change the answer\n\n"
+    "Be specific. Prefer structure over fluff. Call out uncertainty. "
+    "If ATTACHED FILES are present, treat them as primary evidence."
+)
+
+
+def run_deepresearch(db: Session, job: Job, llm: LLMClient) -> None:
+    payload = parse_json(job.payload_json, {})
+    text = payload.get("text") or payload.get("source_text") or ""
+    content = _agent_chat(
+        db,
+        job,
+        llm,
+        agent_type="deepresearch",
+        messages=[
+            {"role": "system", "content": _sys(_DEEPRESEARCH_SYSTEM)},
+            {"role": "user", "content": text},
+        ],
+        max_tokens=4096,
+        temperature=0.35,
+    )
+    art = _save_artifact(db, job, "Deep research", content)
+    post_agent_output(
+        db,
+        tenant_id=job.tenant_id,
+        project_id=job.project_id,
+        agent_type="deepresearch",
+        body=content,
+        job_id=job.id,
+    )
+    write_audit(
+        db,
+        tenant_id=job.tenant_id,
+        project_id=job.project_id,
+        request_id=job.request_id,
+        job_id=job.id,
+        event_type="agent_done",
+        message=f"deepresearch artifact {art.id}",
+    )
+
+
 def run_writing(db: Session, job: Job, llm: LLMClient) -> None:
     payload = parse_json(job.payload_json, {})
     handoff = parse_json(job.handoff_json, {}) or payload.get("handoff") or {}
@@ -519,6 +572,7 @@ def run_status(db: Session, job: Job, llm: LLMClient) -> None:
 
 AGENTS = {
     "ask": run_ask,
+    "deepresearch": run_deepresearch,
     "research": run_ask,  # legacy jobs / prefs
     "writing": run_writing,
     "coding": run_coding,

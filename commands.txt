@@ -18,6 +18,7 @@ hey team, standup in 5
 # MY ROOM - /skills for AI, !commands, plain notes stay quiet
 thinking out loud about auth
 /ask what is the simplest way to harden login?
+/deepresearch compare auth options for a LAN FastAPI app
 /code harden login validation
 /write short release note
 !list

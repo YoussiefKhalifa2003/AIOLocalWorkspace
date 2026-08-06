@@ -1,6 +1,6 @@
 # AIO
 
-**LAN hybrid workplace** — shared team chat, a private AI room per person, an objectives board, and Lead catch-up. Same network only.
+**LAN hybrid workplace** - shared team chat, a private AI room per person, an objectives board, and Lead catch-up. Same network only.
 
 ```
 #general  →  people talk, @pings, !commands (whisper)
@@ -57,8 +57,8 @@ Password for all seeded users: **`demo`**
 | Prefix | Where | What it does |
 |--------|-------|----------------|
 | `@` | `#general` | Ping people (`@Omar`, `@team`) |
-| `/` | **MY ROOM** (mostly) | AI skills — `/ask`, `/code`, `/status`, … |
-| `!` | Anywhere | Board / ops commands — **whisper** in channels (only you see them) |
+| `/` | **MY ROOM** (mostly) | AI skills - `/ask`, `/code`, `/status`, … |
+| `!` | Anywhere | Board / ops commands - **whisper** in channels (only you see them) |
 
 One line: **people in `#general`, agents in your private room, board via `!` or the Board tab.**
 
@@ -69,7 +69,7 @@ One line: **people in `#general`, agents in your private room, board via `!` or 
 ### Chat
 - Team channels + per-user **MY ROOM**
 - `@` mentions with autocomplete
-- Attachments (PDF, images, txt/md) — PDF/text is extracted into the agent prompt
+- Attachments (PDF, images, txt/md) - PDF/text is extracted into the agent prompt
 - Edit your own messages (**ChatGPT-style**): later messages disappear and the ask is re-run
 - Delete your message and its following agent replies go with it
 - `/clear` / `!clear` to wipe chat history (channels: only for you)
@@ -79,6 +79,7 @@ One line: **people in `#general`, agents in your private room, board via `!` or 
 | Skill | Purpose |
 |-------|---------|
 | `/ask` | General Q&A (attach a file and ask what it is) |
+| `/deepresearch` | Deep briefing with tables, tradeoffs, next steps |
 | `/code` | Build or patch |
 | `/write` | Draft prose |
 | `/review` | Check a diff |
@@ -97,13 +98,12 @@ After skill work, you may get **Yes / No** on matching board objectives (`!done`
 - OpenRouter `:free` models and/or **Gemini** from `.env`
 
 ### Lead tools (owner)
-- `/status Omar` — remaining work, issues, private-room skill activity
-- Analytics tab — jobs / metrics
-- Invite links (`!invite`) — optional Teams webhook notify
+- `/status Omar` - remaining work, issues, private-room skill activity
+- Analytics tab - jobs / metrics
+- Invite links (`!invite`) - optional Teams webhook notify
 
 ### Voice (optional)
-- **Speak replies** — Groq TTS on agent answers
-- **Mic input** — Whisper → send
+- **Mic input** - Whisper → send (toggle in the header)
 
 ### GitHub (optional)
 - Webhook notices in `#general`, objective `#obj-N` links
@@ -135,14 +135,14 @@ Copy `.env.example` → `.env`. Useful keys:
 | Variable | Purpose |
 |----------|---------|
 | `GEMINI_API_KEY` | Gemini models (default path) |
-| `OPENROUTER_API_KEY` | Free model picker in Agents tab — [keys](https://openrouter.ai/keys) |
+| `OPENROUTER_API_KEY` | Free model picker in Agents tab - [keys](https://openrouter.ai/keys) |
 | `GROQ_API_KEY` | TTS + Whisper |
 | `GITHUB_TOKEN` / `GITHUB_REPO` | PRs from agent backlog (`owner/repo`) |
 | `AGENT_MODEL_FAST` / `AGENT_MODEL_STRONG` | Model tiers |
 | `AGENT_LLM_BACKEND` | `auto` · `gemini` · `openrouter` · `opencode` |
 | `CODING_BACKEND` | `llm` (default) · `opencode` |
 | `INVITE_APP_URL` | Public base for invite links (`http://YOUR_LAN_IP:8000`) |
-| `TEAMS_WEBHOOK_URL` | Optional — post invite links to Teams |
+| `TEAMS_WEBHOOK_URL` | Optional - post invite links to Teams |
 | `UPLOADS_DIR` | Attachment storage (default `data/uploads`) |
 | `DEMO_API_KEY` / `WORKSPACE_JOIN_KEY` | Seed / join key (default `demo-key-a`) |
 
@@ -152,11 +152,11 @@ Copy `.env.example` → `.env`. Useful keys:
 
 1. Login as `omar@local.test` / `demo`
 2. **#general** → `!add Finish station notes` · `!issue Missing map PDF`
-3. **Board** — see Omar’s card; drag it
+3. **Board** - see Omar’s card; drag it
 4. **MY ROOM** → attach a PDF if you want → `/ask summarize this` or `/write one metro tip`
-5. Edit an older ask — later replies vanish and the skill re-runs
+5. Edit an older ask - later replies vanish and the skill re-runs
 6. Logout → `a@local.test` / `demo`
-7. `/status Omar` — remaining work + private-room activity
+7. `/status Omar` - remaining work + private-room activity
 8. Invite: `!invite` or MEMBERS **+** → colleague opens the link on your LAN
 
 More copy-paste prompts: [`commands.txt`](commands.txt).
@@ -189,7 +189,7 @@ Stack: **FastAPI · SQLite · SQLAlchemy · vanilla JS UI** at `/app`.
 |--|------|-----|
 | Agents | `@` agents in shared chat | `/skills` in **private** rooms |
 | People | Mixed with bots | `#general` is for humans (`@` pings) |
-| Ops | — | `!` whispers + Board tab |
+| Ops | - | `!` whispers + Board tab |
 
 ---
 
@@ -203,4 +203,4 @@ Stack: **FastAPI · SQLite · SQLAlchemy · vanilla JS UI** at `/app`.
 
 ## License
 
-Private / internal — adjust before publishing if you open-source.
+Private / internal - adjust before publishing if you open-source.

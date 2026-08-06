@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from app.config import get_settings
 from app.services.llm import LLMClient, LLMError
 
-VALID_AGENTS = ("ask", "writing", "coding", "code_review", "checklist", "status")
+VALID_AGENTS = ("ask", "deepresearch", "writing", "coding", "code_review", "checklist", "status")
 _LEGACY_AGENT = {"research": "ask"}
 
 

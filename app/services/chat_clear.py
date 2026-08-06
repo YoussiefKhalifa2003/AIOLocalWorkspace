@@ -1,4 +1,4 @@
-"""Clear chat transcript — personal in channels, full wipe in private rooms."""
+"""Clear chat transcript - personal in channels, full wipe in private rooms."""
 
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ def clear_chat_for_user(db: Session, auth: AuthContext, chat: Chat) -> tuple[str
             user_id=auth.user_id,
             before_id=before,
         )
-        return "Cleared for you only — teammates still see the channel history.", True
+        return "Cleared for you only - teammates still see the channel history.", True
 
     wipe_chat_messages(db, chat_id=chat.id)
     return "Private room cleared.", True

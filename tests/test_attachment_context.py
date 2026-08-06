@@ -132,7 +132,7 @@ def test_extract_txt_and_pdf(tmp_path, monkeypatch):
         assert "Hello attachment world" in block
         assert "note.txt" in block
         assert "citi.pdf" in block
-        # PDF text extraction — at least file header present; body if pypdf got glyphs
+        # PDF text extraction - at least file header present; body if pypdf got glyphs
         assert "kind=pdf" in block or "kind=error" in block or "Citi" in block
 
         # End-to-end: research reply should not invent random IEEE if offline + attach present

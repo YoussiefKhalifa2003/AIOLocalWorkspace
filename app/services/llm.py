@@ -87,6 +87,28 @@ class LLMClient:
                 "- Differentiator: auto-routing + quiet rooms + tenant walls\n"
                 f"- Query: {user[:400]}"
             )
+        if "deepresearch" in system.lower() or "rigorous workplace research" in system.lower():
+            topic = user[:120].replace("\n", " ")
+            return (
+                f"# Deep research (offline)\n\n"
+                f"**Executive summary.** Stub briefing for: {topic}\n\n"
+                "## Key findings\n"
+                "- Finding A: illustrative only (no live model)\n"
+                "- Finding B: attach real keys for full depth\n\n"
+                "## Comparison\n\n"
+                "| Option | Pros | Cons | Fit |\n"
+                "| --- | --- | --- | --- |\n"
+                "| Fast path | Cheap, quick | Shallow | Demos |\n"
+                "| Deep path | Insightful tables | Slower | Real decisions |\n\n"
+                "## ASCII sketch\n"
+                "```\n"
+                "impact  |####      | low\n"
+                "        |########  | med\n"
+                "        |##########| high\n"
+                "```\n\n"
+                "## Recommendations\n"
+                "1. Re-run with a live LLM key for real analysis.\n"
+            )
         if "status analyst" in system.lower() or "catch-up" in system.lower():
             # Echo key evidence so tests can assert board facts survived the LLM path
             return (

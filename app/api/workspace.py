@@ -275,10 +275,7 @@ def patch_member(
     wm, user = row
 
     if body.name is not None:
-        name = body.name.strip()
-        if not name or " " in name:
-            raise HTTPException(status_code=400, detail="name must be one word")
-        user.name = name[:80]
+        raise HTTPException(status_code=403, detail="member rename is disabled")
 
     if body.role is not None:
         role = body.role.strip().lower()

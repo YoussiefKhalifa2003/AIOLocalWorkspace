@@ -65,7 +65,7 @@ def extract_attachment_text(row: ChatAttachment) -> tuple[str, str]:
         return (
             "image",
             (
-                f"(Image file — binary content is not pasted into the prompt. "
+                f"(Image file - binary content is not pasted into the prompt. "
                 f"Filename/type/size are authoritative hints. "
                 f"If the user asks what “this” is, treat this image as the referent; "
                 f"do not invent an unrelated paper or document.)"
@@ -80,7 +80,7 @@ def extract_attachment_text(row: ChatAttachment) -> tuple[str, str]:
         if not text.strip():
             return (
                 "pdf",
-                "(PDF opened but no extractable text — may be scanned/image-only.)",
+                "(PDF opened but no extractable text - may be scanned/image-only.)",
             )
         return "pdf", _clip(text)
 

@@ -16,6 +16,11 @@ SKILLS: dict[str, dict] = {
         "blurb": "just ask anything",
         "label": "/ask",
     },
+    "deepresearch": {
+        "agent": "deepresearch",
+        "blurb": "deep dive with tables & structure",
+        "label": "/deepresearch",
+    },
     "code": {
         "agent": "coding",
         "blurb": "build or patch",
@@ -47,6 +52,8 @@ SKILLS: dict[str, dict] = {
 _SKILL_ALIASES: dict[str, str] = {
     "web": "ask",
     "research": "ask",
+    "deep-research": "deepresearch",
+    "deep_research": "deepresearch",
 }
 
 
@@ -81,7 +88,7 @@ def parse_skill(text: str) -> ParsedSkill:
             skill=None,
             agent=None,
             rest=raw,
-            hint=f"Unknown skill `/{key}`. Try /ask, /code, /write, /review, /checklist, /status.",
+            hint=f"Unknown skill `/{key}`. Try /ask, /deepresearch, /code, /write, /review, /checklist, /status.",
         )
     return ParsedSkill(skill=key, agent=meta["agent"], rest=rest)
 

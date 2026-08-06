@@ -49,7 +49,7 @@ def notify_invite_link(
     max_uses: int = 1,
     workspace: str = "AIO",
 ) -> dict:
-    """POST invite to Teams. Never raises — failures are returned in the dict."""
+    """POST invite to Teams. Never raises - failures are returned in the dict."""
     settings = get_settings()
     hook = (settings.teams_webhook_url or "").strip()
     if not hook:

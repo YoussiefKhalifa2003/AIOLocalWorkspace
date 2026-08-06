@@ -24,6 +24,7 @@ AGENT_ALIASES = {
     "lead": "lead",
     "orchestrator": "lead",
     "ask": "ask",
+    "deepresearch": "deepresearch",
     "research": "ask",
     "web": "ask",
     "writing": "writing",
@@ -105,6 +106,7 @@ _CONFIRM_STOP = frozenset(
         "write",
         "writing",
         "ask",
+        "deepresearch",
         "research",
         "web",
         "review",
@@ -188,7 +190,7 @@ _CONFIRM_STOP = frozenset(
 )
 
 # Agents whose output may complete an objective; others never get Yes/No.
-_CONFIRM_AGENTS = frozenset({"coding", "writing", "checklist", "ask"})
+_CONFIRM_AGENTS = frozenset({"coding", "writing", "checklist", "ask", "deepresearch"})
 
 
 def _confirm_tokens(text: str) -> set[str]:
@@ -221,18 +223,18 @@ def _normalize_request_for_confirm(request_text: str) -> str:
     text = _user_ask_for_confirm(request_text)
     text = text.strip()
     text = re.sub(
-        r"^(?:force\s+)?/(?:code|ask|research|write|writing|review|checklist|web|status)\b\s*",
+        r"^(?:force\s+)?/(?:code|ask|deepresearch|deep-research|research|write|writing|review|checklist|web|status)\b\s*",
         "",
         text,
         flags=re.I,
     )
     text = re.sub(
-        r"^(?:force\s+)?(?:code|ask|research|write|writing|review|checklist)\b[:\s]+",
+        r"^(?:force\s+)?(?:code|ask|deepresearch|research|write|writing|review|checklist)\b[:\s]+",
         "",
         text,
         flags=re.I,
     )
-    # Status evidence packs list every card — never use them for confirm matching
+    # Status evidence packs list every card - never use them for confirm matching
     if re.search(r"EVIDENCE\s+PACK", text, flags=re.I):
         return ""
     if len(re.findall(r"Objective\s+#\d+", text, flags=re.I)) >= 2:
@@ -330,7 +332,7 @@ def _candidate_objectives(
     if not text:
         return []
 
-    # Explicit ids only from the user's ask — never from private-room chat context
+    # Explicit ids only from the user's ask - never from private-room chat context
     explicit_ids = _explicit_objective_ids(text)
     if explicit_ids:
         hit = [o for o in rows if o.id in explicit_ids]
@@ -341,7 +343,7 @@ def _candidate_objectives(
     if not req_words:
         return []
 
-    # Open board cards — include todo (common: create card, then /code without dragging)
+    # Open board cards - include todo (common: create card, then /code without dragging)
     pool = [o for o in rows if (o.status or "") in {"todo", "doing", "agent_backlog", "in_review"}]
     if not pool:
         return []
@@ -371,7 +373,7 @@ def _candidate_objectives(
             return linked_hit[:1]
 
     scored = sorted(((score(o), o) for o in pool), key=lambda x: (-x[0], -x[1].id))
-    # Need a real topical hit — generic "/code fix the bug" stays empty
+    # Need a real topical hit - generic "/code fix the bug" stays empty
     matched = [o for s, o in scored if s >= 6][:1]
     return matched
 
@@ -445,7 +447,7 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
             f"Kept objective #{oid} open: {obj.title}. Say what still needs fixing and I'll continue.",
         )
 
-    # invite — mint link with optional seat count: invite 5
+    # invite - mint link with optional seat count: invite 5
     if lower == "invite" or re.match(r"invite\s+\d+\s*$", lower):
         try:
             from app.services.bang_commands import _invite_reply, _parse_invite_uses
