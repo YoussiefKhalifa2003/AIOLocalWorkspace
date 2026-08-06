@@ -21,26 +21,68 @@ rooms_app = typer.Typer(help="Rooms")
 review_app = typer.Typer(help="Reviews")
 objectives_app = typer.Typer(help="Objectives + progress")
 checklist_app = typer.Typer(help="Checklist")
+projects_app = typer.Typer(help="Projects")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(rooms_app, name="rooms")
 app.add_typer(review_app, name="review")
 app.add_typer(objectives_app, name="objectives")
 app.add_typer(checklist_app, name="checklist")
+app.add_typer(projects_app, name="projects")
 
 
-def _headers(api_key: str | None = None, email: str = "a@local.test") -> dict[str, str]:
-    settings = get_settings()
-    key = api_key or settings.demo_api_key
-    h = {"X-API-Key": key}
-    join = settings.workspace_join_key or settings.demo_api_key
-    if key == join:
-        h["X-User-Email"] = email
-    return h
+def _headers(api_key: str | None = None, email: str | None = None) -> dict[str, str]:
+    from app.cli_pkg.session import auth_headers
+
+    return auth_headers(api_key, email)
 
 
-def _client() -> httpx.Client:
-    settings = get_settings()
-    return httpx.Client(base_url=settings.api_base_url, timeout=60.0)
+def _client(timeout: float = 60.0) -> httpx.Client:
+    from app.cli_pkg.session import resolve_base_url
+
+    return httpx.Client(base_url=resolve_base_url(), timeout=timeout)
+
+
+def _default_project_id() -> int:
+    """Stored project from `aio projects use`, resolved once per CLI invocation."""
+    from app.cli_pkg.session import load_credentials
+
+    return load_credentials().project_id or 1
+
+
+DEFAULT_PROJECT = _default_project_id()
+
+
+def _detail(response: httpx.Response) -> str:
+    try:
+        return str(response.json().get("detail") or response.text)
+    except ValueError:
+        return response.text
+
+
+def _fetch_board(project_id: int, api_key: str | None = None) -> dict[str, Any]:
+    with _client() as client:
+        r = client.get(f"/projects/{project_id}/board", headers=_headers(api_key))
+    if r.status_code >= 400:
+        typer.echo(_detail(r))
+        raise typer.Exit(1)
+    return r.json()
+
+
+def _fetch_card(project_id: int, objective_id: int, api_key: str | None = None) -> dict[str, Any]:
+    board = _fetch_board(project_id, api_key)
+    card = next(
+        (
+            c
+            for col in board.get("columns", [])
+            for c in col.get("cards", [])
+            if c["id"] == objective_id
+        ),
+        None,
+    )
+    if card is None:
+        typer.echo(f"objective #{objective_id} not found in project {project_id}")
+        raise typer.Exit(1)
+    return card
 
 
 def _print_table(rows: list[dict[str, Any]], keys: list[str]) -> None:
@@ -96,6 +138,94 @@ def health() -> None:
 
 
 @app.command()
+def login(
+    email: str = typer.Option(..., "--email", "-e", prompt=True),
+    password: str = typer.Option(..., "--password", "-p", prompt=True, hide_input=True),
+    project_id: Optional[int] = typer.Option(None, "--project-id"),
+) -> None:
+    """Sign in and store credentials in ~/.aio/credentials.json (mode 600)."""
+    from app.cli_pkg.session import Credentials, resolve_base_url, save_credentials
+
+    base = resolve_base_url()
+    with httpx.Client(base_url=base, timeout=30.0) as client:
+        r = client.post("/auth/login", json={"email": email, "password": password})
+        if r.status_code >= 400:
+            typer.echo("login failed: invalid email or password")
+            raise typer.Exit(1)
+        data = r.json()
+        creds = Credentials(
+            api_key=data["api_key"],
+            email=data["email"],
+            user_id=int(data["user_id"]),
+            project_id=int(project_id or 0),
+            api_base_url=base,
+        )
+        me = client.get("/auth/me", headers=_headers(creds.api_key, creds.email)).json()
+
+    path = save_credentials(creds)
+    role = "owner" if me.get("is_owner") else "member"
+    typer.echo(f"logged in as {creds.email} ({role}, user_id={creds.user_id})")
+    typer.echo(f"credentials: {path}")
+    if not creds.project_id:
+        typer.echo("tip: set a default project with `aio projects use <id>`")
+
+
+@app.command()
+def logout() -> None:
+    """Remove stored credentials."""
+    from app.cli_pkg.session import clear_credentials, credentials_path
+
+    if clear_credentials():
+        typer.echo(f"removed {credentials_path()}")
+    else:
+        typer.echo("not logged in")
+
+
+@app.command()
+def whoami() -> None:
+    """Show the stored identity and whether it owns the workspace."""
+    from app.cli_pkg.session import load_credentials, resolve_base_url
+
+    creds = load_credentials()
+    if creds.is_empty():
+        typer.echo("not logged in (run: aio login --email <you>)")
+        raise typer.Exit(1)
+    with _client(timeout=15.0) as client:
+        r = client.get("/auth/me", headers=_headers())
+    if r.status_code >= 400:
+        typer.echo(f"stored credentials rejected by {resolve_base_url()} ({r.status_code})")
+        raise typer.Exit(1)
+    me = r.json()
+    typer.echo(f"email:   {me.get('email')}")
+    typer.echo(f"user_id: {me.get('user_id')}")
+    typer.echo(f"owner:   {bool(me.get('is_owner'))}")
+    typer.echo(f"api:     {resolve_base_url()}")
+    typer.echo(f"project: {creds.project_id or DEFAULT_PROJECT}")
+
+
+@app.command()
+def doctor() -> None:
+    """Preflight: API, git, workspaces, GitHub, research, coding runners."""
+    from app.cli_pkg.doctor import available_coding_runners, run_checks
+
+    checks = run_checks()
+    width = max(len(c.name) for c in checks)
+    failures = 0
+    for c in checks:
+        mark = typer.style("OK  ", fg=typer.colors.GREEN) if c.ok else typer.style("FAIL", fg=typer.colors.RED)
+        line = f"{mark} {c.name.ljust(width)}  {c.detail}"
+        typer.echo(line)
+        if not c.ok:
+            failures += 1
+            if c.hint:
+                typer.echo(f"     {' ' * width}  -> {c.hint}")
+    typer.echo("")
+    typer.echo(f"coding runners available: {', '.join(available_coding_runners())}")
+    if failures:
+        typer.echo(f"{failures} check(s) need attention")
+
+
+@app.command()
 def seed() -> None:
     init_db()
     info = seed_demo_data()
@@ -104,21 +234,309 @@ def seed() -> None:
         typer.echo(f"  {k}={v}")
 
 
-@app.command("projects")
-def projects_list(
-    api_key: Optional[str] = typer.Option(None, "--api-key"),
-) -> None:
+@projects_app.callback(invoke_without_command=True)
+def projects_root(ctx: typer.Context) -> None:
+    """List projects (or use a subcommand)."""
+    if ctx.invoked_subcommand is None:
+        _projects_table(None)
+
+
+@projects_app.command("list")
+def projects_list_cmd(api_key: Optional[str] = typer.Option(None, "--api-key")) -> None:
+    _projects_table(api_key)
+
+
+@projects_app.command("use")
+def projects_use(project_id: int = typer.Argument(...)) -> None:
+    """Set the default project for later commands."""
+    from app.cli_pkg.session import load_credentials, save_credentials
+
+    creds = load_credentials()
+    if creds.is_empty():
+        typer.echo("not logged in (run: aio login --email <you>)")
+        raise typer.Exit(1)
+    creds.project_id = int(project_id)
+    save_credentials(creds)
+    typer.echo(f"default project set to {project_id}")
+
+
+def _projects_table(api_key: str | None) -> None:
     with _client() as client:
         r = client.get("/projects", headers=_headers(api_key))
-        r.raise_for_status()
-        rows = r.json()
-    _print_table(rows, ["id", "tenant_id", "name", "github_repo"])
+    if r.status_code >= 400:
+        typer.echo(_detail(r))
+        raise typer.Exit(1)
+    _print_table(r.json(), ["id", "tenant_id", "name", "github_repo"])
+
+
+@app.command("board")
+def board_show(
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+) -> None:
+    """Print the board with repo / PR / branch links per card."""
+    board = _fetch_board(project_id, api_key)
+    repo = board.get("repo_url") or "-"
+    typer.echo(f"project={board.get('project_id')} repo={repo}")
+    for col in board.get("columns", []):
+        cards = col.get("cards", [])
+        typer.echo("")
+        typer.echo(f"{col['id']} ({len(cards)})")
+        if not cards:
+            typer.echo("  (empty)")
+            continue
+        for c in cards:
+            pr = c.get("pr_url") or "-"
+            branch = c.get("github_branch") or "-"
+            typer.echo(f"  #{c['id']} {c['title']} [{c.get('status')}]")
+            typer.echo(f"      pr={pr} repo={c.get('repo_url') or '-'} branch={branch}")
+
+
+@app.command("tui")
+def tui(
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
+    poll: Optional[float] = typer.Option(None, "--poll", help="Refresh interval in seconds"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+    email: Optional[str] = typer.Option(None, "--email"),
+) -> None:
+    """Live owner dashboard: board, agents, merges."""
+    from app.cli_pkg.tui.app import run_tui
+
+    code = run_tui(
+        project_id,
+        poll_seconds=poll if poll is not None else get_settings().tui_poll_seconds,
+        api_key=api_key or "",
+        email=email or "",
+    )
+    if code:
+        raise typer.Exit(code)
+
+
+@app.command("card")
+def card_show(
+    objective_id: int = typer.Argument(...),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+) -> None:
+    """Card detail: subtasks, claims, repo / PR / branch links, workspace path."""
+    card = _fetch_card(project_id, objective_id, api_key)
+    typer.echo(f"#{card['id']} {card['title']}  [{card.get('status')}]")
+    if card.get("description"):
+        typer.echo(f"  {card['description']}")
+    typer.echo(f"  owner:    {card.get('owner_email') or '-'}")
+    typer.echo(
+        f"  progress: {card.get('progress_percent', 0)}% "
+        f"({card.get('checklist_closed', 0)}/{card.get('checklist_total', 0)} subtasks)"
+    )
+    typer.echo(f"  blockers: {card.get('open_issue_count', 0)}")
+    typer.echo(f"  repo:     {card.get('repo_url') or '-'}")
+    typer.echo(f"  pr:       {card.get('pr_url') or '-'}")
+    typer.echo(f"  branch:   {card.get('branch_url') or card.get('github_branch') or '-'}")
+    typer.echo(f"  merged:   {card.get('github_merged_at') or '-'}")
+    typer.echo(f"  workspace: data/workspaces/obj-{card['id']}")
+    for t in card.get("subtasks") or []:
+        typer.echo(f"    [{'x' if t['done'] else ' '}] {t['title']}")
+    for p in card.get("claimed_paths") or []:
+        typer.echo(f"    claim: {p}")
+
+
+@app.command("set")
+def set_status(
+    objective_id: int = typer.Argument(...),
+    status: str = typer.Argument(..., help="todo|doing|blocked|agent_backlog|in_review|done"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
+    runner: Optional[str] = typer.Option(
+        None, "--runner", help="For agent_backlog: llm | codex | claude_code | opencode"
+    ),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+) -> None:
+    """Move a card to another board column."""
+    payload: dict[str, Any] = {"status": status}
+    if runner:
+        payload["coding_runner"] = runner
+    with _client() as client:
+        r = client.patch(
+            f"/projects/{project_id}/objectives/{objective_id}",
+            headers=_headers(api_key),
+            json=payload,
+        )
+    if r.status_code >= 400:
+        typer.echo(_detail(r))
+        raise typer.Exit(1)
+    out = r.json()
+    typer.echo(f"#{out['id']} -> {out['status']}")
+    if status == "agent_backlog":
+        typer.echo("agent started; watch with `aio board` or `aio tui`")
+
+
+@app.command("chat")
+def chat_read(
+    chat_id: int = typer.Argument(...),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Poll for new messages"),
+    limit: int = typer.Option(30, "--limit"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+) -> None:
+    """Read a chat, optionally following new messages."""
+    after = 0
+    with _client() as client:
+        while True:
+            r = client.get(
+                f"/chats/{chat_id}/messages",
+                headers=_headers(api_key),
+                params={"after_id": after, "limit": limit},
+            )
+            if r.status_code >= 400:
+                typer.echo(_detail(r))
+                raise typer.Exit(1)
+            for m in r.json():
+                after = max(after, int(m["id"]))
+                who = m.get("agent_slug") or m.get("sender_name") or m.get("sender_email") or "?"
+                typer.echo(f"[{m['id']}] {who}: {m.get('body') or ''}")
+            if not follow:
+                return
+            time.sleep(2.0)
+
+
+@app.command("say")
+def chat_say(
+    chat_id: int = typer.Argument(...),
+    text: str = typer.Argument(...),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+) -> None:
+    """Post a message and print any agent replies."""
+    with _client(timeout=180.0) as client:
+        r = client.post(
+            f"/chats/{chat_id}/messages",
+            headers=_headers(api_key),
+            json={"body": text, "speak": False},
+        )
+    if r.status_code >= 400:
+        typer.echo(_detail(r))
+        raise typer.Exit(1)
+    data = r.json()
+    for reply in data.get("replies") or []:
+        who = reply.get("agent_slug") or "agent"
+        typer.echo(f"{who}: {reply.get('body') or ''}")
+
+
+@app.command("members")
+def members_list(api_key: Optional[str] = typer.Option(None, "--api-key")) -> None:
+    """Workspace members and roles."""
+    with _client() as client:
+        r = client.get("/workspace/members", headers=_headers(api_key))
+    if r.status_code >= 400:
+        typer.echo(_detail(r))
+        raise typer.Exit(1)
+    _print_table(r.json(), ["user_id", "name", "email", "role"])
+
+
+@app.command("workspaces")
+def workspaces_list() -> None:
+    """Local agent checkouts under AGENT_WORK_ROOT."""
+    import subprocess
+    from pathlib import Path
+
+    root = Path(get_settings().agent_work_root)
+    if not root.exists():
+        typer.echo(f"(no workspaces yet under {root})")
+        return
+    rows: list[dict[str, Any]] = []
+    for path in sorted(root.glob("obj-*")):
+        if not (path / ".git").exists():
+            rows.append({"workspace": path.name, "branch": "(not a git checkout)", "dirty": "-"})
+            continue
+
+        def _git(args: list[str], cwd: Path = path) -> str:
+            try:
+                p = subprocess.run(
+                    ["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=15
+                )
+            except (OSError, subprocess.SubprocessError):
+                return ""
+            return (p.stdout or "").strip()
+
+        rows.append(
+            {
+                "workspace": path.name,
+                "branch": _git(["rev-parse", "--abbrev-ref", "HEAD"]) or "?",
+                "dirty": "yes" if _git(["status", "--porcelain"]) else "no",
+            }
+        )
+    _print_table(rows, ["workspace", "branch", "dirty"])
+
+
+@app.command("pr")
+def pr_show(
+    objective_id: int = typer.Argument(...),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
+    open_browser: bool = typer.Option(False, "--open", help="Open the PR in a browser"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+) -> None:
+    """Print (or open) the PR URL for an objective."""
+    card = _fetch_card(project_id, objective_id, api_key)
+    url = card.get("pr_url")
+    if not url:
+        typer.echo(f"#{objective_id} has no pull request yet")
+        raise typer.Exit(1)
+    typer.echo(url)
+    if open_browser:
+        import webbrowser
+
+        webbrowser.open(url)
+
+
+@app.command("merge")
+def merge_objective_cmd(
+    objective_id: int = typer.Argument(...),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
+    method: Optional[str] = typer.Option(None, "--method", help="squash | merge | rebase"),
+    keep_branch: bool = typer.Option(False, "--keep-branch"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+) -> None:
+    """Merge an in_review objective's PR, then move the card to done."""
+    card = _fetch_card(project_id, objective_id, api_key)
+    if not card.get("can_merge"):
+        typer.echo(
+            f"#{objective_id} is not mergeable from AIO "
+            f"(status={card.get('status')}, pr={card.get('pr_url') or 'none'})"
+        )
+        raise typer.Exit(1)
+
+    typer.echo(f"#{card['id']} {card['title']}")
+    typer.echo(f"  pr:     {card.get('pr_url')}")
+    typer.echo(f"  branch: {card.get('github_branch') or '-'}")
+    typer.echo(f"  method: {method or get_settings().merge_method}")
+    typer.echo("  warning: merging into the default branch cannot be easily undone")
+    if not yes and not typer.confirm("Merge and mark the objective done?"):
+        typer.echo("aborted, nothing merged")
+        raise typer.Exit(1)
+
+    payload: dict[str, Any] = {"confirm": True, "delete_branch": not keep_branch}
+    if method:
+        payload["merge_method"] = method
+    with _client() as client:
+        m = client.post(
+            f"/projects/{project_id}/objectives/{objective_id}/merge",
+            headers=_headers(api_key),
+            json=payload,
+        )
+    if m.status_code >= 400:
+        try:
+            detail = m.json().get("detail")
+        except ValueError:
+            detail = m.text
+        typer.echo(f"merge failed: {detail}")
+        raise typer.Exit(1)
+    out = m.json()
+    typer.echo(f"merged into {out.get('base')} sha={out.get('sha')}")
+    typer.echo(f"objective #{objective_id} -> done")
 
 
 @app.command()
 def ask(
     text: str = typer.Argument(...),
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     wait: bool = typer.Option(False, "--wait", help="Drain worker queue after ask"),
 ) -> None:
@@ -144,7 +562,7 @@ def ask(
 @app.command("request")
 def request_show(
     request_id: int,
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     with _client() as client:
@@ -163,7 +581,7 @@ def request_show(
 
 @jobs_app.command("list")
 def jobs_list(
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     with _client() as client:
@@ -179,7 +597,7 @@ def jobs_list(
 @jobs_app.command("show")
 def jobs_show(
     job_id: int,
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     with _client() as client:
@@ -194,7 +612,7 @@ def jobs_show(
 def artifacts_cmd(
     action: str = typer.Argument("list"),
     artifact_id: Optional[int] = typer.Argument(None),
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     with _client() as client:
@@ -225,7 +643,7 @@ def artifacts_cmd(
 
 @app.command()
 def tasks(
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     """Alias for checklist list (table view)."""
@@ -239,7 +657,7 @@ def tasks(
 @objectives_app.callback(invoke_without_command=True)
 def objectives_root(
     ctx: typer.Context,
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     """Show objectives + progress bar. Subcommands: add, run, complete, clear."""
@@ -254,7 +672,7 @@ def objectives_root(
 @objectives_app.command("add")
 def objectives_add(
     title: str = typer.Argument(...),
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     with _client() as client:
@@ -277,7 +695,7 @@ def objectives_add(
 @objectives_app.command("run")
 def objectives_run(
     objective_id: int = typer.Argument(...),
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     wait: bool = typer.Option(True, "--wait/--no-wait", help="Run worker until jobs finish"),
 ) -> None:
@@ -337,7 +755,7 @@ def objectives_run(
 @objectives_app.command("result")
 def objectives_result(
     objective_id: int = typer.Argument(...),
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     """Show proof/output for an objective that already ran."""
@@ -371,7 +789,7 @@ def objectives_result(
 @objectives_app.command("complete")
 def objectives_complete(
     objective_id: int = typer.Argument(...),
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     with _client() as client:
@@ -391,7 +809,7 @@ def objectives_complete(
 @objectives_app.command("remove")
 def objectives_remove(
     objective_id: int = typer.Argument(...),
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     """Remove one objective from the list."""
@@ -412,7 +830,7 @@ def objectives_remove(
 
 @objectives_app.command("clear")
 def objectives_clear(
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     """Remove ALL objectives for a clean start."""
@@ -436,7 +854,7 @@ def objectives_clear(
 @app.command()
 def run(
     objective_id: int = typer.Argument(...),
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     wait: bool = typer.Option(True, "--wait/--no-wait"),
 ) -> None:
@@ -452,7 +870,7 @@ def run(
 @checklist_app.callback(invoke_without_command=True)
 def checklist_root(
     ctx: typer.Context,
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     all_items: bool = typer.Option(False, "--all", help="Show every old checklist item"),
 ) -> None:
@@ -473,7 +891,7 @@ def checklist_root(
 @checklist_app.command("done")
 def checklist_mark_done(
     item_id: int = typer.Argument(...),
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     undo: bool = typer.Option(False, "--undo"),
 ) -> None:
@@ -494,7 +912,7 @@ def checklist_mark_done(
 
 @checklist_app.command("clear")
 def checklist_clear(
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     """Delete all checklist items for a clean demo."""
@@ -511,7 +929,7 @@ def checklist_clear(
 
 @app.command()
 def audit(
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     with _client() as client:
@@ -523,7 +941,7 @@ def audit(
 
 @rooms_app.command("list")
 def rooms_list(
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     with _client() as client:
@@ -536,7 +954,7 @@ def rooms_list(
 @rooms_app.command("read")
 def rooms_read(
     slug: str,
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     with _client() as client:
@@ -555,7 +973,7 @@ def rooms_read(
 @review_app.command("approve")
 def review_approve(
     job_id: int,
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     wait: bool = typer.Option(False, "--wait"),
 ) -> None:
@@ -613,7 +1031,7 @@ def speak(
 
 @app.command()
 def status(
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
 ) -> None:
     with _client() as client:
@@ -636,7 +1054,7 @@ def status(
 
 @app.command()
 def demo(
-    project_id: int = typer.Option(1, "--project-id"),
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
 ) -> None:
     """Demo: objectives + progress bar + auto-router (no @mentions)."""
     typer.echo("=== AIO DEMO ===")
@@ -756,7 +1174,16 @@ def webhook_sim(
 
 
 def main() -> None:
-    app()
+    try:
+        app()
+    except httpx.ConnectError:
+        from app.cli_pkg.session import resolve_base_url
+
+        typer.echo(
+            f"cannot reach the AIO API at {resolve_base_url()}\n"
+            "start it with: uvicorn app.main:app --host 0.0.0.0 --port 8000"
+        )
+        raise SystemExit(2) from None
 
 
 if __name__ == "__main__":

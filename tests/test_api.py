@@ -18,6 +18,8 @@ def test_webhook_idempotent(tmp_path, monkeypatch):
     db_path = tmp_path / "wh.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "dev-secret")
+    # host .env must not decide which repo the seeded project maps to
+    monkeypatch.setenv("GITHUB_REPO", "")
     from app.config import get_settings
 
     get_settings.cache_clear()

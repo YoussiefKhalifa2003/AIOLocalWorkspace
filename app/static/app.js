@@ -322,6 +322,23 @@
     return Number(card.assignee_user_id) === Number(state.userId);
   }
 
+  function linkBadge(cls, href, text) {
+    const a = document.createElement("a");
+    a.className = `badge ${cls}`;
+    a.href = href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = text;
+    a.onclick = (ev) => ev.stopPropagation();
+    a.addEventListener("mousedown", (ev) => ev.stopPropagation());
+    return a;
+  }
+
+  function shortBranch(branch) {
+    const b = String(branch || "");
+    return b.length > 22 ? `${b.slice(0, 20)}…` : b;
+  }
+
   function boardFingerprint(board, jobsToday) {
     return JSON.stringify({
       jobs: jobsToday,
@@ -333,6 +350,9 @@
           c.progress_percent,
           c.github_pr_url || "",
           c.github_pr_number || 0,
+          c.repo_url || "",
+          c.github_branch || "",
+          c.can_merge ? 1 : 0,
           c.open_issue_count || 0,
           (c.claimed_paths || []).join(","),
           c.owner_email || "",
@@ -432,21 +452,38 @@
             w.textContent = "agent working…";
             c.appendChild(w);
           }
-          if (card.github_pr_url) {
-            const pr = document.createElement("a");
-            pr.className = "badge pr-link";
-            pr.href = card.github_pr_url;
-            pr.target = "_blank";
-            pr.rel = "noopener noreferrer";
-            pr.textContent = card.github_pr_number ? `PR #${card.github_pr_number}` : "PR";
-            pr.onclick = (ev) => ev.stopPropagation();
-            c.appendChild(pr);
+          if (card.pr_url || card.github_pr_url) {
+            c.appendChild(
+              linkBadge(
+                "pr-link",
+                card.pr_url || card.github_pr_url,
+                card.pr_number || card.github_pr_number
+                  ? `PR #${card.pr_number || card.github_pr_number}`
+                  : "PR"
+              )
+            );
+          } else if (col.id === "in_review") {
+            const none = document.createElement("span");
+            none.className = "badge muted";
+            none.textContent = "no PR yet";
+            c.appendChild(none);
+          }
+          if (card.repo_url) {
+            c.appendChild(linkBadge("repo-link", card.repo_url, "repo"));
+          }
+          if (card.branch_url) {
+            c.appendChild(
+              linkBadge("branch-link", card.branch_url, shortBranch(card.github_branch))
+            );
           }
           if (card.open_issue_count) {
             const b = document.createElement("span");
             b.className = "badge";
             b.textContent = `${card.open_issue_count} blocker`;
             c.appendChild(b);
+          }
+          if (card.can_merge && state.isOwner) {
+            c.appendChild(mergeButton({ ...card, status: col.id }));
           }
           if ((card.claimed_paths || []).length) {
             const p = document.createElement("div");
@@ -687,6 +724,82 @@
     return out.join("");
   }
 
+  function openMergeModal(card) {
+    const modal = $("mergeModal");
+    const status = $("mergeModalStatus");
+    const confirmBtn = $("mergeConfirm");
+    const cancelBtn = $("mergeCancel");
+    status.hidden = true;
+    status.textContent = "";
+    confirmBtn.disabled = false;
+    const prNum = card.pr_number || card.github_pr_number;
+    $("mergeModalBody").innerHTML = `
+      <p class="meta">#${card.id} ${escapeHtml(card.title)}</p>
+      <p class="meta">pr: <a href="${escapeHtml(card.pr_url || card.github_pr_url || "")}" target="_blank" rel="noopener noreferrer">#${prNum}</a></p>
+      <p class="meta">branch: ${escapeHtml(card.github_branch || "-")}</p>
+      <p class="meta">method: squash</p>
+    `;
+    modal.classList.remove("hidden");
+
+    const close = () => {
+      modal.classList.add("hidden");
+      confirmBtn.onclick = null;
+      cancelBtn.onclick = null;
+    };
+    cancelBtn.onclick = close;
+    confirmBtn.onclick = async () => {
+      confirmBtn.disabled = true;
+      status.hidden = false;
+      status.textContent = "merging…";
+      try {
+        const out = await api(
+          `/projects/${state.projectId}/objectives/${card.id}/merge`,
+          { method: "POST", body: JSON.stringify({ confirm: true }) }
+        );
+        close();
+        setVoiceStatus(`Merged PR #${prNum} into ${out.base || "main"} — card is done`);
+        state.boardFingerprint = "";
+        await loadBoard();
+      } catch (e) {
+        confirmBtn.disabled = false;
+        status.textContent = String(e.message || e);
+      }
+    };
+  }
+
+  function mergeButton(card) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "merge-btn";
+    b.textContent = "Merge & done";
+    b.onclick = (ev) => {
+      ev.stopPropagation();
+      openMergeModal(card);
+    };
+    return b;
+  }
+
+  function githubPanelHtml(card) {
+    const rows = [];
+    const link = (href, text) =>
+      `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+    if (card.repo_url) rows.push(`<p class="meta">repo: ${link(card.repo_url, card.repo_url.replace("https://github.com/", ""))}</p>`);
+    const prUrl = card.pr_url || card.github_pr_url;
+    const prNum = card.pr_number || card.github_pr_number;
+    if (prUrl) {
+      rows.push(`<p class="meta">pr: ${link(prUrl, prNum ? `#${prNum}` : "open PR")}</p>`);
+    } else if (card.status === "in_review") {
+      rows.push(`<p class="meta">pr: none yet</p>`);
+    }
+    if (card.branch_url) {
+      rows.push(`<p class="meta">branch: ${link(card.branch_url, card.github_branch)}</p>`);
+    } else if (card.github_branch) {
+      rows.push(`<p class="meta">branch: ${escapeHtml(card.github_branch)}</p>`);
+    }
+    rows.push(`<p class="meta">workspace: <code>data/workspaces/obj-${card.id}</code></p>`);
+    return rows.join("");
+  }
+
   function showBoardPanel(card) {
     const panel = $("boardPanel");
     panel.classList.remove("hidden");
@@ -705,9 +818,14 @@
       <p class="meta">subtasks: ${card.checklist_closed}/${card.checklist_total}</p>
       ${subs ? `<ul class="obj-subtasks">${subs}</ul>` : ""}
       <p class="meta">issues: ${card.open_issue_count}</p>
-      ${card.github_pr_url ? `<p><a href="${escapeHtml(card.github_pr_url)}" target="_blank" rel="noopener">Open PR</a></p>` : ""}
+      ${githubPanelHtml(card)}
+      <p id="panelMergeSlot"></p>
       <p><button type="button" id="openInChat">open in chat</button></p>
     `;
+    if (card.can_merge && state.isOwner) {
+      const slot = document.getElementById("panelMergeSlot");
+      if (slot) slot.appendChild(mergeButton(card));
+    }
     const btn = document.getElementById("openInChat");
     if (btn) {
       btn.onclick = () => {

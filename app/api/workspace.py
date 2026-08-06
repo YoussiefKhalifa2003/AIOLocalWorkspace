@@ -326,6 +326,7 @@ def delete_member(
 
 @router.get("/auth/me")
 def me(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)):
+    from app.services.chat_access import is_workspace_owner
     from app.services.mentions import unread_mentions
 
     mentions = unread_mentions(db, auth, limit=20)
@@ -334,6 +335,7 @@ def me(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)):
         "tenant_id": auth.tenant_id,
         "email": auth.user.email,
         "name": auth.user.name,
+        "is_owner": is_workspace_owner(db, auth),
         "unread_mentions": len(mentions),
         "mentions": mentions,
     }

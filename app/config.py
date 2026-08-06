@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     github_webhook_secret: str = "dev-secret"
     github_token: str = ""
     github_repo: str = ""
-    coding_backend: str = "llm"
+    merge_method: str = "squash"  # squash | merge | rebase
+    coding_backend: str = "llm"  # llm | opencode | codex | claude_code
     opencode_bin: str = "opencode"
     opencode_timeout_seconds: int = 120
     opencode_api_key: str = ""
@@ -47,6 +48,26 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
     tts_dir: str = "data/tts"
     uploads_dir: str = "data/uploads"
+    agent_work_root: str = "data/workspaces"
+    agent_git_timeout_seconds: int = 120
+
+    # DeepResearch live retrieval (no key = no citations, never invented links)
+    tavily_api_key: str = ""
+    research_max_results: int = 6
+    research_fetch_timeout_seconds: int = 20
+    research_max_page_chars: int = 20000
+
+    # Agentic coding CLIs (headless), run with cwd = objective workspace
+    codex_bin: str = "codex"
+    codex_timeout_seconds: int = 900
+    codex_sandbox: str = "workspace-write"
+    codex_api_key: str = ""
+    claude_bin: str = "claude"
+    claude_timeout_seconds: int = 900
+    claude_permission_mode: str = "acceptEdits"
+    anthropic_api_key: str = ""
+
+    tui_poll_seconds: float = 2.0
     host_bind: str = "0.0.0.0"
     # Public base for /join/{token} invite links (LAN IP + port)
     invite_app_url: str = ""

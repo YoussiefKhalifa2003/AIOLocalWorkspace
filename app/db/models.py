@@ -143,6 +143,9 @@ class Objective(Base):
     github_pr_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     github_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     github_pr_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    github_merged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

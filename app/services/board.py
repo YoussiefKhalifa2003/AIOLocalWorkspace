@@ -2,13 +2,30 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Objective, TaskItem, User, WorkIssue, utcnow
+from app.db.models import Objective, Project, TaskItem, User, WorkIssue, utcnow
 from app.services.auth import AuthContext
 from app.services.chat_access import is_workspace_owner
 from app.services.file_claims import claims_for_objective
 
 BOARD_COLUMNS = ("todo", "doing", "blocked", "agent_backlog", "in_review", "done")
 VALID_STATUSES = set(BOARD_COLUMNS)
+
+
+def resolve_repo_slug(project: Project | None) -> str | None:
+    """`owner/repo` for the project, falling back to the global setting."""
+    from app.config import get_settings
+
+    slug = ""
+    if project is not None:
+        slug = (project.github_repo or "").strip()
+    if not slug:
+        slug = (get_settings().github_repo or "").strip()
+    return slug or None
+
+
+def repo_url_for(project: Project | None) -> str | None:
+    slug = resolve_repo_slug(project)
+    return f"https://github.com/{slug}" if slug else None
 
 
 def sync_objective_done_flags(obj: Objective) -> None:
@@ -99,6 +116,9 @@ def build_board(db: Session, *, tenant_id: int, project_id: int) -> dict:
         u.id: u
         for u in db.query(User).filter(User.tenant_id == tenant_id).all()
     }
+    project = db.query(Project).filter(Project.id == project_id).one_or_none()
+    repo_slug = resolve_repo_slug(project)
+    repo_url = repo_url_for(project)
     columns: dict[str, list] = {c: [] for c in BOARD_COLUMNS}
     for obj in rows:
         # migrate legacy rows
@@ -136,11 +156,27 @@ def build_board(db: Session, *, tenant_id: int, project_id: int) -> dict:
                 "github_pr_url": obj.github_pr_url,
                 "github_branch": obj.github_branch,
                 "github_pr_number": obj.github_pr_number,
+                "github_merged_at": (
+                    obj.github_merged_at.isoformat() if obj.github_merged_at else None
+                ),
+                "repo_url": repo_url,
+                "pr_url": obj.github_pr_url or None,
+                "pr_number": obj.github_pr_number or None,
+                "branch_url": (
+                    f"{repo_url}/tree/{obj.github_branch}"
+                    if repo_url and obj.github_branch
+                    else None
+                ),
+                "can_merge": bool(
+                    st == "in_review" and obj.github_pr_url and obj.github_pr_number
+                ),
                 "claimed_paths": claims_for_objective(db, obj.id),
             }
         )
     return {
         "project_id": project_id,
+        "github_repo": repo_slug,
+        "repo_url": repo_url,
         "columns": [{"id": c, "cards": columns[c]} for c in BOARD_COLUMNS],
     }
 

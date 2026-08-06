@@ -53,7 +53,7 @@ def create_pr_from_artifact(
     Falls back to a manual message when token/repo is missing or the API fails.
     """
     token = resolve_github_token(project)
-    repo = (project.github_repo or "").strip()
+    repo = _repo_slug(project)
     branch = branch_name or f"aio/obj-{objective_id}-{_slug(title)}-{int(time.time()) % 100000}"
     artifact = (content if content is not None else body) or ""
     if not token or not repo:
@@ -240,6 +240,311 @@ def create_pr_from_artifact(
         }
 
 
+def open_pr_for_branch(
+    *,
+    project: Project,
+    objective_id: int,
+    title: str,
+    branch: str,
+    files: list[str] | None = None,
+    workspace_note: str = "",
+) -> dict[str, Any]:
+    """Open a PR for an already-pushed branch (no blob/tree API)."""
+    token = resolve_github_token(project)
+    repo = _repo_slug(project)
+    if not token or not repo:
+        return {
+            "ok": False,
+            "manual": True,
+            "branch": branch,
+            "files": list(files or []),
+            "message": (
+                "No GITHUB_TOKEN / github_repo configured. Create a PR manually.\n\n"
+                f"Suggested branch: `{branch}`"
+            ),
+        }
+
+    owner, name = repo.split("/", 1) if "/" in repo else (repo, repo)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    file_lines = "\n".join(f"- `{p}`" for p in (files or [])[:40])
+    pr_body = (
+        f"AIO generated for objective #{objective_id}: {title}\n\n"
+        f"#obj-{objective_id}\n\n"
+        f"Committed from local agent workspace"
+        f"{f' (`{workspace_note}`)' if workspace_note else ''}.\n"
+    )
+    if file_lines:
+        pr_body += f"\n### Files\n{file_lines}\n"
+
+    try:
+        with httpx.Client(timeout=45.0) as client:
+            repo_r = client.get(f"https://api.github.com/repos/{owner}/{name}", headers=headers)
+            if repo_r.status_code >= 400:
+                return {
+                    "ok": False,
+                    "manual": True,
+                    "branch": branch,
+                    "files": list(files or []),
+                    "message": f"GitHub repo lookup failed ({repo_r.status_code}).",
+                }
+            default_branch = (repo_r.json() or {}).get("default_branch") or "main"
+            pr_r = client.post(
+                f"https://api.github.com/repos/{owner}/{name}/pulls",
+                headers=headers,
+                json={
+                    "title": f"[AIO #{objective_id}] {title}"[:200],
+                    "head": branch,
+                    "base": default_branch,
+                    "body": pr_body[:60000],
+                },
+            )
+            if pr_r.status_code >= 400:
+                return {
+                    "ok": False,
+                    "manual": True,
+                    "branch": branch,
+                    "files": list(files or []),
+                    "message": (
+                        f"PR create failed ({pr_r.status_code}): {pr_r.text[:300]}\n"
+                        f"Branch may exist: `{branch}`"
+                    ),
+                }
+            data = pr_r.json()
+            return {
+                "ok": True,
+                "manual": False,
+                "branch": branch,
+                "pr_url": data.get("html_url"),
+                "pr_number": data.get("number"),
+                "files": list(files or []),
+            }
+    except httpx.HTTPError as exc:
+        return {
+            "ok": False,
+            "manual": True,
+            "branch": branch,
+            "files": list(files or []),
+            "message": f"GitHub unreachable ({exc}).",
+        }
+
+
+def _repo_slug(project: Project) -> str:
+    return (project.github_repo or get_settings().github_repo or "").strip()
+
+
+def pull_request_status(*, project: Project, pr_number: int) -> dict[str, Any]:
+    """Read merge readiness for a PR. Never raises on HTTP errors."""
+    from app.services.agent_workspace import scrub_secrets
+
+    token = resolve_github_token(project)
+    repo = _repo_slug(project)
+    if not token or not repo:
+        return {"ok": False, "reason_code": "not_configured", "message": "No GITHUB_TOKEN / repo configured."}
+    owner, name = repo.split("/", 1) if "/" in repo else (repo, repo)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.get(
+                f"https://api.github.com/repos/{owner}/{name}/pulls/{pr_number}",
+                headers=headers,
+            )
+    except httpx.HTTPError as exc:
+        return {
+            "ok": False,
+            "reason_code": "unreachable",
+            "message": scrub_secrets(f"GitHub unreachable ({exc}).", token),
+        }
+    if r.status_code == 404:
+        return {"ok": False, "reason_code": "not_found", "message": f"PR #{pr_number} not found."}
+    if r.status_code >= 400:
+        return {
+            "ok": False,
+            "reason_code": "api_error",
+            "message": scrub_secrets(f"GitHub error {r.status_code}: {r.text[:300]}", token),
+        }
+    data = r.json() or {}
+    return {
+        "ok": True,
+        "state": data.get("state"),
+        "merged": bool(data.get("merged")),
+        "mergeable": data.get("mergeable"),
+        "mergeable_state": data.get("mergeable_state"),
+        "base": ((data.get("base") or {}).get("ref")) or "main",
+        "head": ((data.get("head") or {}).get("ref")) or "",
+        "title": data.get("title") or "",
+        "html_url": data.get("html_url") or "",
+    }
+
+
+_MERGE_BLOCKERS = {
+    "dirty": "the PR has merge conflicts",
+    "blocked": "branch protection is blocking the merge",
+}
+
+
+def merge_pull_request(
+    *,
+    project: Project,
+    pr_number: int,
+    commit_title: str = "",
+    commit_message: str = "",
+    merge_method: str = "",
+) -> dict[str, Any]:
+    """Merge a PR after a readiness pre-flight. Returns a structured result."""
+    from app.services.agent_workspace import scrub_secrets
+
+    token = resolve_github_token(project)
+    repo = _repo_slug(project)
+    method = (merge_method or get_settings().merge_method or "squash").strip().lower()
+    if method not in {"squash", "merge", "rebase"}:
+        return {
+            "ok": False,
+            "merged": False,
+            "reason_code": "bad_method",
+            "message": f"Unsupported merge method {method!r}.",
+        }
+    if not token or not repo:
+        return {
+            "ok": False,
+            "merged": False,
+            "reason_code": "not_configured",
+            "message": "No GITHUB_TOKEN / github_repo configured, cannot merge.",
+        }
+
+    pre = pull_request_status(project=project, pr_number=pr_number)
+    if not pre.get("ok"):
+        return {"ok": False, "merged": False, **pre}
+    if pre.get("merged"):
+        return {
+            "ok": False,
+            "merged": True,
+            "reason_code": "already_merged",
+            "message": f"PR #{pr_number} is already merged.",
+            "base": pre.get("base"),
+        }
+    if (pre.get("state") or "") != "open":
+        return {
+            "ok": False,
+            "merged": False,
+            "reason_code": "closed",
+            "message": f"PR #{pr_number} is {pre.get('state')}, not open.",
+            "base": pre.get("base"),
+        }
+    if pre.get("mergeable") is False:
+        state = (pre.get("mergeable_state") or "").lower()
+        why = _MERGE_BLOCKERS.get(state, f"GitHub reports mergeable_state={state or 'unknown'}")
+        return {
+            "ok": False,
+            "merged": False,
+            "reason_code": "not_mergeable",
+            "message": f"PR #{pr_number} cannot be merged: {why}.",
+            "base": pre.get("base"),
+        }
+    state = (pre.get("mergeable_state") or "").lower()
+    if state in _MERGE_BLOCKERS:
+        return {
+            "ok": False,
+            "merged": False,
+            "reason_code": "not_mergeable",
+            "message": f"PR #{pr_number} cannot be merged: {_MERGE_BLOCKERS[state]}.",
+            "base": pre.get("base"),
+        }
+
+    owner, name = repo.split("/", 1) if "/" in repo else (repo, repo)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    payload: dict[str, Any] = {"merge_method": method}
+    if commit_title:
+        payload["commit_title"] = commit_title[:250]
+    if commit_message:
+        payload["commit_message"] = commit_message[:60000]
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            r = client.put(
+                f"https://api.github.com/repos/{owner}/{name}/pulls/{pr_number}/merge",
+                headers=headers,
+                json=payload,
+            )
+    except httpx.HTTPError as exc:
+        return {
+            "ok": False,
+            "merged": False,
+            "reason_code": "unreachable",
+            "message": scrub_secrets(f"GitHub unreachable ({exc}).", token),
+            "base": pre.get("base"),
+        }
+
+    if r.status_code == 200:
+        data = r.json() or {}
+        return {
+            "ok": True,
+            "merged": bool(data.get("merged", True)),
+            "sha": data.get("sha"),
+            "message": data.get("message") or "merged",
+            "reason_code": "merged",
+            "base": pre.get("base"),
+            "head": pre.get("head"),
+            "merge_method": method,
+        }
+
+    codes = {
+        403: ("forbidden", "the token is not allowed to merge this PR"),
+        404: ("not_found", "the PR or repository is not visible to this token"),
+        405: ("not_mergeable", "GitHub refused the merge (not mergeable)"),
+        409: ("head_changed", "the head branch moved since the last check"),
+        422: ("invalid", "GitHub rejected the merge request as invalid"),
+    }
+    code, why = codes.get(r.status_code, ("api_error", f"GitHub returned {r.status_code}"))
+    detail = ""
+    try:
+        detail = (r.json() or {}).get("message") or ""
+    except ValueError:
+        detail = r.text[:200]
+    return {
+        "ok": False,
+        "merged": False,
+        "reason_code": code,
+        "message": scrub_secrets(f"Merge failed: {why}. {detail}".strip(), token),
+        "base": pre.get("base"),
+    }
+
+
+def delete_remote_branch(*, project: Project, branch: str) -> dict[str, Any]:
+    """Best-effort cleanup of a merged branch."""
+    from app.services.agent_workspace import scrub_secrets
+
+    token = resolve_github_token(project)
+    repo = _repo_slug(project)
+    if not token or not repo or not branch:
+        return {"ok": False, "message": "not configured"}
+    owner, name = repo.split("/", 1) if "/" in repo else (repo, repo)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.delete(
+                f"https://api.github.com/repos/{owner}/{name}/git/refs/heads/{branch}",
+                headers=headers,
+            )
+    except httpx.HTTPError as exc:
+        return {"ok": False, "message": scrub_secrets(str(exc), token)}
+    return {"ok": r.status_code in (204, 422), "status": r.status_code}
+
+
 def artifact_files_for_objective(objective_id: int, title: str, content: str) -> dict[str, str]:
     """Map generated agent output to paths under aio/objectives/obj-N/."""
     base = f"aio/objectives/obj-{objective_id}"
@@ -273,6 +578,10 @@ def artifact_files_for_objective(objective_id: int, title: str, content: str) ->
     else:
         files[f"{base}/output.md"] = text if text.endswith("\n") else text + "\n"
     return files
+
+
+def branch_slug(title: str) -> str:
+    return _slug(title)
 
 
 def _slug(title: str) -> str:

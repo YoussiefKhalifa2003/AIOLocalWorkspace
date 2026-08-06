@@ -1,6 +1,33 @@
-# Hybrid AIO (http://127.0.0.1:8000/app)
+# AIO - CLI first. API: uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Legacy web UI: http://127.0.0.1:8000/app
 # Owner: a@local.test / demo
 # Member: omar@local.test / demo
+
+# --- CLI: sign in and look around ---
+./aio login --email a@local.test --password demo
+./aio whoami
+./aio doctor
+./aio projects
+./aio projects use 1
+
+# --- CLI: the owner loop ---
+./aio tui                       # live dashboard (owner only)
+./aio board                     # columns + repo / PR / branch per card
+./aio card 12                   # detail, subtasks, claims, workspace path
+./aio set 12 doing
+./aio set 12 agent_backlog                  # LLM coding path
+./aio set 12 agent_backlog --runner codex   # or --runner claude_code
+./aio pr 12 --open
+./aio merge 12                  # asks first, then merges and moves to done
+./aio merge 12 --yes --method squash
+./aio workspaces                # local checkouts + dirty state
+
+# --- CLI: chat from the terminal ---
+./aio members
+./aio chat 1 --follow
+./aio say 1 "standup in 5"
+
+# TUI keys: j/k card  h/l column  a agent_backlog  s status  m merge  o open PR  y copy  r refresh  q quit
 
 # #general - chat + @people + !commands (whispers)
 hey team, standup in 5
@@ -37,6 +64,8 @@ thinking out loud about auth
 !link 1 branch feat/x
 ./aio webhook-sim --title "Ship #obj-1" --action opened
 ./aio drain
+# agent_backlog -> workspace clone -> agent edits -> push -> PR -> in_review -> ./aio merge <id> -> done
+# /deepresearch cites only pages it fetched; without TAVILY_API_KEY it says "NO LIVE SOURCES"
 
 # Reset
 rm -f aio.db && ./aio seed
