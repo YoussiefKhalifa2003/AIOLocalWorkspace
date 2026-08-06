@@ -25,10 +25,13 @@ thinking out loud about auth
 # OPENROUTER_API_KEY in .env
 
 # Board tab - drag cards; or !set <id> doing|done
+# Chat - paperclip/attach button for screenshots & PDFs (png/jpeg/pdf/txt/md)
+# Attach + /web|/code|/research so the agent can read the file (PDF/text extracted)
 
 # Owner catch-up
 !status Omar
 !team
+/status Omar
 
 # GitHub
 !link 1 branch feat/x

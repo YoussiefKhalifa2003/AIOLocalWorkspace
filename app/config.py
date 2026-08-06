@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     groq_stt_model: str = "whisper-large-v3-turbo"
     groq_base_url: str = "https://api.groq.com/openai/v1"
     tts_dir: str = "data/tts"
+    uploads_dir: str = "data/uploads"
     host_bind: str = "0.0.0.0"
     # Public base for /join/{token} invite links (LAN IP + port)
     invite_app_url: str = ""

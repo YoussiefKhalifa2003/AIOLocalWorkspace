@@ -206,7 +206,11 @@ def run_research(db: Session, job: Job, llm: LLMClient) -> None:
         messages=[
             {
                 "role": "system",
-                "content": _sys("You are a research agent. Produce concise factual notes with bullets."),
+                "content": _sys(
+                    "You are a research agent. Produce concise factual notes with bullets. "
+                    "If ATTACHED FILES are present, treat them as the primary source when the user "
+                    "refers to \"this\" / the file / the document. Do not invent an unrelated paper."
+                ),
             },
             {"role": "user", "content": text},
         ],

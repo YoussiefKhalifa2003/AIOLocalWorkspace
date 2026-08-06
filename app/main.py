@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__
 from app.api import (
     agent_settings,
+    attachments,
     audit,
     chats,
     github,
@@ -48,6 +49,7 @@ app.include_router(stt.router)
 app.include_router(workspace.router)
 app.include_router(agent_settings.router)
 app.include_router(chats.router)
+app.include_router(attachments.router)
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

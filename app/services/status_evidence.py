@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     Artifact,
     Chat,
+    ChatAttachment,
     ChatMessage,
     FileClaim,
     Job,
@@ -128,6 +129,35 @@ def _private_room_activity(
             who = "system"
             clip_n = 240
         lines.append(f"[{who}] {_clip(body, clip_n)}")
+    return lines
+
+
+def _recent_attachments_for_user(
+    db: Session, *, tenant_id: int, user_id: int, limit: int = 12
+) -> list[str]:
+    rows = (
+        db.query(ChatAttachment, Chat)
+        .join(Chat, Chat.id == ChatAttachment.chat_id)
+        .filter(
+            ChatAttachment.tenant_id == tenant_id,
+            ChatAttachment.uploader_user_id == user_id,
+            ChatAttachment.message_id.isnot(None),
+        )
+        .order_by(ChatAttachment.id.desc())
+        .limit(limit)
+        .all()
+    )
+    lines = []
+    for att, chat in reversed(rows):
+        where = (
+            "private room"
+            if (chat.kind or "") == "private"
+            else f"#{chat.name}"
+        )
+        msg = f"msg #{att.message_id}" if att.message_id else "unlinked"
+        lines.append(
+            f"{att.filename} ({att.content_type}, {att.size_bytes}b) in {where} [{msg}]"
+        )
     return lines
 
 
@@ -251,6 +281,13 @@ def build_user_evidence(
     else:
         lines.append("Recent team-channel messages: (none — quiet in channels)")
 
+    uploads = _recent_attachments_for_user(db, tenant_id=tenant_id, user_id=user.id)
+    if uploads:
+        lines.append("Recent attachments (chat uploads):")
+        lines.extend(f"  {u}" for u in uploads)
+    else:
+        lines.append("Recent attachments: (none)")
+
     return "\n".join(lines)
 
 
@@ -294,11 +331,15 @@ def status_system_prompt() -> str:
         "You are a workplace status analyst for AIO. "
         "Using ONLY the evidence pack, write a thorough catch-up for a manager or the member. "
         "Include EVERYTHING essential from the evidence: board objectives, blockers/issues, "
-        "team-channel chat, AND private-room notes and /skill work (user asks + agent outcomes). "
+        "team-channel chat, private-room notes and /skill work (user asks + agent outcomes), "
+        "and chat attachments the member uploaded. "
         "Call out when someone is stuck or asking for help in their private room even if "
         "channels are quiet. "
         "Cover: what they've done, what is in progress, where they asked for help, blockers, "
         "and chat vs board activity. "
-        "Use short sections and bullets. Do not invent facts not in the evidence. "
+        "Format for chat: short section titles on their own line, then plain bullet lines starting with '- '. "
+        "Do not use Markdown tables, code fences, or decorative symbols. "
+        "Bold sparingly with ** only for names or ids if needed. "
+        "Do not invent facts not in the evidence. "
         "If evidence is thin, say so clearly."
     )

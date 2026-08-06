@@ -54,6 +54,8 @@ def _sqlite_migrate() -> None:
         _add("tenants", "invite_token", "VARCHAR(64)")
         _add("tenants", "invite_max_uses", "INTEGER")
         _add("tenants", "invite_uses_left", "INTEGER")
+        _add("chat_messages", "edited_at", "DATETIME")
+        _add("chat_messages", "deleted_at", "DATETIME")
         # backfill status from done
         ocols = {row[1] for row in conn.execute(text("PRAGMA table_info(objectives)")).fetchall()}
         if "status" in ocols and "done" in ocols:
