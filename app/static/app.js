@@ -13,6 +13,8 @@
     members: [],
     chats: [],
     tab: "chat",
+    boardTimer: null,
+    boardLoading: false,
     projectId: Number(localStorage.getItem("aio_project") || 0) || 1,
     projects: [],
     isOwner: false,
@@ -155,7 +157,19 @@
     $("boardView").classList.toggle("hidden", tab !== "board");
     $("modelsView").classList.toggle("hidden", tab !== "models");
     $("analyticsView").classList.toggle("hidden", tab !== "analytics");
-    if (tab === "board") void loadBoard();
+    if (state.boardTimer) {
+      clearInterval(state.boardTimer);
+      state.boardTimer = null;
+    }
+    if (tab === "board") {
+      void loadBoard();
+      // Live refresh so agent_backlog → in_review shows without a manual reload
+      state.boardTimer = setInterval(() => {
+        if (state.tab === "board" && state.projectId && !state.boardLoading) {
+          void loadBoard({ quiet: true });
+        }
+      }, 2000);
+    }
     if (tab === "models") void loadModels();
     if (tab === "analytics") void loadAnalytics();
   }
@@ -307,92 +321,130 @@
     return Number(card.assignee_user_id) === Number(state.userId);
   }
 
-  async function loadBoard() {
-    const board = await api(`/projects/${state.projectId}/board`);
-    const root = $("boardColumns");
-    root.innerHTML = "";
-    let jobsToday = "";
+  async function loadBoard(opts) {
+    const quiet = !!(opts && opts.quiet);
+    if (!state.projectId) return;
+    if (state.boardLoading) return;
+    state.boardLoading = true;
     try {
-      const sum = await api(`/projects/${state.projectId}/jobs/summary`);
-      jobsToday = `jobs: ${sum.total}`;
-    } catch (_) { /* ignore */ }
-    $("boardFooter").textContent = jobsToday;
+      const board = await api(`/projects/${state.projectId}/board`);
+      const root = $("boardColumns");
+      root.innerHTML = "";
+      let jobsToday = "";
+      try {
+        const sum = await api(`/projects/${state.projectId}/jobs/summary`);
+        jobsToday = `jobs: ${sum.total}`;
+      } catch (_) { /* ignore */ }
+      const backlogCards =
+        ((board.columns || []).find((c) => c.id === "agent_backlog") || {}).cards || [];
+      const workingNote = backlogCards.length
+        ? ` · agent working on ${backlogCards.length} card${backlogCards.length === 1 ? "" : "s"}`
+        : "";
+      $("boardFooter").textContent = `${jobsToday}${workingNote}`;
 
-    const allCards = [];
-    (board.columns || []).forEach((col) => {
-      (col.cards || []).forEach((card) => {
-        allCards.push({ ...card, status: col.id });
-      });
-    });
-    state.boardCards = allCards;
-
-    (board.columns || []).forEach((col) => {
-      const el = document.createElement("div");
-      el.className = "board-col";
-      el.dataset.status = col.id;
-      const h = document.createElement("h3");
-      h.textContent = `${col.id} (${(col.cards || []).length})`;
-      el.appendChild(h);
-      const cards = document.createElement("div");
-      cards.className = "cards";
-      cards.dataset.status = col.id;
-
-      cards.addEventListener("dragover", (ev) => {
-        ev.preventDefault();
-        el.classList.add("drag-over");
-      });
-      cards.addEventListener("dragleave", () => el.classList.remove("drag-over"));
-      cards.addEventListener("drop", async (ev) => {
-        ev.preventDefault();
-        el.classList.remove("drag-over");
-        const oid = Number(ev.dataTransfer.getData("text/oid"));
-        const status = col.id;
-        if (!oid) return;
-        try {
-          await api(`/projects/${state.projectId}/objectives/${oid}`, {
-            method: "PATCH",
-            body: JSON.stringify({ status }),
-          });
-          await loadBoard();
-        } catch (e) {
-          setVoiceStatus(String(e.message || e));
-        }
-      });
-
-      (col.cards || []).forEach((card) => {
-        const c = document.createElement("div");
-        c.className = "board-card";
-        c.draggable = canDragCard(card);
-        c.dataset.id = card.id;
-        c.innerHTML = `<div class="t">${escapeHtml(card.title)}</div>
-          <div class="meta">${escapeHtml(card.owner_email || "")} - ${card.progress_percent || 0}%</div>`;
-        if (card.open_issue_count) {
-          const b = document.createElement("span");
-          b.className = "badge";
-          b.textContent = `${card.open_issue_count} blocker`;
-          c.appendChild(b);
-        }
-        if ((card.claimed_paths || []).length) {
-          const p = document.createElement("div");
-          p.className = "meta";
-          p.textContent = "claims: " + card.claimed_paths.join(", ");
-          c.appendChild(p);
-        }
-        c.addEventListener("dragstart", (ev) => {
-          if (!canDragCard(card)) {
-            ev.preventDefault();
-            return;
-          }
-          c.classList.add("dragging");
-          ev.dataTransfer.setData("text/oid", String(card.id));
+      const allCards = [];
+      (board.columns || []).forEach((col) => {
+        (col.cards || []).forEach((card) => {
+          allCards.push({ ...card, status: col.id });
         });
-        c.addEventListener("dragend", () => c.classList.remove("dragging"));
-        c.onclick = () => showBoardPanel(card);
-        cards.appendChild(c);
       });
-      el.appendChild(cards);
-      root.appendChild(el);
-    });
+      state.boardCards = allCards;
+
+      (board.columns || []).forEach((col) => {
+        const el = document.createElement("div");
+        el.className = "board-col";
+        el.dataset.status = col.id;
+        const h = document.createElement("h3");
+        h.textContent = `${col.id} (${(col.cards || []).length})`;
+        el.appendChild(h);
+        const cards = document.createElement("div");
+        cards.className = "cards";
+        cards.dataset.status = col.id;
+
+        cards.addEventListener("dragover", (ev) => {
+          ev.preventDefault();
+          el.classList.add("drag-over");
+        });
+        cards.addEventListener("dragleave", () => el.classList.remove("drag-over"));
+        cards.addEventListener("drop", async (ev) => {
+          ev.preventDefault();
+          el.classList.remove("drag-over");
+          const oid = Number(ev.dataTransfer.getData("text/oid"));
+          const status = col.id;
+          if (!oid) return;
+          try {
+            if (status === "agent_backlog") {
+              setVoiceStatus(
+                `Objective #${oid}: agent started — stay on Board, it updates live`
+              );
+            }
+            await api(`/projects/${state.projectId}/objectives/${oid}`, {
+              method: "PATCH",
+              body: JSON.stringify({ status }),
+            });
+            await loadBoard();
+          } catch (e) {
+            setVoiceStatus(String(e.message || e));
+            await loadBoard();
+          }
+        });
+
+        (col.cards || []).forEach((card) => {
+          const c = document.createElement("div");
+          c.className = "board-card";
+          if (col.id === "agent_backlog") c.classList.add("agent-working");
+          c.draggable = canDragCard(card);
+          c.dataset.id = card.id;
+          c.innerHTML = `<div class="t">${escapeHtml(card.title)}</div>
+          <div class="meta">${escapeHtml(card.owner_email || "")} - ${card.progress_percent || 0}%</div>`;
+          if (col.id === "agent_backlog") {
+            const w = document.createElement("span");
+            w.className = "badge working";
+            w.textContent = "agent working…";
+            c.appendChild(w);
+          }
+          if (card.github_pr_url) {
+            const pr = document.createElement("a");
+            pr.className = "badge pr-link";
+            pr.href = card.github_pr_url;
+            pr.target = "_blank";
+            pr.rel = "noopener noreferrer";
+            pr.textContent = card.github_pr_number ? `PR #${card.github_pr_number}` : "PR";
+            pr.onclick = (ev) => ev.stopPropagation();
+            c.appendChild(pr);
+          }
+          if (card.open_issue_count) {
+            const b = document.createElement("span");
+            b.className = "badge";
+            b.textContent = `${card.open_issue_count} blocker`;
+            c.appendChild(b);
+          }
+          if ((card.claimed_paths || []).length) {
+            const p = document.createElement("div");
+            p.className = "meta";
+            p.textContent = "claims: " + card.claimed_paths.join(", ");
+            c.appendChild(p);
+          }
+          c.addEventListener("dragstart", (ev) => {
+            if (!canDragCard(card)) {
+              ev.preventDefault();
+              return;
+            }
+            c.classList.add("dragging");
+            ev.dataTransfer.setData("text/oid", String(card.id));
+          });
+          c.addEventListener("dragend", () => c.classList.remove("dragging"));
+          c.onclick = () => showBoardPanel(card);
+          cards.appendChild(c);
+        });
+        el.appendChild(cards);
+        root.appendChild(el);
+      });
+    } catch (e) {
+      if (!quiet) setVoiceStatus(String(e.message || e));
+    } finally {
+      state.boardLoading = false;
+    }
   }
 
   function escapeHtml(s) {

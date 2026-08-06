@@ -258,8 +258,25 @@ def test_gate_e_agent_backlog_manual_pr(tmp_path, monkeypatch):
         json={"status": "agent_backlog"},
     )
     assert r.status_code == 200
-    # without token should move to doing (manual)
+    # without token: coding runs in background then moves to doing (manual PR)
     assert r.json()["status"] in ("doing", "in_review", "agent_backlog", "blocked")
+    import time
+
+    status = r.json()["status"]
+    for _ in range(80):
+        if status in ("doing", "in_review", "blocked"):
+            break
+        time.sleep(0.25)
+        board = client.get(f"/projects/{pid}/board", headers=ha).json()
+        card = next(
+            (c for col in board["columns"] for c in col["cards"] if c["id"] == oid),
+            None,
+        )
+        assert card is not None
+        status = card.get("status") or next(
+            col["id"] for col in board["columns"] if any(c["id"] == oid for c in col["cards"])
+        )
+    assert status in ("doing", "in_review", "blocked"), status
     msgs = client.get(f"/chats/{info['chat_general']}/messages?after_id=0", headers=ha).json()
     assert any("objective" in m["body"].lower() and str(oid) in m["body"] for m in msgs)
 

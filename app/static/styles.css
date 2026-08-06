@@ -949,10 +949,29 @@ header .tab.active { color: #eee; border-color: #888; background: #1a1a1a; }
 .board-card .badge {
   display: inline-block;
   margin-top: 4px;
+  margin-right: 4px;
   padding: 1px 4px;
   border: 1px solid #a55;
   color: #c88;
   font-size: 10px;
+}
+.board-card .badge.working {
+  border-color: #3a7a4a;
+  color: #8dcc9a;
+  animation: board-pulse 1.4s ease-in-out infinite;
+}
+.board-card .badge.pr-link {
+  border-color: #456;
+  color: #9ab;
+  text-decoration: none;
+}
+.board-card.agent-working {
+  border-color: #3a5a42;
+  background: #121a14;
+}
+@keyframes board-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 .board-col.drag-over { border-color: #666; background: #121212; }
 .board-panel {
