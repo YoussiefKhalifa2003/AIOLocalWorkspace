@@ -1,4 +1,4 @@
-"""Edit/delete own chat messages for everyone."""
+"""Edit/delete own chat messages — ChatGPT-style truncate on edit."""
 
 from __future__ import annotations
 
@@ -69,8 +69,10 @@ def test_edit_and_delete_own_message(tmp_path, monkeypatch):
         json={"body": "hello team (fixed)"},
     )
     assert edited.status_code == 200
-    assert edited.json()["body"] == "hello team (fixed)"
-    assert edited.json()["edited_at"]
+    data = edited.json()
+    assert data["message"]["body"] == "hello team (fixed)"
+    assert data["message"]["edited_at"]
+    assert data["removed_ids"] == []
 
     # Everyone sees the edit
     msgs = client.get(f"/chats/{g}/messages?after_id=0", headers=ho).json()
@@ -83,10 +85,9 @@ def test_edit_and_delete_own_message(tmp_path, monkeypatch):
     assert deleted.json()["deleted_at"]
     assert deleted.json()["body"] == ""
 
+    # Soft-deleted messages are hidden from normal list
     msgs2 = client.get(f"/chats/{g}/messages?after_id=0", headers=ho).json()
-    gone = next(m for m in msgs2 if m["id"] == mid)
-    assert gone["deleted_at"]
-    assert gone["body"] == ""
+    assert not any(m["id"] == mid for m in msgs2)
 
     # Sync path: after_id high + since should still return mutation
     sync = client.get(
@@ -94,3 +95,51 @@ def test_edit_and_delete_own_message(tmp_path, monkeypatch):
         headers=ho,
     ).json()
     assert any(m["id"] == mid and m["deleted_at"] for m in sync)
+
+
+def test_edit_truncates_later_messages(tmp_path, monkeypatch):
+    client, info = _boot(tmp_path, monkeypatch)
+    ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
+    g = info["chat_general"]
+
+    m1 = client.post(
+        f"/chats/{g}/messages",
+        headers=ha,
+        json={"body": "first", "speak": False},
+    ).json()["user_message_id"]
+    m2 = client.post(
+        f"/chats/{g}/messages",
+        headers=ha,
+        json={"body": "second", "speak": False},
+    ).json()["user_message_id"]
+    m3 = client.post(
+        f"/chats/{g}/messages",
+        headers=ha,
+        json={"body": "third", "speak": False},
+    ).json()["user_message_id"]
+
+    edited = client.patch(
+        f"/chats/{g}/messages/{m1}",
+        headers=ha,
+        json={"body": "first (rewound)"},
+    )
+    assert edited.status_code == 200
+    data = edited.json()
+    assert data["message"]["body"] == "first (rewound)"
+    assert data["message"]["edited_at"]
+    assert set(data["removed_ids"]) == {m2, m3}
+
+    msgs = client.get(f"/chats/{g}/messages?after_id=0", headers=ha).json()
+    ids = [m["id"] for m in msgs]
+    assert m1 in ids
+    assert m2 not in ids
+    assert m3 not in ids
+    assert next(m for m in msgs if m["id"] == m1)["body"] == "first (rewound)"
+
+    # Other clients learn about truncations via since=
+    sync = client.get(
+        f"/chats/{g}/messages?after_id={m3}&since=2020-01-01T00:00:00Z",
+        headers=ha,
+    ).json()
+    deleted_ids = {m["id"] for m in sync if m.get("deleted_at")}
+    assert m2 in deleted_ids and m3 in deleted_ids

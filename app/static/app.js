@@ -1120,6 +1120,50 @@
     return false;
   }
 
+  function recomputeLastMsgId() {
+    const box = $("messages");
+    let max = 0;
+    if (box) {
+      box.querySelectorAll(".msg[data-msg-id]").forEach((el) => {
+        max = Math.max(max, Number(el.dataset.msgId) || 0);
+      });
+    }
+    state.lastMsgId = max;
+  }
+
+  function cleanOrphanDaySeparators(box) {
+    if (!box) return;
+    const kids = [...box.children];
+    kids.forEach((el, i) => {
+      if (!el.classList.contains("msg-day")) return;
+      const next = kids[i + 1];
+      if (!next || next.classList.contains("msg-day")) el.remove();
+    });
+    const last = box.lastElementChild;
+    if (last && last.classList.contains("msg-day")) last.remove();
+  }
+
+  /** Remove messages after editedId (ChatGPT branch truncate) and any explicit ids. */
+  function removeMessagesFromDom(removedIds, afterId) {
+    const box = $("messages");
+    if (!box) return;
+    const extra = new Set((removedIds || []).map(Number));
+    const floor = afterId != null ? Number(afterId) : null;
+    [...box.querySelectorAll(".msg[data-msg-id]")].forEach((el) => {
+      const id = Number(el.dataset.msgId);
+      if (extra.has(id) || (floor != null && id > floor)) el.remove();
+    });
+    cleanOrphanDaySeparators(box);
+    recomputeLastMsgId();
+  }
+
+  function focusMessageEl(el) {
+    if (!el) return;
+    el.classList.add("highlight-ping");
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => el.classList.remove("highlight-ping"), 2500);
+  }
+
   function fillMessageContent(div, m) {
     const color = colorForMessage(m);
     div.style.borderLeftColor = color;
@@ -1291,15 +1335,31 @@
         setVoiceStatus("message cannot be empty");
         return;
       }
+      const expectsLlm = looksLikeAgentWork(next);
+      if (expectsLlm) startLlmWait(next);
+      save.disabled = true;
+      cancel.disabled = true;
       try {
-        const updated = await api(`/chats/${state.chatId}/messages/${m.id}`, {
+        const data = await api(`/chats/${state.chatId}/messages/${m.id}`, {
           method: "PATCH",
           body: JSON.stringify({ body: next }),
         });
+        const updated = data.message || data;
+        const removedIds = data.removed_ids || [];
+        const replies = data.replies || [];
         finish();
+        removeMessagesFromDom(removedIds, updated.id);
         fillMessageContent(div, updated);
+        if (replies.length) renderMessages(replies, true);
+        else recomputeLastMsgId();
+        focusMessageEl(div);
+        state.lastSyncAt = new Date().toISOString();
       } catch (e) {
         setVoiceStatus(String(e.message || e));
+        save.disabled = false;
+        cancel.disabled = false;
+      } finally {
+        stopLlmWait();
       }
     };
     input.onkeydown = (ev) => {
@@ -1322,11 +1382,10 @@
     if (!state.chatId) return;
     if (!window.confirm("Delete this message for everyone?")) return;
     try {
-      const updated = await api(`/chats/${state.chatId}/messages/${messageId}`, {
+      await api(`/chats/${state.chatId}/messages/${messageId}`, {
         method: "DELETE",
       });
-      const el = document.querySelector(`.msg[data-msg-id="${messageId}"]`);
-      if (el) fillMessageContent(el, updated);
+      removeMessagesFromDom([messageId], null);
     } catch (e) {
       setVoiceStatus(String(e.message || e));
     }
@@ -1341,6 +1400,12 @@
       const existing = append
         ? box.querySelector(`.msg[data-msg-id="${m.id}"]`)
         : null;
+      if (m.deleted_at) {
+        if (existing) existing.remove();
+        cleanOrphanDaySeparators(box);
+        recomputeLastMsgId();
+        return;
+      }
       if (existing) {
         // Don't clobber an in-progress edit
         if (Number(state.editingMsgId) === Number(m.id)) return;

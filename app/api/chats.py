@@ -202,6 +202,7 @@ def list_messages(
             ChatMessage.tenant_id == auth.tenant_id,
             ChatMessage.id > effective_after,
             visible_messages_filter(auth.user_id),
+            ChatMessage.deleted_at.is_(None),
         )
         .order_by(ChatMessage.id.asc())
         .limit(min(limit, 200))
@@ -230,7 +231,7 @@ def list_messages(
                     ),
                 )
                 .order_by(ChatMessage.id.asc())
-                .limit(100)
+                .limit(200)
                 .all()
             )
             for m in mutated:
@@ -263,34 +264,7 @@ def _own_user_message(
     return msg
 
 
-@router.patch("/chats/{chat_id}/messages/{message_id}")
-def edit_message(
-    chat_id: int,
-    message_id: int,
-    body: MessagePatch,
-    auth: AuthContext = Depends(get_auth),
-    db: Session = Depends(get_db),
-):
-    msg = _own_user_message(db, auth, chat_id, message_id)
-    text = (body.body or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="body required")
-    msg.body = text
-    msg.edited_at = utcnow()
-    db.commit()
-    db.refresh(msg)
-    return message_to_dict(db, msg)
-
-
-@router.delete("/chats/{chat_id}/messages/{message_id}")
-def delete_message(
-    chat_id: int,
-    message_id: int,
-    auth: AuthContext = Depends(get_auth),
-    db: Session = Depends(get_db),
-):
-    msg = _own_user_message(db, auth, chat_id, message_id)
-    # Soft-delete so everyone sees removal via poll sync; strip content
+def _soft_delete_message(db: Session, msg: ChatMessage) -> None:
     arts = (
         db.query(ChatAttachment)
         .filter(ChatAttachment.message_id == msg.id)
@@ -302,6 +276,87 @@ def delete_message(
     msg.body = ""
     msg.audio_url = None
     msg.deleted_at = utcnow()
+
+
+def _truncate_messages_after(
+    db: Session, *, chat_id: int, tenant_id: int, after_id: int
+) -> list[int]:
+    """Soft-delete every message after after_id in this chat. Returns removed ids."""
+    later = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.chat_id == chat_id,
+            ChatMessage.tenant_id == tenant_id,
+            ChatMessage.id > after_id,
+            ChatMessage.deleted_at.is_(None),
+        )
+        .order_by(ChatMessage.id.asc())
+        .all()
+    )
+    removed: list[int] = []
+    for m in later:
+        removed.append(m.id)
+        _soft_delete_message(db, m)
+    return removed
+
+
+@router.patch("/chats/{chat_id}/messages/{message_id}")
+def edit_message(
+    chat_id: int,
+    message_id: int,
+    body: MessagePatch,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """Edit own message (ChatGPT-style): truncate everything after it, then re-process."""
+    chat = require_chat_access(db, auth, chat_id)
+    msg = _own_user_message(db, auth, chat_id, message_id)
+    text = (body.body or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="body required")
+
+    removed_ids = _truncate_messages_after(
+        db, chat_id=chat_id, tenant_id=auth.tenant_id, after_id=msg.id
+    )
+    msg.body = text
+    msg.edited_at = utcnow()
+    db.flush()
+
+    replies: list[ChatMessage] = []
+    # Re-process as if newly sent (skip /clear — editing should not wipe the room)
+    skip_rerun = text.startswith("/") and text[1:].strip().lower().startswith(
+        ("clear", "clear chat", "clear messages")
+    )
+    if not skip_rerun:
+        replies, _, _, _ = handle_chat_message(
+            db,
+            auth=auth,
+            chat=chat,
+            user_message=msg,
+            speak=False,
+        )
+
+    db.commit()
+    db.refresh(msg)
+    for r in replies:
+        db.refresh(r)
+
+    return {
+        "message": message_to_dict(db, msg),
+        "removed_ids": removed_ids,
+        "replies": [message_to_dict(db, r) for r in replies],
+    }
+
+
+@router.delete("/chats/{chat_id}/messages/{message_id}")
+def delete_message(
+    chat_id: int,
+    message_id: int,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    msg = _own_user_message(db, auth, chat_id, message_id)
+    _soft_delete_message(db, msg)
     db.commit()
     db.refresh(msg)
     return message_to_dict(db, msg)
