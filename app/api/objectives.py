@@ -49,6 +49,7 @@ class ObjectivePatch(BaseModel):
 class ObjectiveSetupIn(BaseModel):
     description: str | None = None
     subtasks: list[str] = Field(default_factory=list)
+    dismiss: bool = False
 
 
 def _obj_out(obj: Objective) -> ObjectiveOut:
@@ -260,6 +261,32 @@ def patch_objective(
     return _obj_out(obj)
 
 
+def _clear_setup_markers(db: Session, *, tenant_id: int, objective_id: int) -> int:
+    """Remove [[setup:N]] from lead messages so the card does not remount after refresh."""
+    import re
+
+    from app.db.models import ChatMessage
+
+    marker = f"[[setup:{objective_id}]]"
+    rows = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.tenant_id == tenant_id,
+            ChatMessage.body.contains(marker),
+        )
+        .all()
+    )
+    n = 0
+    for msg in rows:
+        cleaned = re.sub(rf"\n?\[\[setup:{objective_id}\]\]\s*", "", msg.body or "").rstrip()
+        if cleaned != msg.body:
+            msg.body = cleaned
+            n += 1
+    if n:
+        db.flush()
+    return n
+
+
 @router.put("/projects/{project_id}/objectives/{objective_id}/setup", response_model=ObjectiveOut)
 def setup_objective(
     project_id: int,
@@ -268,7 +295,7 @@ def setup_objective(
     auth: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
 ):
-    """Optional post-!add setup: description + objective-scoped subtasks."""
+    """Optional post-!add setup: description + objective-scoped subtasks (or dismiss)."""
     try:
         get_project_for_tenant(db, auth.tenant_id, project_id)
         obj = _get_objective(db, auth.tenant_id, project_id, objective_id)
@@ -277,6 +304,19 @@ def setup_objective(
 
     if not can_edit_objective(db, auth, obj):
         raise HTTPException(status_code=403, detail="can only edit your own objectives")
+
+    if body.dismiss:
+        _clear_setup_markers(db, tenant_id=auth.tenant_id, objective_id=obj.id)
+        write_audit(
+            db,
+            tenant_id=auth.tenant_id,
+            project_id=project_id,
+            event_type="objective_setup_dismissed",
+            message=f"objective {obj.id} setup dismissed",
+        )
+        db.commit()
+        db.refresh(obj)
+        return _obj_out(obj)
 
     if body.description is not None:
         desc = body.description.strip()
@@ -304,6 +344,7 @@ def setup_objective(
             )
         )
 
+    _clear_setup_markers(db, tenant_id=auth.tenant_id, objective_id=obj.id)
     write_audit(
         db,
         tenant_id=auth.tenant_id,

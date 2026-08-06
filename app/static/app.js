@@ -603,7 +603,25 @@
       input.focus();
     };
     card.querySelector(".setup-add-sub").onclick = () => addRow("");
-    card.querySelector(".setup-skip").onclick = () => dismissSetupCard(card);
+    card.querySelector(".setup-skip").onclick = async () => {
+      const status = card.querySelector(".setup-status");
+      const pid = state.projectId;
+      if (!pid) {
+        dismissSetupCard(card);
+        return;
+      }
+      status.hidden = false;
+      status.textContent = "Closing…";
+      try {
+        await api(`/projects/${pid}/objectives/${objectiveId}/setup`, {
+          method: "PUT",
+          body: JSON.stringify({ dismiss: true }),
+        });
+        dismissSetupCard(card);
+      } catch (e) {
+        status.textContent = e.message || String(e);
+      }
+    };
     card.querySelector(".setup-save").onclick = async () => {
       const status = card.querySelector(".setup-status");
       const desc = card.querySelector(".setup-desc").value;

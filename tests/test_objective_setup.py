@@ -58,6 +58,10 @@ def test_add_includes_setup_marker_and_setup_api(tmp_path, monkeypatch):
     assert setup.status_code == 200, setup.text
     assert setup.json()["description"] == "Write clear station notes for the demo."
 
+    # Marker stripped so the setup card does not remount after refresh
+    hist = client.get(f"/chats/{general}/messages", headers=ha).json()
+    assert not any("[[setup:" in (m.get("body") or "") for m in hist)
+
     board = client.get(f"/projects/{project_id}/board", headers=ha).json()
     card = None
     for col in board["columns"]:
