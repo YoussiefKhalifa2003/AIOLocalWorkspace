@@ -238,17 +238,15 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
             f"Kept objective #{oid} open: {obj.title}. Say what still needs fixing and I'll continue.",
         )
 
-    # invite — mint a new single-use workspace link
-    if lower in ("invite", "invitation") or lower.startswith("invite ") or lower.startswith("invitation"):
+    # invite — mint link with optional seat count: invite 5
+    if lower == "invite" or re.match(r"invite\s+\d+\s*$", lower):
         try:
+            from app.services.bang_commands import _invite_reply, _parse_invite_uses
+
+            uses = _parse_invite_uses(re.sub(r"^!", "", text.strip(), count=1))
             tenant = db.query(Tenant).filter(Tenant.id == auth.tenant_id).one()
-            data = mint_invite_link(db, tenant)
-            return IntentResult(
-                True,
-                "Single-use invite link (one person only). After they register it dies — "
-                "run !invitation again for the next person:\n"
-                f"{data['invite_url']}",
-            )
+            data = mint_invite_link(db, tenant, max_uses=uses)
+            return IntentResult(True, _invite_reply(data))
         except Exception as exc:  # noqa: BLE001
             return IntentResult(True, f"Invite link failed: {exc}")
 
@@ -770,7 +768,7 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
             "- claim path <file> / release claim <file> / proceed\n"
             "- show checklist / checklist done <id> / clear checklist\n"
             "- log issue <text> / show issues / resolve issue <id>\n"
-            "- invite / invitation\n"
+            "- invite [N] (N seats, default 1)\n"
             "- create chat <name> / list chats / delete chat [id]\n"
             "- @Research / @Writing / @Code / @Review / @Checklist ...\n"
             "- After agent work: Yes/No on objectives, or yes <id> / no <id>\n"

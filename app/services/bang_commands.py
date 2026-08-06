@@ -52,12 +52,51 @@ Issues
   !resolve <id>            close blocker
 
 Room
-  !invite / !invitation    mint a single-use invite link
+  !invite [N]              mint invite link (N uses, default 1)
   !status <name>           member catch-up (owner/self)
   !clear                   wipe this chat
   !help                    this list
 
 Private room: use /skills for AI (e.g. /code ...). Board tab shows the board."""
+
+
+def _parse_invite_uses(raw: str) -> int:
+    """Parse `invite` / `invite 5` → max uses (default 1)."""
+    from app.services.workspace_invite import clamp_invite_uses
+
+    m = re.match(r"invite(?:\s+(\d+))?\s*$", raw.strip(), re.I)
+    if not m:
+        return 1
+    if m.group(1):
+        return clamp_invite_uses(int(m.group(1)))
+    return 1
+
+
+def _invite_reply(data: dict) -> str:
+    uses = int(data.get("max_uses") or 1)
+    left = int(data.get("uses_left") or uses)
+    url = data["invite_url"]
+    if uses <= 1:
+        msg = (
+            "Invite link (1 use). After someone registers it expires — "
+            "run `!invite` or `!invite 5` for more seats:\n"
+            f"{url}"
+        )
+    else:
+        msg = (
+            f"Invite link ({uses} uses). Seat count drops as people register; "
+            f"expires after the last signup ({left} left now):\n"
+            f"{url}"
+        )
+    teams = data.get("teams") or {}
+    if teams.get("ok"):
+        msg += "\n\nPosted to Teams channel."
+    elif teams.get("skipped"):
+        pass
+    elif teams:
+        reason = teams.get("reason") or f"HTTP {teams.get('status_code')}"
+        msg += f"\n\nTeams notify failed: {reason}"
+    return msg
 
 
 def _progress_bar(done: int, total: int) -> str:
@@ -380,16 +419,12 @@ def try_bang_command(db: Session, auth: AuthContext, chat: Chat, text: str, Inte
         issue.resolved_at = utcnow()
         return IntentResult(True, f"Resolved issue #{iid}.")
 
-    if lower in ("invite", "invitation") or lower.startswith("invite ") or lower.startswith("invitation"):
+    if lower == "invite" or re.match(r"invite\s+\d+\s*$", lower):
         try:
+            uses = _parse_invite_uses(raw)
             tenant = db.query(Tenant).filter(Tenant.id == auth.tenant_id).one()
-            data = mint_invite_link(db, tenant)
-            return IntentResult(
-                True,
-                "Single-use invite link (one person only). After they register it dies — "
-                "run !invitation again for the next person:\n"
-                f"{data['invite_url']}",
-            )
+            data = mint_invite_link(db, tenant, max_uses=uses)
+            return IntentResult(True, _invite_reply(data))
         except Exception as exc:  # noqa: BLE001
             return IntentResult(True, f"Invite link failed: {exc}")
 

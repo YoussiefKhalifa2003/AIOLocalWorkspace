@@ -108,7 +108,6 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   flex: 1;
   overflow: auto;
   padding: 12px;
-  white-space: pre-wrap;
 }
 .msg {
   margin-bottom: 12px;
@@ -121,6 +120,91 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .msg .meta .msg-id { color: #666; }
 .msg.whisper .meta .msg-id::after { content: ""; }
 .msg audio { display: block; margin-top: 6px; width: 240px; height: 28px; }
+.msg .body:not(.md) { white-space: pre-wrap; word-break: break-word; }
+.msg .body.md {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.45;
+  color: #d8d8d8;
+}
+.msg .body.md > :first-child { margin-top: 0; }
+.msg .body.md > :last-child { margin-bottom: 0; }
+.msg .body.md .md-p { margin: 0 0 0.65em; }
+.msg .body.md .md-h {
+  margin: 0.85em 0 0.4em;
+  font-weight: 650;
+  line-height: 1.25;
+  color: #f0f0f0;
+}
+.msg .body.md h1.md-h { font-size: 1.2em; }
+.msg .body.md h2.md-h { font-size: 1.1em; }
+.msg .body.md h3.md-h,
+.msg .body.md h4.md-h { font-size: 1.02em; color: #e4e4e4; }
+.msg .body.md .md-list {
+  margin: 0.35em 0 0.7em;
+  padding-left: 1.35em;
+}
+.msg .body.md .md-list li { margin: 0.2em 0; }
+.msg .body.md .md-quote {
+  margin: 0.5em 0;
+  padding: 0.35em 0.75em;
+  border-left: 3px solid #4a6a52;
+  color: #b7c4b9;
+  background: rgba(70, 110, 80, 0.12);
+}
+.msg .body.md .md-hr {
+  border: 0;
+  border-top: 1px solid #3a3a3a;
+  margin: 0.85em 0;
+}
+.msg .body.md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: #1c1c1c;
+  border: 1px solid #333;
+  border-radius: 3px;
+  padding: 0.08em 0.35em;
+  color: #d7e8c8;
+}
+.msg .body.md .md-pre {
+  margin: 0.55em 0 0.75em;
+  padding: 0.7em 0.85em;
+  overflow-x: auto;
+  background: #141414;
+  border: 1px solid #2e2e2e;
+  border-radius: 6px;
+  white-space: pre;
+}
+.msg .body.md .md-pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 0.86em;
+  color: #cfd8c8;
+}
+.msg .body.md .md-table-wrap {
+  overflow-x: auto;
+  margin: 0.55em 0 0.75em;
+}
+.msg .body.md .md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92em;
+}
+.msg .body.md .md-table th,
+.msg .body.md .md-table td {
+  border: 1px solid #333;
+  padding: 0.35em 0.55em;
+  text-align: left;
+}
+.msg .body.md .md-table th {
+  background: #1a1a1a;
+  color: #eee;
+  font-weight: 600;
+}
+.msg .body.md a { color: #7eb6ff; text-decoration: underline; text-underline-offset: 2px; }
+.msg .body.md strong { color: #f2f2f2; font-weight: 650; }
+.msg .body.md em { color: #cfcfcf; }
 .confirm-actions { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .confirm-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .confirm-row span { color: #aaa; font-size: 12px; }

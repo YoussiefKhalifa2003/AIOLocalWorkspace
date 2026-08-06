@@ -132,7 +132,7 @@ def join_page(token: str, db: Session = Depends(get_db)):
     if tenant_by_invite_token(db, token) is None:
         return HTMLResponse(
             "<html><body><h1>Invite not valid</h1>"
-            "<p>This link was already used or replaced. Ask a teammate for a new invite.</p>"
+            "<p>This link is used up, expired, or was replaced. Ask a teammate for a new invite.</p>"
             "<p><a href='/app'>Go to login</a></p></body></html>",
             status_code=400,
         )
@@ -192,18 +192,26 @@ def join_register_json(token: str, body: RegisterIn, db: Session = Depends(get_d
 
 @router.get("/workspace/invite-link")
 @router.post("/workspace/invite-link")
-def get_invite_link(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)):
-    """Mint a new single-use invite link (previous unused link is invalidated)."""
+def get_invite_link(
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+    max_uses: int = 1,
+):
+    """Mint invite link with max_uses seats (default 1). Previous unused link is invalidated."""
     tenant = db.query(Tenant).filter(Tenant.id == auth.tenant_id).one()
-    data = mint_invite_link(db, tenant)
+    data = mint_invite_link(db, tenant, max_uses=max_uses)
     db.commit()
     return data
 
 
 @router.post("/workspace/invite-link/rotate")
-def rotate_link(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)):
+def rotate_link(
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+    max_uses: int = 1,
+):
     tenant = db.query(Tenant).filter(Tenant.id == auth.tenant_id).one()
-    data = mint_invite_link(db, tenant)
+    data = mint_invite_link(db, tenant, max_uses=max_uses)
     db.commit()
     return data
 

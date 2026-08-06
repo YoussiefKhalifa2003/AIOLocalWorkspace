@@ -12,6 +12,16 @@ from app.services.handoff import enqueue_next_pipeline_job, parse_json
 from app.services.llm import LLMClient, LLMError
 from app.services.rooms import post_agent_output
 
+CHAT_MARKDOWN = (
+    "Format for chat readability: short sections, ## headings sparingly, "
+    "bullet lists, **bold** for key points, and fenced ```language code``` blocks. "
+    "No HTML. Avoid walls of unformatted text."
+)
+
+
+def _sys(text: str) -> str:
+    return f"{text.rstrip()} {CHAT_MARKDOWN}"
+
 
 def _save_artifact(db: Session, job: Job, title: str, content: str) -> Artifact:
     art = Artifact(
@@ -196,7 +206,7 @@ def run_research(db: Session, job: Job, llm: LLMClient) -> None:
         messages=[
             {
                 "role": "system",
-                "content": "You are a research agent. Produce concise factual notes with bullets.",
+                "content": _sys("You are a research agent. Produce concise factual notes with bullets."),
             },
             {"role": "user", "content": text},
         ],
@@ -248,7 +258,7 @@ def run_writing(db: Session, job: Job, llm: LLMClient) -> None:
         messages=[
             {
                 "role": "system",
-                "content": "You are a writing agent. Draft a clear short report or brief.",
+                "content": _sys("You are a writing agent. Draft a clear short report or brief."),
             },
             {"role": "user", "content": prompt},
         ],
@@ -305,7 +315,7 @@ def run_coding(db: Session, job: Job, llm: LLMClient) -> None:
             messages=[
                 {
                     "role": "system",
-                    "content": (
+                    "content": _sys(
                         "You are a coding agent. Write correct, minimal source code for the request. "
                         "Prefer a single fenced code block. Brief notes only if needed. "
                         "Do not write marketing prose or essays."
@@ -345,7 +355,7 @@ def run_code_review(db: Session, job: Job, llm: LLMClient) -> None:
         messages=[
             {
                 "role": "system",
-                "content": (
+                "content": _sys(
                     "You are a code review agent. List bugs, risks, and suggestions. "
                     "Be specific. If no diff is present, say what is missing."
                 ),

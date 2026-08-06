@@ -35,8 +35,8 @@ class LlmCodingBackend(CodingBackend):
                     "role": "system",
                     "content": (
                         "You are a coding agent. Write correct, minimal source code for the request. "
-                        "Prefer a single fenced code block. Brief notes only if needed. "
-                        "Do not write marketing prose or essays."
+                        "Prefer a single fenced code block with a language tag. Brief notes only if needed. "
+                        "Do not write marketing prose or essays. No HTML."
                     ),
                 },
                 {"role": "user", "content": prompt},

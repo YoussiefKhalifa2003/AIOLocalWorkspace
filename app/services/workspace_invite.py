@@ -1,4 +1,4 @@
-"""Workspace invite links: single-use tokens, mint a fresh one when needed."""
+"""Workspace invite links: N-use tokens (default 1), mint via !invite / !invite N."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import Tenant
+
+MAX_INVITE_USES = 50
 
 
 def invite_public_base_url() -> str:
@@ -31,33 +33,73 @@ def invite_public_base_url() -> str:
     return urlunparse((scheme, netloc, "", "", "", ""))
 
 
-def rotate_invite_token(db: Session, tenant: Tenant) -> str:
+def clamp_invite_uses(n: int | None) -> int:
+    try:
+        uses = int(n if n is not None else 1)
+    except (TypeError, ValueError):
+        uses = 1
+    return max(1, min(uses, MAX_INVITE_USES))
+
+
+def rotate_invite_token(db: Session, tenant: Tenant, *, max_uses: int = 1) -> str:
+    uses = clamp_invite_uses(max_uses)
     tenant.invite_token = secrets.token_urlsafe(18)
+    tenant.invite_max_uses = uses
+    tenant.invite_uses_left = uses
     db.flush()
     return tenant.invite_token  # type: ignore[return-value]
 
 
-def mint_invite_link(db: Session, tenant: Tenant) -> dict:
-    """Create a new single-use invite link (invalidates any previous unused link)."""
-    token = rotate_invite_token(db, tenant)
+def mint_invite_link(db: Session, tenant: Tenant, *, max_uses: int = 1) -> dict:
+    """Create a new invite link with max_uses seats (invalidates any previous link)."""
+    uses = clamp_invite_uses(max_uses)
+    token = rotate_invite_token(db, tenant, max_uses=uses)
     url = f"{invite_public_base_url()}/join/{token}"
-    return {"invite_url": url, "token": token, "tenant_id": tenant.id, "single_use": True}
+    from app.services.teams_notify import notify_invite_link
+
+    teams = notify_invite_link(
+        invite_url=url,
+        max_uses=uses,
+        workspace=(tenant.name or "AIO"),
+    )
+    return {
+        "invite_url": url,
+        "token": token,
+        "tenant_id": tenant.id,
+        "max_uses": uses,
+        "uses_left": uses,
+        "single_use": uses == 1,
+        "teams": teams,
+    }
 
 
 def consume_invite_token(db: Session, tenant: Tenant, token: str) -> None:
-    """Invalidate the invite after successful registration."""
-    if (tenant.invite_token or "").strip() == (token or "").strip():
+    """Consume one seat after successful registration; clear token when exhausted."""
+    if (tenant.invite_token or "").strip() != (token or "").strip():
+        return
+    left = tenant.invite_uses_left
+    if left is None:
+        left = 1
+    left = max(0, int(left) - 1)
+    tenant.invite_uses_left = left
+    if left <= 0:
         tenant.invite_token = None
-        db.flush()
+        tenant.invite_uses_left = 0
+    db.flush()
 
 
 def tenant_by_invite_token(db: Session, token: str) -> Tenant | None:
     token = (token or "").strip()
     if not token:
         return None
-    return db.query(Tenant).filter(Tenant.invite_token == token).one_or_none()
+    tenant = db.query(Tenant).filter(Tenant.invite_token == token).one_or_none()
+    if tenant is None:
+        return None
+    left = tenant.invite_uses_left
+    if left is not None and int(left) <= 0:
+        return None
+    return tenant
 
 
-# Back-compat alias used by seed / older call sites
 def invite_link_for_tenant(db: Session, tenant: Tenant) -> dict:
-    return mint_invite_link(db, tenant)
+    return mint_invite_link(db, tenant, max_uses=1)

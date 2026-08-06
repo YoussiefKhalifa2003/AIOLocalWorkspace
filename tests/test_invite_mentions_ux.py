@@ -38,16 +38,48 @@ def test_invite_link_register_and_login(tmp_path, monkeypatch):
     ok = client.post(
         f"/chats/{general}/messages",
         headers=ha,
-        json={"body": "!invitation", "speak": False},
+        json={"body": "!invite", "speak": False},
     )
     body = ok.json()["replies"][0]["body"]
-    assert "Single-use invite link" in body
+    assert "Invite link (1 use)" in body
     assert "/join/" in body
+
+    multi = client.post(
+        f"/chats/{general}/messages",
+        headers=ha,
+        json={"body": "!invite 3", "speak": False},
+    )
+    mbody = multi.json()["replies"][0]["body"]
+    assert "Invite link (3 uses)" in mbody
+    assert "/join/" in mbody
+    token_multi = mbody.strip().split("/join/")[-1].split()[0].strip()
+
+    r1 = client.post(
+        f"/join/{token_multi}/register.json",
+        json={"email": "seat1@example.com", "password": "secret1", "name": "SeatOne"},
+    )
+    assert r1.status_code == 200, r1.text
+    r2 = client.post(
+        f"/join/{token_multi}/register.json",
+        json={"email": "seat2@example.com", "password": "secret1", "name": "SeatTwo"},
+    )
+    assert r2.status_code == 200, r2.text
+    r3 = client.post(
+        f"/join/{token_multi}/register.json",
+        json={"email": "seat3@example.com", "password": "secret1", "name": "SeatThree"},
+    )
+    assert r3.status_code == 200, r3.text
+    r4 = client.post(
+        f"/join/{token_multi}/register.json",
+        json={"email": "seat4@example.com", "password": "secret1", "name": "SeatFour"},
+    )
+    assert r4.status_code == 400
 
     link = client.get("/workspace/invite-link", headers=ha)
     assert link.status_code == 200
     token = link.json()["token"]
     assert link.json().get("single_use") is True
+    assert link.json().get("max_uses") == 1
 
     page = client.get(f"/join/{token}")
     assert page.status_code == 200
@@ -69,9 +101,11 @@ def test_invite_link_register_and_login(tmp_path, monkeypatch):
     dead = client.get(f"/join/{token}")
     assert dead.status_code == 400
 
-    # Mint a fresh link for the next person
-    link2 = client.post("/workspace/invite-link", headers=ha)
+    # Mint a fresh multi-use link via API
+    link2 = client.post("/workspace/invite-link?max_uses=2", headers=ha)
     assert link2.status_code == 200
+    assert link2.json()["max_uses"] == 2
+    assert link2.json().get("single_use") is False
     token2 = link2.json()["token"]
     assert token2 != token
     reg2 = client.post(
@@ -79,6 +113,11 @@ def test_invite_link_register_and_login(tmp_path, monkeypatch):
         json={"email": "second@example.com", "password": "secret2", "name": "Second"},
     )
     assert reg2.status_code == 200
+    reg2b = client.post(
+        f"/join/{token2}/register.json",
+        json={"email": "third@example.com", "password": "secret2", "name": "Third"},
+    )
+    assert reg2b.status_code == 200
 
     # Name required
     link3 = client.post("/workspace/invite-link", headers=ha)

@@ -381,6 +381,141 @@
       .replace(/>/g, "&gt;");
   }
 
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/"/g, "&quot;");
+  }
+
+  function looksLikeMarkdown(text) {
+    const t = String(text || "");
+    if (!t) return false;
+    return /(^|\n)\s{0,3}#{1,4}\s|(^|\n)```|(^|\n)\s*[-*+]\s|(^|\n)\s*\d+\.\s|(^|\n)>\s|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\[[^\]]+\]\([^)]+\)|(^|\n)\|.+\|/.test(t);
+  }
+
+  function formatInlineMarkdown(raw) {
+    let s = escapeHtml(raw);
+    // code first so we don't format inside ticks
+    s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+    s = s.replace(/(^|[^_\w])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
+    s = s.replace(
+      /\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+    );
+    s = s.replace(
+      /(^|[\s(])(https?:\/\/[^\s<]+)/g,
+      '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>'
+    );
+    s = s.replace(
+      /(^|[\s(])(mailto:[^\s<]+)/gi,
+      (_, pre, href) => `${pre}<a href="${href}">${href.replace(/^mailto:/i, "")}</a>`
+    );
+    return s;
+  }
+
+  function renderMarkdownHtml(text) {
+    const src = String(text || "").replace(/\r\n/g, "\n");
+    const blocks = [];
+    const fenceRe = /```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g;
+    let last = 0;
+    let m;
+    while ((m = fenceRe.exec(src)) !== null) {
+      if (m.index > last) blocks.push({ type: "md", text: src.slice(last, m.index) });
+      blocks.push({ type: "code", lang: m[1] || "", code: m[2].replace(/\n$/, "") });
+      last = m.index + m[0].length;
+    }
+    if (last < src.length) blocks.push({ type: "md", text: src.slice(last) });
+
+    const out = [];
+    blocks.forEach((block) => {
+      if (block.type === "code") {
+        const lang = block.lang ? ` data-lang="${escapeAttr(block.lang)}"` : "";
+        out.push(
+          `<pre class="md-pre"${lang}><code>${escapeHtml(block.code)}</code></pre>`
+        );
+        return;
+      }
+      const chunks = block.text.split(/\n{2,}/);
+      chunks.forEach((chunk) => {
+        const trimmed = chunk.replace(/^\n+|\n+$/g, "");
+        if (!trimmed) return;
+        const lines = trimmed.split("\n");
+
+        if (lines.length === 1 && /^\s*(-{3,}|_{3,}|\*{3,})\s*$/.test(lines[0])) {
+          out.push("<hr class=\"md-hr\" />");
+          return;
+        }
+
+        const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+        if (heading && lines.length === 1) {
+          const level = heading[1].length;
+          out.push(`<h${level} class="md-h">${formatInlineMarkdown(heading[2].trim())}</h${level}>`);
+          return;
+        }
+
+        if (lines.every((ln) => /^\s*>\s?/.test(ln) || ln.trim() === "")) {
+          const inner = lines
+            .map((ln) => ln.replace(/^\s*>\s?/, ""))
+            .join("\n");
+          out.push(`<blockquote class="md-quote">${formatInlineMarkdown(inner)}</blockquote>`);
+          return;
+        }
+
+        if (lines.every((ln) => /^\s*[-*+]\s+/.test(ln) || ln.trim() === "")) {
+          const items = lines
+            .filter((ln) => /^\s*[-*+]\s+/.test(ln))
+            .map((ln) => `<li>${formatInlineMarkdown(ln.replace(/^\s*[-*+]\s+/, ""))}</li>`)
+            .join("");
+          out.push(`<ul class="md-list">${items}</ul>`);
+          return;
+        }
+
+        if (lines.every((ln) => /^\s*\d+\.\s+/.test(ln) || ln.trim() === "")) {
+          const items = lines
+            .filter((ln) => /^\s*\d+\.\s+/.test(ln))
+            .map((ln) => `<li>${formatInlineMarkdown(ln.replace(/^\s*\d+\.\s+/, ""))}</li>`)
+            .join("");
+          out.push(`<ol class="md-list">${items}</ol>`);
+          return;
+        }
+
+        // GFM-ish table: header | sep | rows
+        if (
+          lines.length >= 2 &&
+          lines[0].includes("|") &&
+          /^\s*\|?[\s:-]+\|[\s|:-]+\|?\s*$/.test(lines[1])
+        ) {
+          const splitRow = (row) =>
+            row
+              .trim()
+              .replace(/^\|/, "")
+              .replace(/\|$/, "")
+              .split("|")
+              .map((c) => c.trim());
+          const headers = splitRow(lines[0]);
+          const bodyRows = lines.slice(2).filter((ln) => ln.includes("|"));
+          const thead = `<thead><tr>${headers
+            .map((h) => `<th>${formatInlineMarkdown(h)}</th>`)
+            .join("")}</tr></thead>`;
+          const tbody = `<tbody>${bodyRows
+            .map((row) => {
+              const cells = splitRow(row);
+              return `<tr>${headers
+                .map((_, i) => `<td>${formatInlineMarkdown(cells[i] || "")}</td>`)
+                .join("")}</tr>`;
+            })
+            .join("")}</tbody>`;
+          out.push(`<div class="md-table-wrap"><table class="md-table">${thead}${tbody}</table></div>`);
+          return;
+        }
+
+        out.push(`<p class="md-p">${formatInlineMarkdown(trimmed).replace(/\n/g, "<br />")}</p>`);
+      });
+    });
+    return out.join("");
+  }
+
   function showBoardPanel(card) {
     const panel = $("boardPanel");
     panel.classList.remove("hidden");
@@ -642,8 +777,15 @@
   }
 
   function setMessageBody(el, text) {
+    const raw = String(text || "");
+    if (looksLikeMarkdown(raw) || raw.includes("\n")) {
+      el.classList.add("md");
+      el.innerHTML = renderMarkdownHtml(raw);
+      return;
+    }
+    el.classList.remove("md");
     el.textContent = "";
-    const parts = String(text || "").split(/(https?:\/\/\S+|mailto:[^\s]+)/g);
+    const parts = raw.split(/(https?:\/\/\S+|mailto:[^\s]+)/g);
     parts.forEach((part) => {
       if (/^https?:\/\//.test(part)) {
         const a = document.createElement("a");
@@ -663,10 +805,14 @@
     });
   }
 
-  function showInviteLink(url) {
-    window.alert(
-      `Single-use invite link (one person).\nAfter they register, run !invitation or click + again for the next person.\n\n${url}`
-    );
+  function showInviteLink(data) {
+    const url = typeof data === "string" ? data : data.invite_url;
+    const uses = Number((data && data.max_uses) || 1);
+    const msg =
+      uses <= 1
+        ? `Invite link (1 use).\nAfter someone registers it expires — run !invite or !invite 5 for more seats.\n\n${url}`
+        : `Invite link (${uses} uses).\nSeat count drops as people register.\n\n${url}`;
+    window.alert(msg);
     setVoiceStatus("invite link ready");
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(url).catch(() => {});
@@ -1088,8 +1234,11 @@
 
   async function inviteMember() {
     try {
-      const data = await api("/workspace/invite-link");
-      if (data.invite_url) showInviteLink(data.invite_url);
+      const raw = window.prompt("How many people can use this link? (1–50)", "1");
+      if (raw === null) return;
+      const n = Math.max(1, Math.min(50, parseInt(raw, 10) || 1));
+      const data = await api(`/workspace/invite-link?max_uses=${n}`, { method: "POST" });
+      if (data.invite_url) showInviteLink(data);
       else setVoiceStatus("no invite link");
     } catch (e) {
       setVoiceStatus(String(e.message || e));
@@ -1236,7 +1385,7 @@
     { insert: "!issue ", label: "!issue", blurb: "log a blocker", args: ["<text>"] },
     { insert: "!issues", label: "!issues", blurb: "show blockers", args: [] },
     { insert: "!resolve ", label: "!resolve", blurb: "close blocker", args: ["<id>"] },
-    { insert: "!invitation", label: "!invitation", blurb: "new single-use invite", args: [] },
+    { insert: "!invite ", label: "!invite", blurb: "invite link (optional seats)", args: ["[N]"] },
     { insert: "!status ", label: "!status", blurb: "member catch-up", args: ["<name>"] },
     { insert: "!clear", label: "!clear", blurb: "wipe this chat", args: [] },
     { insert: "!help", label: "!help", blurb: "list commands", args: [] },
@@ -1289,6 +1438,12 @@
       const token = c.label.slice(1).toLowerCase();
       return !p || token.startsWith(p) || c.label.toLowerCase().includes(p);
     }).slice(0, 16);
+  }
+
+  function isCompleteCatalogToken(catalog, after) {
+    const p = (after || "").toLowerCase();
+    if (!p) return false;
+    return catalog.some((c) => c.label.slice(1).toLowerCase() === p);
   }
 
   function findCommandSpec(v) {
@@ -1569,6 +1724,11 @@
         return;
       }
       if (hit.ch === "!") {
+        // Full command typed (!list, !invite, !set) — close prefix; args need a space
+        if (isCompleteCatalogToken(COMMAND_CATALOG, hit.after)) {
+          hideMentions();
+          return;
+        }
         showPicker(filterCatalog(COMMAND_CATALOG, hit.after), hit.idx, "prefix");
         return;
       }
@@ -1579,16 +1739,17 @@
           return;
         }
         setVoiceStatus("");
+        if (isCompleteCatalogToken(SKILL_CATALOG, hit.after)) {
+          hideMentions();
+          return;
+        }
         showPicker(filterCatalog(SKILL_CATALOG, hit.after), hit.idx, "prefix");
         return;
       }
     }
-    // Argument stage for completed command tokens
+    // Argument stage for completed command tokens (after trailing space)
     const showed = await maybeShowArgPicker();
-    if (!showed && !activePrefix(v)) {
-      // keep closed unless arg picker opened
-      if (!pickerState.open) hideMentions();
-    }
+    if (!showed) hideMentions();
   }
 
   $("input").addEventListener("input", () => {

@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     host_bind: str = "0.0.0.0"
     # Public base for /join/{token} invite links (LAN IP + port)
     invite_app_url: str = ""
+    # Microsoft Teams Incoming Webhook / Workflow URL (optional; blank = skip)
+    teams_webhook_url: str = ""
 
     def resolve_gemini_key(self) -> str:
         return (self.gemini_api_key or "").strip()
