@@ -66,7 +66,7 @@ def test_evidence_includes_private_room_help_ask(tmp_path, monkeypatch):
                 chat_id=priv.id,
                 sender_user_id=None,
                 agent_slug="ask",
-                body="## app/api/chats.py — Auth Edge Case Help\nHere is diagnostic guidance…",
+                body="## app/api/chats.py - Auth Edge Case Help\nHere is diagnostic guidance…",
                 visibility="public",
             )
         )

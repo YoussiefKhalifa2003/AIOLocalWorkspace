@@ -6,6 +6,7 @@ from app.services.audit import write_audit
 
 AGENT_ROOM = {
     "ask": "ask",
+    "deepresearch": "ask",
     "research": "ask",  # legacy
     "writing": "writing",
     "coding": "coding",

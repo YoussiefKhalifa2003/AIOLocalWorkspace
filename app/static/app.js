@@ -38,6 +38,7 @@
   const AGENT_COLORS = {
     lead: "#6a6",
     ask: "#4a9",
+    deepresearch: "#3a8",
     research: "#4a9",
     writing: "#a84",
     coding: "#4af",
@@ -161,6 +162,7 @@
 
   const AGENT_LABELS = {
     ask: "Ask",
+    deepresearch: "DeepResearch",
     research: "Ask",
     writing: "Writing",
     coding: "Code",
@@ -174,8 +176,14 @@
     ask: {
       mention: "/ask",
       job: "answers questions",
-      line: "Plain answers, no ceremony. Attach a file and ask what it is — I’ll read it.",
+      line: "Plain answers, no ceremony. Attach a file and ask what it is - I'll read it.",
       accent: "#4a9",
+    },
+    deepresearch: {
+      mention: "/deepresearch",
+      job: "deep research briefs",
+      line: "Long-form analysis with tables, tradeoffs, and next steps. Use when /ask is too thin.",
+      accent: "#3a8",
     },
     writing: {
       mention: "/write",
@@ -451,6 +459,36 @@
       items.length = 0;
     };
 
+    const isTableRow = (line) => /^\s*\|.+\|\s*$/.test(line);
+    const isTableSep = (line) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+    const splitCells = (line) =>
+      line
+        .trim()
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map((c) => c.trim());
+
+    const flushTable = (out, rows) => {
+      if (rows.length < 2) return false;
+      const head = splitCells(rows[0]);
+      const bodyRows = rows.slice(2).filter((r) => isTableRow(r));
+      if (!head.length) return false;
+      const thead = `<thead><tr>${head
+        .map((c) => `<th>${formatInlineMarkdown(c)}</th>`)
+        .join("")}</tr></thead>`;
+      const tbody = `<tbody>${bodyRows
+        .map((r) => {
+          const cells = splitCells(r);
+          return `<tr>${head
+            .map((_, i) => `<td>${formatInlineMarkdown(cells[i] || "")}</td>`)
+            .join("")}</tr>`;
+        })
+        .join("")}</tbody>`;
+      out.push(`<div class="md-table-wrap"><table class="md-table">${thead}${tbody}</table></div>`);
+      return true;
+    };
+
     const out = [];
     blocks.forEach((block) => {
       if (block.type === "code") {
@@ -465,6 +503,7 @@
       let listKind = null;
       let listItems = [];
       let para = [];
+      let tableBuf = [];
 
       const flushPara = () => {
         if (!para.length) return;
@@ -474,14 +513,33 @@
         out.push(`<p class="md-p">${formatInlineMarkdown(text).replace(/\n/g, "<br />")}</p>`);
       };
 
+      const flushTableBuf = () => {
+        if (!tableBuf.length) return;
+        if (!flushTable(out, tableBuf)) {
+          tableBuf.forEach((row) => para.push(row));
+          flushPara();
+        }
+        tableBuf = [];
+      };
+
       lines.forEach((line) => {
         const trimmed = line.trimEnd();
         if (!trimmed.trim()) {
+          flushTableBuf();
           flushList(out, listKind, listItems);
           listKind = null;
           flushPara();
           return;
         }
+
+        if (isTableRow(trimmed) || (tableBuf.length && isTableSep(trimmed))) {
+          flushList(out, listKind, listItems);
+          listKind = null;
+          flushPara();
+          tableBuf.push(trimmed);
+          return;
+        }
+        flushTableBuf();
 
         if (/^\s*(-{3,}|_{3,}|\*{3,})\s*$/.test(trimmed)) {
           flushList(out, listKind, listItems);
@@ -536,12 +594,12 @@
           return;
         }
 
-        // GFM table rows kept as plain paragraphs unless full table detected later — skip for status
         flushList(out, listKind, listItems);
         listKind = null;
         para.push(trimmed);
       });
 
+      flushTableBuf();
       flushList(out, listKind, listItems);
       flushPara();
     });
@@ -591,7 +649,7 @@
       <div class="setup-head">
         <div class="setup-kicker">New objective</div>
         <div class="setup-title">${escapeHtml(title)}</div>
-        <div class="setup-hint">Optional — add a short brief and subtasks, or skip.</div>
+        <div class="setup-hint">Optional - add a short brief and subtasks, or skip.</div>
       </div>
       <label class="setup-label">Description
         <textarea class="setup-desc" rows="3" placeholder="What does done look like?"></textarea>
@@ -655,7 +713,7 @@
       const pid = state.projectId;
       if (!pid) {
         status.hidden = false;
-        status.textContent = "No project — open board once, then retry.";
+        status.textContent = "No project - open board once, then retry.";
         return;
       }
       status.hidden = false;
@@ -820,7 +878,7 @@
     }
   }
 
-  function renderChatLi(c, { allowDelete, allowRename }) {
+  function renderChatLi(c, { allowDelete }) {
     const li = document.createElement("li");
     li.dataset.id = c.id;
     if (Number(c.id) === Number(state.chatId)) li.classList.add("active");
@@ -830,23 +888,6 @@
     label.textContent = c.kind === "private" ? "my private room" : `#${c.name}`;
     label.onclick = () => selectChat(c.id);
     li.appendChild(label);
-
-    const canRename =
-      allowRename &&
-      !(c.name === "general" && c.kind === "channel") &&
-      c.kind === "channel";
-    if (canRename) {
-      const ren = document.createElement("button");
-      ren.type = "button";
-      ren.className = "x rename";
-      ren.title = "rename chat";
-      ren.textContent = "✎";
-      ren.onclick = (ev) => {
-        ev.stopPropagation();
-        void renameChat(c);
-      };
-      li.appendChild(ren);
-    }
 
     if (allowDelete && !(c.name === "general" && c.kind === "channel")) {
       const del = document.createElement("button");
@@ -879,11 +920,11 @@
 
     const teamList = $("teamList");
     teamList.innerHTML = "";
-    team.forEach((c) => teamList.appendChild(renderChatLi(c, { allowDelete: true, allowRename: true })));
+    team.forEach((c) => teamList.appendChild(renderChatLi(c, { allowDelete: true })));
 
     const myRoomList = $("myRoomList");
     myRoomList.innerHTML = "";
-    mine.forEach((c) => myRoomList.appendChild(renderChatLi(c, { allowDelete: false, allowRename: false })));
+    mine.forEach((c) => myRoomList.appendChild(renderChatLi(c, { allowDelete: false })));
 
     if (state.chatId && !chats.some((c) => Number(c.id) === Number(state.chatId))) {
       state.chatId = null;
@@ -928,16 +969,6 @@
           void kickMember(m);
         };
         li.appendChild(kick);
-        const rename = document.createElement("button");
-        rename.type = "button";
-        rename.className = "x rename";
-        rename.title = "rename";
-        rename.textContent = "✎";
-        rename.onclick = (ev) => {
-          ev.stopPropagation();
-          void renameMember(m);
-        };
-        li.appendChild(rename);
       }
       memberList.appendChild(li);
     });
@@ -949,21 +980,6 @@
     try {
       await api(`/workspace/members/${m.user_id}`, { method: "DELETE" });
       setVoiceStatus(`removed ${name}`);
-      await refreshSidebar();
-    } catch (e) {
-      setVoiceStatus(String(e.message || e));
-    }
-  }
-
-  async function renameMember(m) {
-    const next = window.prompt("One-word display name", m.name || "");
-    if (next === null) return;
-    try {
-      await api(`/workspace/members/${m.user_id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ name: next.trim() }),
-      });
-      setVoiceStatus("member updated");
       await refreshSidebar();
     } catch (e) {
       setVoiceStatus(String(e.message || e));
@@ -1014,7 +1030,7 @@
     const uses = Number((data && data.max_uses) || 1);
     const msg =
       uses <= 1
-        ? `Invite link (1 use).\nAfter someone registers it expires — run !invite or !invite 5 for more seats.\n\n${url}`
+        ? `Invite link (1 use).\nAfter someone registers it expires - run !invite or !invite 5 for more seats.\n\n${url}`
         : `Invite link (${uses} uses).\nSeat count drops as people register.\n\n${url}`;
     window.alert(msg);
     setVoiceStatus("invite link ready");
@@ -1028,7 +1044,7 @@
   function parseMsgDate(iso) {
     if (!iso) return null;
     let s = String(iso).trim();
-    // SQLite/UTC rows often arrive naive ("2026-08-06 09:23:29") — treat as UTC
+    // SQLite/UTC rows often arrive naive ("2026-08-06 09:23:29") - treat as UTC
     if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
       s = s.replace(" ", "T");
       if (!s.endsWith("Z")) s += "Z";
@@ -1290,7 +1306,7 @@
   function beginEditMessage(div, m) {
     if (!state.chatId || m.deleted_at) return;
     if (state.editingMsgId && Number(state.editingMsgId) !== Number(m.id)) {
-      // cancel other edit by re-polling that bubble later — force single edit
+      // cancel other edit by re-polling that bubble later - force single edit
       const prev = document.querySelector(`.msg[data-msg-id="${state.editingMsgId}"]`);
       if (prev && prev._editCancel) prev._editCancel();
     }
@@ -1729,7 +1745,7 @@
         method: "POST",
         body: JSON.stringify({
           body: body || "",
-          speak: $("speakToggle").checked,
+          speak: false,
           attachment_ids: ids,
         }),
       });
@@ -1742,9 +1758,9 @@
 
   function skillNameFromBody(body) {
     const t = String(body || "").trim();
-    const m = t.match(/^\/(ask|code|research|write|web|review|checklist|status)\b/i);
-    if (m) return m[1].toLowerCase();
-    const m2 = t.match(/^(?:force\s+)?(code|ask|research|write|review)\b/i);
+    const m = t.match(/^\/(ask|deepresearch|deep-research|code|research|write|web|review|checklist|status)\b/i);
+    if (m) return m[1].toLowerCase().replace(/-/g, "");
+    const m2 = t.match(/^(?:force\s+)?(code|ask|deepresearch|research|write|review)\b/i);
     return m2 ? m2[1].toLowerCase() : "";
   }
 
@@ -1754,8 +1770,8 @@
     if (/^\/clear\b/i.test(t) || /^!clear\b/i.test(t)) return false;
     // /status works in any room; other skills are private-only
     if (/^\/status\b/i.test(t)) return true;
-    if (/^\/(ask|code|research|write|web|review|checklist)\b/i.test(t)) return true;
-    if (/^(force\s+)?(code|ask|research|write|review)\b/i.test(t)) return true;
+    if (/^\/(ask|deepresearch|deep-research|code|research|write|web|review|checklist)\b/i.test(t)) return true;
+    if (/^(force\s+)?(code|ask|deepresearch|research|write|review)\b/i.test(t)) return true;
     const meta = currentChatMeta();
     if (meta && meta.kind === "private" && t.startsWith("/")) return true;
     return false;
@@ -1773,7 +1789,7 @@
     const input = $("input");
     if (!input) return;
     input.disabled = !!on;
-    // Disabling the input drops focus — put it back so you can keep typing
+    // Disabling the input drops focus - put it back so you can keep typing
     if (!on) {
       requestAnimationFrame(() => {
         if (!input.disabled) input.focus();
@@ -1783,7 +1799,7 @@
 
   function estimateWaitMs(body) {
     const skill = skillNameFromBody(body);
-    if (skill === "code") return 120000;
+    if (skill === "deepresearch" || skill === "code") return 120000;
     if (skill === "ask" || skill === "research" || skill === "web" || skill === "review") return 90000;
     return 60000;
   }
@@ -1826,12 +1842,12 @@
     if (!box || !bar) return;
     box.classList.remove("hidden");
     label.textContent = skill
-      ? `Running /${skill} — model is working…`
-      : "Agent working — model is generating…";
+      ? `Running /${skill} - model is working…`
+      : "Agent working - model is generating…";
     if (hint) {
       hint.textContent = skill
         ? `Please wait while /${skill} finishes`
-        : "Please wait — the model is generating a reply";
+        : "Please wait - the model is generating a reply";
     }
     bar.style.width = "4%";
     showPendingBubble(skill);
@@ -1914,29 +1930,9 @@
     }
   }
 
-  async function renameChat(c) {
-    const next = window.prompt("Rename team chat", c.name || "");
-    if (next === null) return;
-    const cleaned = next.trim();
-    if (!cleaned) return;
-    try {
-      await api(`/chats/${c.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ name: cleaned }),
-      });
-      await refreshSidebar();
-      if (Number(state.chatId) === Number(c.id)) {
-        $("chatTitle").textContent = `team #${cleaned}`;
-      }
-      setVoiceStatus(`renamed chat to #${cleaned}`);
-    } catch (e) {
-      setVoiceStatus(String(e.message || e));
-    }
-  }
-
   async function inviteMember() {
     try {
-      const raw = window.prompt("How many people can use this link? (1–50)", "1");
+      const raw = window.prompt("How many people can use this link? (1-50)", "1");
       if (raw === null) return;
       const n = Math.max(1, Math.min(50, parseInt(raw, 10) || 1));
       const data = await api(`/workspace/invite-link?max_uses=${n}`, { method: "POST" });
@@ -2103,6 +2099,7 @@
 
   const SKILL_CATALOG = [
     { insert: "/ask ", label: "/ask", blurb: "just ask anything", args: ["<ask>"] },
+    { insert: "/deepresearch ", label: "/deepresearch", blurb: "deep dive with tables", args: ["<ask>"] },
     { insert: "/code ", label: "/code", blurb: "build or patch", args: ["<ask>"] },
     { insert: "/write ", label: "/write", blurb: "draft clear prose", args: ["<ask>"] },
     { insert: "/review ", label: "/review", blurb: "check the diff", args: ["<ask>"] },
@@ -2435,7 +2432,7 @@
         return;
       }
       if (hit.ch === "!") {
-        // Full command typed (!list, !invite, !set) — close prefix; args need a space
+        // Full command typed (!list, !invite, !set) - close prefix; args need a space
         if (isCompleteCatalogToken(COMMAND_CATALOG, hit.after)) {
           hideMentions();
           return;

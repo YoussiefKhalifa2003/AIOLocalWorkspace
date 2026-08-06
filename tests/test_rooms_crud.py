@@ -30,7 +30,7 @@ def _boot(tmp_path, monkeypatch):
     return TestClient(app), info
 
 
-def test_rename_channel_and_block_general(tmp_path, monkeypatch):
+def test_rename_channel_disabled_and_block_general_delete(tmp_path, monkeypatch):
     client, info = _boot(tmp_path, monkeypatch)
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
 
@@ -43,15 +43,7 @@ def test_rename_channel_and_block_general(tmp_path, monkeypatch):
     cid = created.json()["id"]
 
     ren = client.patch(f"/chats/{cid}", headers=ha, json={"name": "design"})
-    assert ren.status_code == 200, ren.text
-    assert ren.json()["name"] == "design"
-
-    blocked = client.patch(
-        f"/chats/{info['chat_general']}",
-        headers=ha,
-        json={"name": "lobby"},
-    )
-    assert blocked.status_code == 400
+    assert ren.status_code == 403
 
     del_general = client.delete(f"/chats/{info['chat_general']}", headers=ha)
     assert del_general.status_code == 400

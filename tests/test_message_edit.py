@@ -1,4 +1,4 @@
-"""Edit/delete own chat messages — ChatGPT-style truncate on edit."""
+"""Edit/delete own chat messages - ChatGPT-style truncate on edit."""
 
 from __future__ import annotations
 

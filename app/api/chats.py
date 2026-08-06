@@ -104,17 +104,7 @@ def rename_chat(
     auth: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
 ):
-    chat = require_chat_access(db, auth, chat_id)
-    if chat.kind == "private" and chat.owner_user_id != auth.user_id:
-        raise HTTPException(status_code=403, detail="cannot rename another user's private room")
-    if chat.name == "general" and chat.kind == "channel":
-        raise HTTPException(status_code=400, detail="cannot rename general channel")
-    name = body.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="name required")
-    chat.name = name[:120]
-    db.commit()
-    return chat_to_dict(chat)
+    raise HTTPException(status_code=403, detail="chat rename is disabled")
 
 
 @router.delete("/chats/{chat_id}")
@@ -347,7 +337,7 @@ def edit_message(
     db.flush()
 
     replies: list[ChatMessage] = []
-    # Re-process as if newly sent (skip /clear — editing should not wipe the room)
+    # Re-process as if newly sent (skip /clear - editing should not wipe the room)
     skip_rerun = text.startswith("/") and text[1:].strip().lower().startswith(
         ("clear", "clear chat", "clear messages")
     )

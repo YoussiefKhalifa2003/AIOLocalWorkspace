@@ -74,6 +74,7 @@ DEFAULT_OPENROUTER_PREFS: dict[str, str] = {
     "coding": "cohere/north-mini-code:free",
     "code_review": "openai/gpt-oss-20b:free",
     "ask": "inclusionai/ling-3.0-flash:free",
+    "deepresearch": "google/gemma-4-31b-it:free",
     "writing": "poolside/laguna-s-2.1:free",
     "checklist": "nvidia/nemotron-nano-9b-v2:free",
     "status": "inclusionai/ling-3.0-flash:free",

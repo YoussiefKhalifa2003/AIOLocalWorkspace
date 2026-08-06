@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AIO</title>
-  <link rel="stylesheet" href="/static/styles.css?v=layout1" />
+  <link rel="stylesheet" href="/static/styles.css?v=deep1" />
 </head>
 <body>
   <div id="login" class="screen">
@@ -29,7 +29,6 @@
         <button type="button" data-tab="models" class="tab">Agents</button>
         <button type="button" data-tab="analytics" class="tab" id="analyticsTab">Dashboard</button>
       </nav>
-      <label class="speak"><input type="checkbox" id="speakToggle" /> speak replies</label>
       <label class="speak"><input type="checkbox" id="voiceToggle" /> voice input</label>
       <button id="logoutBtn" type="button">logout</button>
     </header>
@@ -60,7 +59,7 @@
               <span id="llmWaitLabel" class="llm-wait-label">Agent working…</span>
             </div>
             <div class="llm-wait-track"><div id="llmWaitBar" class="llm-wait-bar"></div></div>
-            <div id="llmWaitHint" class="llm-wait-hint">Please wait — the model is generating a reply</div>
+            <div id="llmWaitHint" class="llm-wait-hint">Please wait - the model is generating a reply</div>
           </div>
         </div>
         <form id="composer">
@@ -109,6 +108,6 @@
       <div id="analyticsBody" class="analytics-body"></div>
     </div>
   </div>
-  <script src="/static/app.js?v=layout1"></script>
+  <script src="/static/app.js?v=deep1"></script>
 </body>
 </html>

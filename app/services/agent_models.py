@@ -23,6 +23,7 @@ def get_prefs_map(db: Session, tenant_id: int) -> dict[str, str]:
             "coding": "deepseek-v4-flash-free",
             "code_review": "big-pickle",
             "ask": "ling-3.0-flash-free",
+            "deepresearch": "nemotron-3-ultra-free",
             "writing": "mimo-v2.5-free",
             "checklist": "north-mini-code-free",
             "status": "ling-3.0-flash-free",

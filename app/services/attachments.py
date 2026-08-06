@@ -68,7 +68,7 @@ def validate_upload(*, filename: str, content_type: str | None, size: int) -> tu
     ext = _extension(safe)
     if ext not in ALLOWED_EXTENSIONS:
         raise AttachmentError(
-            "unsupported file type — use png, jpeg, gif, webp, pdf, txt, or md"
+            "unsupported file type - use png, jpeg, gif, webp, pdf, txt, or md"
         )
     canonical = ALLOWED_EXTENSIONS[ext]
     ctype = (content_type or "").split(";")[0].strip().lower()

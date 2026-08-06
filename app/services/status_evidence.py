@@ -198,9 +198,9 @@ def _recent_jobs_for_user(
         snippet = _clip(art.content, 200) if art and art.content else ""
         bit = f"job #{j.id} {j.agent_type} [{j.status}]"
         if ask:
-            bit += f" — ask: {_clip(ask, 200)}"
+            bit += f" - ask: {_clip(ask, 200)}"
         if snippet:
-            bit += f" — out: {snippet}"
+            bit += f" - out: {snippet}"
         lines.append(bit)
     return lines
 
@@ -214,7 +214,7 @@ def build_user_evidence(
 ) -> str:
     """Full activity pack for /status (board + channels + private room + agent jobs).
 
-    Intended for self-view or workspace owner catch-up — includes private-room
+    Intended for self-view or workspace owner catch-up - includes private-room
     skill traffic so managers do not need to ping the member.
     """
     base = format_user_status(db, tenant_id=tenant_id, project_id=project_id, user=user)
@@ -267,7 +267,7 @@ def build_user_evidence(
     )
     if private:
         lines.append(
-            "Private-room activity (member notes + /skills + agent replies — "
+            "Private-room activity (member notes + /skills + agent replies - "
             "visible to owner status only):"
         )
         lines.extend(f"  {p}" for p in private)
@@ -279,7 +279,7 @@ def build_user_evidence(
         lines.append("Recent team-channel messages:")
         lines.extend(f"  {c}" for c in channel)
     else:
-        lines.append("Recent team-channel messages: (none — quiet in channels)")
+        lines.append("Recent team-channel messages: (none - quiet in channels)")
 
     uploads = _recent_attachments_for_user(db, tenant_id=tenant_id, user_id=user.id)
     if uploads:
@@ -312,7 +312,7 @@ def build_team_evidence(db: Session, *, tenant_id: int, project_id: int) -> str:
         )
         if not priv and not jobs:
             continue
-        extra.append(f"— {u.name or u.email}:")
+        extra.append(f"- {u.name or u.email}:")
         for j in jobs[:3]:
             extra.append(f"  {j}")
         for p in priv[-4:]:
