@@ -96,47 +96,8 @@ def _progress_bar(done: int, total: int, width: int = 20) -> str:
     return f"[{'#' * filled}{'-' * (width - filled)}] {done}/{total} ({pct}%)"
 
 
-def _candidate_objectives(
-    db: Session, *, tenant_id: int, project_id: int, user_id: int, request_text: str
-) -> list[Objective]:
-    """Objectives that this request is actually about. Empty if none clearly match.
-
-    Avoids asking 'is objective N met?' for unrelated open cards after freeform /code.
-    """
-    rows = (
-        db.query(Objective)
-        .filter(
-            Objective.tenant_id == tenant_id,
-            Objective.project_id == project_id,
-            Objective.user_id == user_id,
-            Objective.done.is_(False),
-        )
-        .order_by(Objective.id.desc())
-        .all()
-    )
-    if not rows:
-        return []
-
-    text = request_text or ""
-    # Explicit ids in the prompt: "objective 7", "#7", "obj-7"
-    explicit_ids = {
-        int(x)
-        for x in re.findall(
-            r"(?:objective|obj(?:ective)?|#)\s*[-:]?\s*(\d+)", text, flags=re.I
-        )
-    }
-    if explicit_ids:
-        hit = [o for o in rows if o.id in explicit_ids]
-        if hit:
-            return hit[:3]
-
-    # Prefer open cards already in agent flow
-    active_statuses = {"agent_backlog", "in_review", "doing"}
-    active = [o for o in rows if (o.status or "") in active_statuses]
-
-    req_words = {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2}
-    # Drop skill verbs that create false overlaps
-    stop = {
+_CONFIRM_STOP = frozenset(
+    {
         "code",
         "coding",
         "write",
@@ -155,17 +116,201 @@ def _candidate_objectives(
         "and",
         "for",
         "with",
+        "from",
+        "this",
+        "that",
+        "into",
+        "about",
+        "using",
+        "implement",
+        "implementation",
+        "objective",
+        "objectives",
+        "task",
+        "tasks",
+        "work",
+        "working",
+        "agent",
+        "agents",
+        "need",
+        "needs",
+        "want",
+        "just",
+        "some",
+        "more",
+        "like",
+        "also",
+        "then",
+        "when",
+        "have",
+        "been",
+        "will",
+        "can",
+        "should",
+        "file",
+        "files",
+        "app",
+        "api",
+        "page",
+        "pages",
+        "user",
+        "users",
+        "data",
+        "test",
+        "tests",
+        "new",
+        "set",
+        "get",
+        "put",
+        "run",
+        "use",
+        "via",
+        "our",
+        "your",
+        "their",
     }
-    req_words -= stop
+)
+
+# Agents whose output may complete an objective; others never get Yes/No.
+_CONFIRM_AGENTS = frozenset({"coding", "writing", "checklist"})
+
+
+def _confirm_tokens(text: str) -> set[str]:
+    return {
+        w
+        for w in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if len(w) > 2 and w not in _CONFIRM_STOP
+    }
+
+
+def _normalize_request_for_confirm(request_text: str) -> str:
+    """Strip skill prefixes / evidence noise so matching uses the user's intent."""
+    text = (request_text or "").strip()
+    text = re.sub(
+        r"^(?:force\s+)?/(?:code|research|write|writing|review|checklist|web|status)\b\s*",
+        "",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r"^(?:force\s+)?(?:code|research|write|writing|review|checklist)\b[:\s]+",
+        "",
+        text,
+        flags=re.I,
+    )
+    # Status evidence packs list every card — never use them for confirm matching
+    if re.search(r"EVIDENCE\s+PACK", text, flags=re.I):
+        return ""
+    if len(re.findall(r"Objective\s+#\d+", text, flags=re.I)) >= 2:
+        return ""
+    return text.strip()
+
+
+def _candidate_objectives(
+    db: Session,
+    *,
+    tenant_id: int,
+    project_id: int,
+    user_id: int,
+    request_text: str,
+    request_id: int | None = None,
+) -> list[Objective]:
+    """Objectives this request clearly targets. Empty unless match is strong.
+
+    Avoids asking 'objective met?' for unrelated open cards after freeform /code.
+    """
+    from sqlalchemy import or_
+
+    rows = (
+        db.query(Objective)
+        .filter(
+            Objective.tenant_id == tenant_id,
+            Objective.project_id == project_id,
+            Objective.done.is_(False),
+            or_(
+                Objective.user_id == user_id,
+                Objective.assignee_user_id == user_id,
+            ),
+        )
+        .order_by(Objective.id.desc())
+        .all()
+    )
+    if not rows:
+        return []
+
+    # Strongest signal: objective already linked to this work request
+    if request_id is not None:
+        linked = [o for o in rows if o.request_id == request_id]
+        if linked:
+            return linked[:1]
+
+    text = _normalize_request_for_confirm(request_text)
+    if not text:
+        return []
+
+    # Explicit ids only from intentional phrasing (not bare "#7")
+    explicit_ids: set[int] = set()
+    for m in re.finditer(
+        r"(?:objective|obj)\s*#?\s*[-:]?\s*(\d+)|#obj-(\d+)|obj-(\d+)",
+        text,
+        flags=re.I,
+    ):
+        for g in m.groups():
+            if g:
+                explicit_ids.add(int(g))
+    if explicit_ids:
+        hit = [o for o in rows if o.id in explicit_ids]
+        if hit:
+            return hit[:1]
+
+    # Prefer cards already in agent flow; never use idle todo as fallback pool
+    active_statuses = {"agent_backlog", "in_review", "doing"}
+    pool = [o for o in rows if (o.status or "") in active_statuses]
+    if not pool:
+        return []
+
+    req_words = _confirm_tokens(text)
+    if len(req_words) < 2:
+        return []
+
+    subtask_map: dict[int, list[str]] = {}
+    items = (
+        db.query(TaskItem)
+        .filter(
+            TaskItem.tenant_id == tenant_id,
+            TaskItem.project_id == project_id,
+            TaskItem.objective_id.in_([o.id for o in pool]),
+        )
+        .all()
+    )
+    for it in items:
+        if it.objective_id is not None:
+            subtask_map.setdefault(it.objective_id, []).append(it.title)
 
     def score(obj: Objective) -> int:
-        title_words = {w for w in re.findall(r"[a-z0-9]+", obj.title.lower()) if len(w) > 2}
-        return len(req_words & title_words)
+        title_words = _confirm_tokens(obj.title)
+        desc_words = _confirm_tokens(obj.description or "")
+        task_words: set[str] = set()
+        for t in subtask_map.get(obj.id, []):
+            task_words |= _confirm_tokens(t)
+        all_obj = title_words | desc_words | task_words
+        if not all_obj:
+            return 0
 
-    pool = active or rows
+        title_hit = req_words & title_words
+        other_hit = (req_words & (desc_words | task_words)) - title_hit
+        s = 3 * len(title_hit) + len(other_hit)
+        # Long distinctive tokens count more
+        s += sum(2 for w in title_hit if len(w) >= 6)
+        s += sum(1 for w in other_hit if len(w) >= 6)
+        # Majority of title words must appear for a soft phrase match bonus
+        if title_words and len(title_hit) >= max(2, (len(title_words) + 1) // 2):
+            s += 5
+        return s
+
     scored = sorted(((score(o), o) for o in pool), key=lambda x: (-x[0], -x[1].id))
-    # Require real overlap - never fall back to "newest unrelated"
-    matched = [o for s, o in scored if s > 0][:1]
+    # High bar: never ask on a single weak word overlap
+    matched = [o for s, o in scored if s >= 5][:1]
     return matched
 
 
@@ -896,13 +1041,17 @@ def _run_agent_branch(
     for a in arts:
         chunks.append(f"--- {a.agent_type} ---\n{a.content}")
     body = "\n\n".join(chunks)
-    cands = _candidate_objectives(
-        db,
-        tenant_id=auth.tenant_id,
-        project_id=project_id,
-        user_id=auth.user_id,
-        request_text=text,
-    )
+    confirm_agents = [a for a in agents if a in _CONFIRM_AGENTS]
+    cands: list[Objective] = []
+    if confirm_agents:
+        cands = _candidate_objectives(
+            db,
+            tenant_id=auth.tenant_id,
+            project_id=project_id,
+            user_id=auth.user_id,
+            request_text=text,
+            request_id=req.id,
+        )
     body, confirm_ids = _with_confirm_footer(body, cands)
     return IntentResult(
         True,

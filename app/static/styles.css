@@ -492,7 +492,6 @@ aside li .swatch {
   color: #d8eadc;
 }
 .llm-wait-label { font-weight: 600; }
-.llm-wait-eta { color: #9bb89f; white-space: nowrap; }
 .llm-wait-track {
   height: 8px;
   background: #243028;

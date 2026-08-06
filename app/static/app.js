@@ -1327,7 +1327,6 @@
     const box = $("llmWait");
     const bar = $("llmWaitBar");
     const label = $("llmWaitLabel");
-    const eta = $("llmWaitEta");
     const hint = $("llmWaitHint");
     if (!box || !bar) return;
     box.classList.remove("hidden");
@@ -1336,22 +1335,17 @@
       : "Agent working — model is generating…";
     if (hint) {
       hint.textContent = skill
-        ? `Please wait while /${skill} finishes (often 30–90s)`
+        ? `Please wait while /${skill} finishes`
         : "Please wait — the model is generating a reply";
     }
     bar.style.width = "4%";
-    eta.textContent = "starting…";
     showPendingBubble(skill);
     llmWaitTimer = setInterval(() => {
       const elapsed = Date.now() - llmWaitStarted;
       const t = Math.min(1, elapsed / llmWaitExpectedMs);
       const pct = Math.min(92, 4 + t * 88);
       bar.style.width = `${pct}%`;
-      const left = Math.max(0, Math.ceil((llmWaitExpectedMs - elapsed) / 1000));
-      if (elapsed < llmWaitExpectedMs) {
-        eta.textContent = left > 5 ? `~${left}s left` : "almost done…";
-      } else {
-        eta.textContent = "still working…";
+      if (elapsed >= llmWaitExpectedMs) {
         label.textContent = skill
           ? `/${skill} is taking longer than usual…`
           : "Taking longer than usual…";
