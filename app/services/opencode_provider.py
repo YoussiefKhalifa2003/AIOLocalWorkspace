@@ -31,7 +31,7 @@ FREE_IDS = {m["id"] for m in OPENCODE_FREE_MODELS}
 # Also accept opencode/<id> form used by OpenCode CLI config
 FREE_IDS |= {f"opencode/{m['id']}" for m in OPENCODE_FREE_MODELS}
 
-AGENT_TYPES = ("research", "writing", "coding", "code_review", "checklist")
+AGENT_TYPES = ("research", "writing", "coding", "code_review", "checklist", "status")
 
 
 @dataclass

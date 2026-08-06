@@ -41,6 +41,7 @@
     code_review: "#48a",
     review: "#48a",
     checklist: "#a6a",
+    status: "#7a9",
   };
 
   const $ = (id) => document.getElementById(id);
@@ -160,6 +161,7 @@
     coding: "Code",
     code_review: "Review",
     checklist: "Checklist",
+    status: "Status",
   };
 
   // Dry coworker notes - no callsigns / units / marketing bios
@@ -193,6 +195,12 @@
       job: "breaks work into ticks",
       line: "I turn a foggy ask into numbered boxes. Boring on purpose.",
       accent: "#a6a",
+    },
+    status: {
+      mention: "/status",
+      job: "catches you up",
+      line: "I read the board, issues, and channel trail so quiet workers still show up.",
+      accent: "#7a9",
     },
   };
 
@@ -519,11 +527,20 @@
   function showBoardPanel(card) {
     const panel = $("boardPanel");
     panel.classList.remove("hidden");
+    const subs = (card.subtasks || [])
+      .map(
+        (t) =>
+          `<li class="${t.done ? "done" : ""}">${t.done ? "✓" : "○"} ${escapeHtml(t.title)}</li>`
+      )
+      .join("");
+    const desc = (card.description || "").trim();
     $("boardPanelBody").innerHTML = `
       <h3>#${card.id} ${escapeHtml(card.title)}</h3>
+      ${desc ? `<p class="obj-desc">${escapeHtml(desc)}</p>` : ""}
       <p class="meta">owner: ${escapeHtml(card.owner_email || "")}</p>
       <p class="meta">status: ${escapeHtml(card.status)}</p>
-      <p class="meta">checklist: ${card.checklist_closed}/${card.checklist_total}</p>
+      <p class="meta">subtasks: ${card.checklist_closed}/${card.checklist_total}</p>
+      ${subs ? `<ul class="obj-subtasks">${subs}</ul>` : ""}
       <p class="meta">issues: ${card.open_issue_count}</p>
       ${card.github_pr_url ? `<p><a href="${escapeHtml(card.github_pr_url)}" target="_blank" rel="noopener">Open PR</a></p>` : ""}
       <p><button type="button" id="openInChat">open in chat</button></p>
@@ -535,6 +552,85 @@
         setVoiceStatus(`objective #${card.id}: ${card.title}`);
       };
     }
+  }
+
+  function dismissSetupCard(card) {
+    if (card && card.parentNode) card.parentNode.removeChild(card);
+  }
+
+  function mountSetupCard(parent, objectiveId, titleHint) {
+    const card = document.createElement("div");
+    card.className = "setup-card";
+    card.dataset.objectiveId = String(objectiveId);
+    const title = titleHint || `Objective #${objectiveId}`;
+    card.innerHTML = `
+      <div class="setup-head">
+        <div class="setup-kicker">New objective</div>
+        <div class="setup-title">${escapeHtml(title)}</div>
+        <div class="setup-hint">Optional — add a short brief and subtasks, or skip.</div>
+      </div>
+      <label class="setup-label">Description
+        <textarea class="setup-desc" rows="3" placeholder="What does done look like?"></textarea>
+      </label>
+      <div class="setup-subs-head">
+        <span>Subtasks</span>
+        <button type="button" class="setup-add-sub">+ add</button>
+      </div>
+      <ul class="setup-subs"></ul>
+      <div class="setup-actions">
+        <button type="button" class="setup-save">Save</button>
+        <button type="button" class="setup-skip">Skip</button>
+      </div>
+      <div class="setup-status" hidden></div>
+    `;
+    const list = card.querySelector(".setup-subs");
+    const addRow = (value) => {
+      const li = document.createElement("li");
+      li.className = "setup-sub-row";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "setup-sub-input";
+      input.placeholder = "Subtask…";
+      input.value = value || "";
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "setup-sub-rm";
+      rm.textContent = "×";
+      rm.onclick = () => li.remove();
+      li.appendChild(input);
+      li.appendChild(rm);
+      list.appendChild(li);
+      input.focus();
+    };
+    card.querySelector(".setup-add-sub").onclick = () => addRow("");
+    card.querySelector(".setup-skip").onclick = () => dismissSetupCard(card);
+    card.querySelector(".setup-save").onclick = async () => {
+      const status = card.querySelector(".setup-status");
+      const desc = card.querySelector(".setup-desc").value;
+      const subtasks = [...card.querySelectorAll(".setup-sub-input")]
+        .map((el) => el.value.trim())
+        .filter(Boolean);
+      const pid = state.projectId;
+      if (!pid) {
+        status.hidden = false;
+        status.textContent = "No project — open board once, then retry.";
+        return;
+      }
+      status.hidden = false;
+      status.textContent = "Saving…";
+      try {
+        await api(`/projects/${pid}/objectives/${objectiveId}/setup`, {
+          method: "PUT",
+          body: JSON.stringify({ description: desc, subtasks }),
+        });
+        status.textContent = "Saved.";
+        setTimeout(() => dismissSetupCard(card), 450);
+        setVoiceStatus(`objective #${objectiveId} updated`);
+      } catch (e) {
+        status.textContent = e.message || String(e);
+      }
+    };
+    parent.appendChild(card);
   }
 
   async function loadAnalytics() {
@@ -682,7 +778,7 @@
     }
   }
 
-  function renderChatLi(c, { allowDelete }) {
+  function renderChatLi(c, { allowDelete, allowRename }) {
     const li = document.createElement("li");
     li.dataset.id = c.id;
     if (Number(c.id) === Number(state.chatId)) li.classList.add("active");
@@ -692,6 +788,23 @@
     label.textContent = c.kind === "private" ? "my private room" : `#${c.name}`;
     label.onclick = () => selectChat(c.id);
     li.appendChild(label);
+
+    const canRename =
+      allowRename &&
+      !(c.name === "general" && c.kind === "channel") &&
+      c.kind === "channel";
+    if (canRename) {
+      const ren = document.createElement("button");
+      ren.type = "button";
+      ren.className = "x rename";
+      ren.title = "rename chat";
+      ren.textContent = "✎";
+      ren.onclick = (ev) => {
+        ev.stopPropagation();
+        void renameChat(c);
+      };
+      li.appendChild(ren);
+    }
 
     if (allowDelete && !(c.name === "general" && c.kind === "channel")) {
       const del = document.createElement("button");
@@ -724,11 +837,11 @@
 
     const teamList = $("teamList");
     teamList.innerHTML = "";
-    team.forEach((c) => teamList.appendChild(renderChatLi(c, { allowDelete: true })));
+    team.forEach((c) => teamList.appendChild(renderChatLi(c, { allowDelete: true, allowRename: true })));
 
     const myRoomList = $("myRoomList");
     myRoomList.innerHTML = "";
-    mine.forEach((c) => myRoomList.appendChild(renderChatLi(c, { allowDelete: false })));
+    mine.forEach((c) => myRoomList.appendChild(renderChatLi(c, { allowDelete: false, allowRename: false })));
 
     if (state.chatId && !chats.some((c) => Number(c.id) === Number(state.chatId))) {
       state.chatId = null;
@@ -762,8 +875,57 @@
       label.title = m.email || "";
       li.appendChild(swatch);
       li.appendChild(label);
+      if (state.isOwner && Number(m.user_id) !== Number(state.userId)) {
+        const kick = document.createElement("button");
+        kick.type = "button";
+        kick.className = "x";
+        kick.title = "remove member";
+        kick.textContent = "x";
+        kick.onclick = (ev) => {
+          ev.stopPropagation();
+          void kickMember(m);
+        };
+        li.appendChild(kick);
+        const rename = document.createElement("button");
+        rename.type = "button";
+        rename.className = "x rename";
+        rename.title = "rename";
+        rename.textContent = "✎";
+        rename.onclick = (ev) => {
+          ev.stopPropagation();
+          void renameMember(m);
+        };
+        li.appendChild(rename);
+      }
       memberList.appendChild(li);
     });
+  }
+
+  async function kickMember(m) {
+    const name = m.name || m.email;
+    if (!window.confirm(`Remove ${name} from the workspace? This deletes their account.`)) return;
+    try {
+      await api(`/workspace/members/${m.user_id}`, { method: "DELETE" });
+      setVoiceStatus(`removed ${name}`);
+      await refreshSidebar();
+    } catch (e) {
+      setVoiceStatus(String(e.message || e));
+    }
+  }
+
+  async function renameMember(m) {
+    const next = window.prompt("One-word display name", m.name || "");
+    if (next === null) return;
+    try {
+      await api(`/workspace/members/${m.user_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: next.trim() }),
+      });
+      setVoiceStatus("member updated");
+      await refreshSidebar();
+    } catch (e) {
+      setVoiceStatus(String(e.message || e));
+    }
   }
 
   function lanAppUrl() {
@@ -835,13 +997,22 @@
       const confirmIds = confirmMatch
         ? confirmMatch[1].split(",").map((s) => s.trim()).filter(Boolean)
         : [];
-      bodyText = bodyText.replace(/\n?\[\[confirm:[0-9,\s]+\]\]\s*$/, "").trimEnd();
+      const setupMatch = bodyText.match(/\[\[setup:(\d+)\]\]/);
+      const setupId = setupMatch ? setupMatch[1] : null;
+      bodyText = bodyText
+        .replace(/\n?\[\[confirm:[0-9,\s]+\]\]\s*$/, "")
+        .replace(/\n?\[\[setup:\d+\]\]\s*$/, "")
+        .trimEnd();
+      const titleFromBody = (bodyText.match(/Added objective #\d+:\s*(.+?)(?:\s*\(yours\))?$/m) || [])[1];
       div.innerHTML =
         `<div class="meta"><span class="who"></span>${whisperTag} <span class="msg-id"> - #${m.id}</span></div><div class="body"></div>`;
       const whoEl = div.querySelector(".who");
       whoEl.textContent = who;
       whoEl.style.color = color;
       setMessageBody(div.querySelector(".body"), bodyText);
+      if (setupId) {
+        mountSetupCard(div, setupId, titleFromBody ? `#${setupId} ${titleFromBody}` : `Objective #${setupId}`);
+      }
       if (confirmIds.length) {
         const actions = document.createElement("div");
         actions.className = "confirm-actions";
@@ -1065,7 +1236,7 @@
 
   function skillNameFromBody(body) {
     const t = String(body || "").trim();
-    const m = t.match(/^\/(code|research|write|web|review|checklist)\b/i);
+    const m = t.match(/^\/(code|research|write|web|review|checklist|status)\b/i);
     if (m) return m[1].toLowerCase();
     const m2 = t.match(/^(?:force\s+)?(code|research|write|review)\b/i);
     return m2 ? m2[1].toLowerCase() : "";
@@ -1074,10 +1245,11 @@
   function looksLikeAgentWork(body) {
     const t = String(body || "").trim();
     if (!t) return false;
-    // Any private-room skill invocation
+    if (/^\/clear\b/i.test(t) || /^!clear\b/i.test(t)) return false;
+    // /status works in any room; other skills are private-only
+    if (/^\/status\b/i.test(t)) return true;
     if (/^\/(code|research|write|web|review|checklist)\b/i.test(t)) return true;
     if (/^(force\s+)?(code|research|write|review)\b/i.test(t)) return true;
-    // Any other leading slash in private room (unknown skill still hits server)
     const meta = currentChatMeta();
     if (meta && meta.kind === "private" && t.startsWith("/")) return true;
     return false;
@@ -1227,6 +1399,26 @@
       }
       await refreshSidebar();
       setVoiceStatus(`deleted chat #${id}`);
+    } catch (e) {
+      setVoiceStatus(String(e.message || e));
+    }
+  }
+
+  async function renameChat(c) {
+    const next = window.prompt("Rename team chat", c.name || "");
+    if (next === null) return;
+    const cleaned = next.trim();
+    if (!cleaned) return;
+    try {
+      await api(`/chats/${c.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: cleaned }),
+      });
+      await refreshSidebar();
+      if (Number(state.chatId) === Number(c.id)) {
+        $("chatTitle").textContent = `team #${cleaned}`;
+      }
+      setVoiceStatus(`renamed chat to #${cleaned}`);
     } catch (e) {
       setVoiceStatus(String(e.message || e));
     }
@@ -1386,8 +1578,7 @@
     { insert: "!issues", label: "!issues", blurb: "show blockers", args: [] },
     { insert: "!resolve ", label: "!resolve", blurb: "close blocker", args: ["<id>"] },
     { insert: "!invite ", label: "!invite", blurb: "invite link (optional seats)", args: ["[N]"] },
-    { insert: "!status ", label: "!status", blurb: "member catch-up", args: ["<name>"] },
-    { insert: "!clear", label: "!clear", blurb: "wipe this chat", args: [] },
+    { insert: "!clear", label: "!clear", blurb: "clear chat (you only in #general)", args: [] },
     { insert: "!help", label: "!help", blurb: "list commands", args: [] },
   ];
 
@@ -1398,6 +1589,8 @@
     { insert: "/write ", label: "/write", blurb: "draft clear prose", args: ["<ask>"] },
     { insert: "/review ", label: "/review", blurb: "check the diff", args: ["<ask>"] },
     { insert: "/checklist ", label: "/checklist", blurb: "break into ticks", args: ["<ask>"] },
+    { insert: "/status ", label: "/status", blurb: "AI member catch-up", args: ["<name>"] },
+    { insert: "/clear", label: "/clear", blurb: "clear chat (you only in #general)", args: [] },
   ];
 
   const pickerState = {
@@ -1733,9 +1926,16 @@
         return;
       }
       if (hit.ch === "/") {
+        const channelSlash = [
+          { insert: "/status ", label: "/status", blurb: "AI member catch-up", args: ["<name>"] },
+          { insert: "/clear", label: "/clear", blurb: "clear for you only", args: [] },
+        ];
         if (!meta || meta.kind !== "private") {
-          hideMentions();
-          setVoiceStatus("skills (/) only work in your private room");
+          if (isCompleteCatalogToken(channelSlash, hit.after)) {
+            hideMentions();
+            return;
+          }
+          showPicker(filterCatalog(channelSlash, hit.after), hit.idx, "prefix");
           return;
         }
         setVoiceStatus("");

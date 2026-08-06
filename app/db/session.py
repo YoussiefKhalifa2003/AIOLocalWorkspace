@@ -45,6 +45,8 @@ def _sqlite_migrate() -> None:
         _add("objectives", "github_pr_url", "VARCHAR(512)")
         _add("objectives", "github_branch", "VARCHAR(255)")
         _add("objectives", "github_pr_number", "INTEGER")
+        _add("objectives", "description", "TEXT")
+        _add("task_items", "objective_id", "INTEGER")
         _add("projects", "github_token", "VARCHAR(255)")
         _add("agent_metrics", "user_id", "INTEGER")
         _add("agent_metrics", "tokens", "INTEGER")

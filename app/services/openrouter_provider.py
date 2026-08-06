@@ -76,6 +76,7 @@ DEFAULT_OPENROUTER_PREFS: dict[str, str] = {
     "research": "inclusionai/ling-3.0-flash:free",
     "writing": "poolside/laguna-s-2.1:free",
     "checklist": "nvidia/nemotron-nano-9b-v2:free",
+    "status": "inclusionai/ling-3.0-flash:free",
 }
 
 

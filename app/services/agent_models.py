@@ -25,6 +25,7 @@ def get_prefs_map(db: Session, tenant_id: int) -> dict[str, str]:
             "research": "ling-3.0-flash-free",
             "writing": "mimo-v2.5-free",
             "checklist": "north-mini-code-free",
+            "status": "ling-3.0-flash-free",
         }
         _ = OPENCODE_FREE_MODELS
     else:

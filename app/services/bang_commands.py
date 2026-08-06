@@ -53,11 +53,11 @@ Issues
 
 Room
   !invite [N]              mint invite link (N uses, default 1)
-  !status <name>           member catch-up (owner/self)
-  !clear                   wipe this chat
+  !status / !team          use /status instead (AI catch-up)
+  !clear                   clear this chat (channels: only for you)
   !help                    this list
 
-Private room: use /skills for AI (e.g. /code ...). Board tab shows the board."""
+Private room: use /skills for AI (e.g. /code ..., /status Omar). Board tab shows the board."""
 
 
 def _parse_invite_uses(raw: str) -> int:
@@ -150,7 +150,10 @@ def try_bang_command(db: Session, auth: AuthContext, chat: Chat, text: str, Inte
         )
         db.add(obj)
         db.flush()
-        return IntentResult(True, f"Added objective #{obj.id}: {obj.title} (yours)")
+        return IntentResult(
+            True,
+            f"Added objective #{obj.id}: {obj.title} (yours)\n[[setup:{obj.id}]]",
+        )
 
     if lower in ("list", "list objectives", "objectives"):
         from app.services.status import objectives_for_user
@@ -428,35 +431,26 @@ def try_bang_command(db: Session, auth: AuthContext, chat: Chat, text: str, Inte
         except Exception as exc:  # noqa: BLE001
             return IntentResult(True, f"Invite link failed: {exc}")
 
-    m = re.match(r"status\s+(\S+)$", lower)
+    m = re.match(r"status(?:\s+(\S+))?$", lower)
     if m:
-        from app.services.status import can_view_user_status, format_user_status, resolve_member
-
-        target = resolve_member(db, auth.tenant_id, m.group(1))
-        if target is None:
-            return IntentResult(True, f"No member matching '{m.group(1)}'.")
-        if not can_view_user_status(db, auth, target.id):
-            return IntentResult(True, "Only the workspace owner can view another member's status.")
+        who = (m.group(1) or "").strip()
+        hint = f"/status {who}".strip() if who else "/status"
         return IntentResult(
             True,
-            format_user_status(
-                db, tenant_id=auth.tenant_id, project_id=project_id, user=target
-            ),
+            f"`!status` moved to the AI skill `{hint}` (works in private rooms and team channels).",
         )
 
     if lower in ("team", "team status", "team report"):
-        if not is_workspace_owner(db, auth):
-            return IntentResult(True, "Team report is for workspace owners. Ask an owner.")
-        from app.services.status import format_team_report
-
         return IntentResult(
-            True, format_team_report(db, tenant_id=auth.tenant_id, project_id=project_id)
+            True,
+            "`!team` moved to `/status team` (owner AI briefing).",
         )
 
     if lower in ("clear", "clear chat"):
-        db.query(ChatMessage).filter(ChatMessage.chat_id == chat.id).delete()
-        db.flush()
-        return IntentResult(True, "Chat cleared.", cleared_chat=True)
+        from app.services.chat_clear import clear_chat_for_user
+
+        reply, _ = clear_chat_for_user(db, auth, chat)
+        return IntentResult(True, reply, cleared_chat=True)
 
     # Advanced / still supported if typed
     m = re.match(r"newchat\s+(.+)$", lower)

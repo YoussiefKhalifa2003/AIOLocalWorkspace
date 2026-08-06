@@ -40,6 +40,11 @@ SKILLS: dict[str, dict] = {
         "blurb": "break into ticks",
         "label": "/checklist",
     },
+    "status": {
+        "agent": "status",
+        "blurb": "AI catch-up on a member",
+        "label": "/status",
+    },
 }
 
 
@@ -73,7 +78,7 @@ def parse_skill(text: str) -> ParsedSkill:
             skill=None,
             agent=None,
             rest=raw,
-            hint=f"Unknown skill `/{key}`. Try /code, /write, /research, /web, /review, /checklist.",
+            hint=f"Unknown skill `/{key}`. Try /code, /write, /research, /web, /review, /checklist, /status.",
         )
     return ParsedSkill(skill=key, agent=meta["agent"], rest=rest)
 

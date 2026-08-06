@@ -474,12 +474,51 @@ def run_checklist(db: Session, job: Job, llm: LLMClient) -> None:
     )
 
 
+def run_status(db: Session, job: Job, llm: LLMClient) -> None:
+    from app.services.status_evidence import status_system_prompt
+
+    payload = parse_json(job.payload_json, {})
+    text = payload.get("text") or payload.get("source_text") or ""
+    content = _agent_chat(
+        db,
+        job,
+        llm,
+        agent_type="status",
+        messages=[
+            {
+                "role": "system",
+                "content": _sys(status_system_prompt()),
+            },
+            {"role": "user", "content": text},
+        ],
+    )
+    art = _save_artifact(db, job, "Status briefing", content)
+    post_agent_output(
+        db,
+        tenant_id=job.tenant_id,
+        project_id=job.project_id,
+        agent_type="status",
+        body=content,
+        job_id=job.id,
+    )
+    write_audit(
+        db,
+        tenant_id=job.tenant_id,
+        project_id=job.project_id,
+        request_id=job.request_id,
+        job_id=job.id,
+        event_type="agent_done",
+        message=f"status artifact {art.id}",
+    )
+
+
 AGENTS = {
     "research": run_research,
     "writing": run_writing,
     "coding": run_coding,
     "code_review": run_code_review,
     "checklist": run_checklist,
+    "status": run_status,
 }
 
 

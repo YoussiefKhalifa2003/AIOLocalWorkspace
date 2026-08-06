@@ -38,19 +38,41 @@ def can_edit_objective(db: Session, auth: AuthContext, obj: Objective) -> bool:
     return owner_id(obj) == auth.user_id
 
 
+def checklist_stats_for_objective(db: Session, *, objective_id: int) -> tuple[int, int]:
+    items = (
+        db.query(TaskItem)
+        .filter(TaskItem.objective_id == objective_id)
+        .all()
+    )
+    total = len(items)
+    closed = sum(1 for i in items if i.done)
+    return closed, total
+
+
 def checklist_stats(db: Session, *, tenant_id: int, project_id: int, user_id: int) -> tuple[int, int]:
+    """Legacy: all checklist items owned by user (non-objective-scoped). Prefer checklist_stats_for_objective."""
     items = (
         db.query(TaskItem)
         .filter(
             TaskItem.tenant_id == tenant_id,
             TaskItem.project_id == project_id,
             TaskItem.owner_user_id == user_id,
+            TaskItem.objective_id.is_(None),
         )
         .all()
     )
     total = len(items)
     closed = sum(1 for i in items if i.done)
     return closed, total
+
+
+def subtasks_for_objective(db: Session, *, objective_id: int) -> list[TaskItem]:
+    return (
+        db.query(TaskItem)
+        .filter(TaskItem.objective_id == objective_id)
+        .order_by(TaskItem.done.asc(), TaskItem.id.asc())
+        .all()
+    )
 
 
 def open_issue_count(db: Session, *, tenant_id: int, project_id: int, user_id: int) -> int:
@@ -86,7 +108,7 @@ def build_board(db: Session, *, tenant_id: int, project_id: int) -> dict:
             obj.status = st
         oid = owner_id(obj)
         u = users.get(oid)
-        closed, total = checklist_stats(db, tenant_id=tenant_id, project_id=project_id, user_id=oid)
+        closed, total = checklist_stats_for_objective(db, objective_id=obj.id)
         issues = open_issue_count(db, tenant_id=tenant_id, project_id=project_id, user_id=oid)
         if total > 0:
             pct = int(round(100 * closed / total))
@@ -96,6 +118,7 @@ def build_board(db: Session, *, tenant_id: int, project_id: int) -> dict:
             {
                 "id": obj.id,
                 "title": obj.title,
+                "description": obj.description or "",
                 "status": st,
                 "done": obj.done,
                 "user_id": obj.user_id,
@@ -106,6 +129,10 @@ def build_board(db: Session, *, tenant_id: int, project_id: int) -> dict:
                 "checklist_closed": closed,
                 "checklist_total": total,
                 "progress_percent": pct,
+                "subtasks": [
+                    {"id": t.id, "title": t.title, "done": bool(t.done)}
+                    for t in subtasks_for_objective(db, objective_id=obj.id)
+                ],
                 "github_pr_url": obj.github_pr_url,
                 "github_branch": obj.github_branch,
                 "github_pr_number": obj.github_pr_number,

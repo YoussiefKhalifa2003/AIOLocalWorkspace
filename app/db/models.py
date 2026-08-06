@@ -118,6 +118,7 @@ class TaskItem(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     request_id: Mapped[Optional[int]] = mapped_column(ForeignKey("work_requests.id"), nullable=True)
     job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    objective_id: Mapped[Optional[int]] = mapped_column(ForeignKey("objectives.id"), nullable=True, index=True)
     owner_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     done: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -133,6 +134,7 @@ class Objective(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     assignee_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     done: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     status: Mapped[str] = mapped_column(String(40), default="todo", index=True)
     # todo | doing | blocked | done | agent_backlog | in_review
@@ -311,6 +313,20 @@ class ChatMessage(Base):
     visibility: Mapped[str] = mapped_column(String(20), default="public", nullable=False)
     whisper_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ChatClearCursor(Base):
+    """Per-user clear watermark: messages with id <= cleared_before_id are hidden for that user."""
+
+    __tablename__ = "chat_clear_cursors"
+    __table_args__ = (UniqueConstraint("chat_id", "user_id", name="uq_chat_clear_cursor"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    cleared_before_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class ChatMention(Base):

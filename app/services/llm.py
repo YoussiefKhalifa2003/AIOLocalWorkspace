@@ -80,6 +80,14 @@ class LLMClient:
                 "- Differentiator: auto-routing + quiet rooms + tenant walls\n"
                 f"- Query: {user[:400]}"
             )
+        if "status analyst" in system.lower() or "catch-up" in system.lower():
+            # Echo key evidence so tests can assert board facts survived the LLM path
+            return (
+                "## Status briefing (offline)\n\n"
+                "Based on workspace evidence only:\n\n"
+                f"{user[:1800]}\n\n"
+                "_Quiet in chat does not mean idle if board cards/issues are active._"
+            )
         return f"OFFLINE RESPONSE\n{user[:1000]}"
 
     def _endpoint_for(self, model: str) -> tuple[str, str, str]:

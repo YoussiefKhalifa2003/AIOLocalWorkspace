@@ -43,7 +43,7 @@ def objectives_for_user(
         .filter(
             Objective.tenant_id == tenant_id,
             Objective.project_id == project_id,
-            Objective.user_id == user_id,
+            (Objective.user_id == user_id) | (Objective.assignee_user_id == user_id),
         )
         .order_by(Objective.sort_order, Objective.id)
         .all()
@@ -107,7 +107,10 @@ def format_user_status(
     ]
     for o in objs:
         mark = "x" if o.done else " "
-        lines.append(f"  [{mark}] #{o.id} {o.title}")
+        st = o.status or ("done" if o.done else "todo")
+        lines.append(f"  [{mark}] #{o.id} [{st}] {o.title}")
+        if o.description:
+            lines.append(f"      {o.description[:120]}")
     if not objs:
         lines.append("  (none)")
     lines.append(f"Checklist: {cdone}/{len(checks)} done")

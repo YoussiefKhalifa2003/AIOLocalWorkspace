@@ -28,6 +28,10 @@ class ChatIn(BaseModel):
     project_id: int | None = 1
 
 
+class ChatPatch(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
 class MessageIn(BaseModel):
     body: str = Field(min_length=1)
     speak: bool = False
@@ -80,6 +84,26 @@ def create_chat(
     db.add(chat)
     db.flush()
     ensure_channel_membership(db, chat)
+    db.commit()
+    return chat_to_dict(chat)
+
+
+@router.patch("/chats/{chat_id}")
+def rename_chat(
+    chat_id: int,
+    body: ChatPatch,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    chat = require_chat_access(db, auth, chat_id)
+    if chat.kind == "private" and chat.owner_user_id != auth.user_id:
+        raise HTTPException(status_code=403, detail="cannot rename another user's private room")
+    if chat.name == "general" and chat.kind == "channel":
+        raise HTTPException(status_code=400, detail="cannot rename general channel")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    chat.name = name[:120]
     db.commit()
     return chat_to_dict(chat)
 
@@ -157,12 +181,16 @@ def list_messages(
     limit: int = 100,
 ):
     require_chat_access(db, auth, chat_id)
+    from app.services.chat_clear import cleared_before_id
+
+    floor = cleared_before_id(db, chat_id=chat_id, user_id=auth.user_id)
+    effective_after = max(after_id, floor)
     q = (
         db.query(ChatMessage)
         .filter(
             ChatMessage.chat_id == chat_id,
             ChatMessage.tenant_id == auth.tenant_id,
-            ChatMessage.id > after_id,
+            ChatMessage.id > effective_after,
             visible_messages_filter(auth.user_id),
         )
         .order_by(ChatMessage.id.asc())

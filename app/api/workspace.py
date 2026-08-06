@@ -236,6 +236,97 @@ def members(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)
     ]
 
 
+class MemberPatchIn(BaseModel):
+    name: str | None = None
+    role: str | None = None
+
+
+def _require_owner(db: Session, auth: AuthContext) -> None:
+    from app.services.chat_access import is_workspace_owner
+
+    if not is_workspace_owner(db, auth):
+        raise HTTPException(status_code=403, detail="owner only")
+
+
+def _owner_count(db: Session, tenant_id: int) -> int:
+    return (
+        db.query(WorkspaceMember)
+        .filter(WorkspaceMember.tenant_id == tenant_id, WorkspaceMember.role == "owner")
+        .count()
+    )
+
+
+@router.patch("/workspace/members/{user_id}")
+def patch_member(
+    user_id: int,
+    body: MemberPatchIn,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    _require_owner(db, auth)
+    row = (
+        db.query(WorkspaceMember, User)
+        .join(User, User.id == WorkspaceMember.user_id)
+        .filter(WorkspaceMember.tenant_id == auth.tenant_id, WorkspaceMember.user_id == user_id)
+        .one_or_none()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="member not found")
+    wm, user = row
+
+    if body.name is not None:
+        name = body.name.strip()
+        if not name or " " in name:
+            raise HTTPException(status_code=400, detail="name must be one word")
+        user.name = name[:80]
+
+    if body.role is not None:
+        role = body.role.strip().lower()
+        if role not in ("owner", "member"):
+            raise HTTPException(status_code=400, detail="role must be owner or member")
+        if wm.role == "owner" and role == "member" and _owner_count(db, auth.tenant_id) <= 1:
+            raise HTTPException(status_code=400, detail="cannot demote the last owner")
+        wm.role = role
+
+    db.commit()
+    return {
+        "user_id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "role": wm.role,
+    }
+
+
+@router.delete("/workspace/members/{user_id}")
+def delete_member(
+    user_id: int,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    _require_owner(db, auth)
+    if user_id == auth.user_id:
+        raise HTTPException(status_code=400, detail="cannot delete yourself")
+
+    row = (
+        db.query(WorkspaceMember, User)
+        .join(User, User.id == WorkspaceMember.user_id)
+        .filter(WorkspaceMember.tenant_id == auth.tenant_id, WorkspaceMember.user_id == user_id)
+        .one_or_none()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="member not found")
+    wm, user = row
+
+    if wm.role == "owner" and _owner_count(db, auth.tenant_id) <= 1:
+        raise HTTPException(status_code=400, detail="cannot delete the last owner")
+
+    from app.services.seed import delete_user_by_email
+
+    result = delete_user_by_email(db, user.email)
+    db.commit()
+    return {"status": "ok", **result}
+
+
 @router.get("/auth/me")
 def me(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)):
     from app.services.mentions import unread_mentions

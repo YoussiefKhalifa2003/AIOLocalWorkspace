@@ -28,6 +28,7 @@ class ObjectiveIn(BaseModel):
 class ObjectiveOut(BaseModel):
     id: int
     title: str
+    description: str | None = None
     done: bool
     status: str = "todo"
     assignee_user_id: int | None = None
@@ -42,12 +43,19 @@ class ObjectivePatch(BaseModel):
     status: str | None = None
     assignee_user_id: int | None = None
     title: str | None = None
+    description: str | None = None
+
+
+class ObjectiveSetupIn(BaseModel):
+    description: str | None = None
+    subtasks: list[str] = Field(default_factory=list)
 
 
 def _obj_out(obj: Objective) -> ObjectiveOut:
     return ObjectiveOut(
         id=obj.id,
         title=obj.title,
+        description=obj.description,
         done=obj.done,
         status=obj.status or ("done" if obj.done else "todo"),
         assignee_user_id=owner_id(obj),
@@ -212,6 +220,9 @@ def patch_objective(
     if body.title is not None:
         obj.title = body.title.strip()[:255]
 
+    if body.description is not None:
+        obj.description = body.description.strip() or None
+
     from app.services.chat_access import is_workspace_owner
 
     if body.assignee_user_id is not None:
@@ -246,6 +257,62 @@ def patch_objective(
         message=f"objective {obj.id} status={obj.status} assignee={obj.assignee_user_id}",
     )
     db.commit()
+    return _obj_out(obj)
+
+
+@router.put("/projects/{project_id}/objectives/{objective_id}/setup", response_model=ObjectiveOut)
+def setup_objective(
+    project_id: int,
+    objective_id: int,
+    body: ObjectiveSetupIn,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """Optional post-!add setup: description + objective-scoped subtasks."""
+    try:
+        get_project_for_tenant(db, auth.tenant_id, project_id)
+        obj = _get_objective(db, auth.tenant_id, project_id, objective_id)
+    except IsolationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not can_edit_objective(db, auth, obj):
+        raise HTTPException(status_code=403, detail="can only edit your own objectives")
+
+    if body.description is not None:
+        desc = body.description.strip()
+        obj.description = desc or None
+
+    db.query(TaskItem).filter(
+        TaskItem.objective_id == obj.id,
+        TaskItem.tenant_id == auth.tenant_id,
+        TaskItem.project_id == project_id,
+    ).delete(synchronize_session=False)
+
+    owner = owner_id(obj)
+    for raw in body.subtasks or []:
+        title = (raw or "").strip()[:255]
+        if not title:
+            continue
+        db.add(
+            TaskItem(
+                tenant_id=auth.tenant_id,
+                project_id=project_id,
+                objective_id=obj.id,
+                owner_user_id=owner,
+                title=title,
+                done=False,
+            )
+        )
+
+    write_audit(
+        db,
+        tenant_id=auth.tenant_id,
+        project_id=project_id,
+        event_type="objective_setup",
+        message=f"objective {obj.id} setup subtasks={len(body.subtasks or [])}",
+    )
+    db.commit()
+    db.refresh(obj)
     return _obj_out(obj)
 
 

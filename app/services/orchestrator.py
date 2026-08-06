@@ -330,7 +330,7 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
         )
         db.add(obj)
         db.flush()
-        return IntentResult(True, f"Added objective #{obj.id}: {obj.title} (yours)")
+        return IntentResult(True, f"Added objective #{obj.id}: {obj.title} (yours)\n[[setup:{obj.id}]]")
 
     if lower in ("board", "show board", "objective board"):
         from app.services.board import board_text_summary
@@ -556,10 +556,10 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
         return IntentResult(True, f"Removed checklist #{iid}.")
 
     if lower in ("clear", "clear chat", "clear messages"):
-        # Wipe transcript in this chat (keep the chat itself)
-        db.query(ChatMessage).filter(ChatMessage.chat_id == chat.id).delete()
-        db.flush()
-        return IntentResult(True, "Chat cleared.", cleared_chat=True)
+        from app.services.chat_clear import clear_chat_for_user
+
+        reply, _ = clear_chat_for_user(db, auth, chat)
+        return IntentResult(True, reply, cleared_chat=True)
 
     m = re.match(r"run objective\s+(\d+)$", lower)
     if m:
@@ -753,12 +753,8 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
         return IntentResult(
             True,
             "Commands:\n"
-            "- In TEAM chats: type board/ops commands bare "
-            "(e.g. `add objective ...`, `board`, `claim path ...`)\n"
-            "- In TEAM chats: start with `/` only to wake AI "
-            "(e.g. `/help`, `/@Omar status`, `/@Research one tip`)\n"
-            "- Plain non-command messages in TEAM are human-only (no AI)\n"
-            "- In MY ROOM: AI always listens (no `/` needed); commands work bare too\n"
+            "- Prefer `!` for board/ops and `/skills` for AI in private rooms\n"
+            "- /status [name|me|team] AI catch-up (channel whisper or private)\n"
             "- add objective <text> / show objectives / run objective <id>\n"
             "- remove objective <id> / remove checklist <id>\n"
             "- clear / clear chat - wipe messages in this chat\n"
@@ -770,11 +766,7 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
             "- log issue <text> / show issues / resolve issue <id>\n"
             "- invite [N] (N seats, default 1)\n"
             "- create chat <name> / list chats / delete chat [id]\n"
-            "- @Research / @Writing / @Code / @Review / @Checklist ...\n"
-            "- After agent work: Yes/No on objectives, or yes <id> / no <id>\n"
-            "- @Omar status / status for Omar (owner: others; anyone: self)\n"
-            "- @team report / team status (owner)\n"
-            "- or just type a request in your private room (Lead routes it)",
+            "- or just type a request in your private room via /skills",
         )
 
     return None
@@ -931,8 +923,9 @@ def handle_chat_message(
     """Process a user chat message.
 
     - `!...` commands: no LLM; whisper in team channels.
-    - Team channels: plain text is human-only; `/` does not wake AI (skills are private-only).
-    - Private rooms: until skills phase, non-! still routes to agents (Phase 5 tightens this).
+    - `/status`: AI catch-up in private rooms and team channels (whisper on channels).
+    - Other `/skills`: private rooms only.
+    - Team channels: plain text is human-only.
     """
     from app.services.bang_commands import try_bang_command
     from app.services.chat_visibility import mark_whisper
@@ -965,7 +958,40 @@ def handle_chat_message(
             db, auth=auth, chat=chat, result=result, speak=speak, whisper=whisper
         )
 
-    # Team channel: no bare commands, no slash-AI
+    # /clear and /status work in channels (whisper) and private rooms
+    if raw_body.startswith("/"):
+        from app.services.skills import parse_skill
+
+        clear_token = raw_body[1:].strip().lower()
+        if clear_token in ("clear", "clear chat", "clear messages"):
+            from app.services.chat_clear import clear_chat_for_user
+
+            if is_channel:
+                mark_whisper(user_message, auth.user_id)
+                whisper = True
+            reply, _ = clear_chat_for_user(db, auth, chat)
+            return _post_lead_reply(
+                db,
+                auth=auth,
+                chat=chat,
+                result=IntentResult(True, reply, cleared_chat=True),
+                speak=speak,
+                whisper=whisper or True,
+            )
+
+        parsed = parse_skill(raw_body)
+        if parsed.skill == "status":
+            if is_channel:
+                mark_whisper(user_message, auth.user_id)
+                whisper = True
+            status_result = _run_status_skill(
+                db, auth=auth, chat=chat, rest=parsed.rest or ""
+            )
+            return _post_lead_reply(
+                db, auth=auth, chat=chat, result=status_result, speak=speak, whisper=whisper
+            )
+
+    # Team channel: no bare commands, no other slash-AI
     if is_channel:
         return [], None, None, False
 
@@ -1000,3 +1026,56 @@ def handle_chat_message(
 
     # Plain notes - no LLM
     return [], None, None, False
+
+
+def _run_status_skill(
+    db: Session,
+    *,
+    auth: AuthContext,
+    chat: Chat,
+    rest: str,
+) -> IntentResult:
+    from app.db.models import User
+    from app.services.chat_access import is_workspace_owner
+    from app.services.status import can_view_user_status, resolve_member
+    from app.services.status_evidence import build_team_evidence, build_user_evidence
+
+    project_id = chat.project_id or 1
+    token = (rest or "").strip()
+    low = token.lower()
+
+    if not token or low in ("me", "self"):
+        user = db.query(User).filter(User.id == auth.user_id).one()
+        evidence = build_user_evidence(
+            db, tenant_id=auth.tenant_id, project_id=project_id, user=user
+        )
+        label = user.name or user.email
+        prompt = (
+            f"Write a status catch-up for {label}.\n\n"
+            f"EVIDENCE PACK:\n{evidence}"
+        )
+        return _run_agent_branch(db, auth, chat, prompt, forced_agent="status")
+
+    if low == "team":
+        if not is_workspace_owner(db, auth):
+            return IntentResult(True, "Team status is for workspace owners. Ask an owner.")
+        evidence = build_team_evidence(
+            db, tenant_id=auth.tenant_id, project_id=project_id
+        )
+        prompt = f"Write a team status briefing for the owner.\n\nEVIDENCE PACK:\n{evidence}"
+        return _run_agent_branch(db, auth, chat, prompt, forced_agent="status")
+
+    target = resolve_member(db, auth.tenant_id, token)
+    if target is None:
+        return IntentResult(True, f"No member matching '{token}'.")
+    if not can_view_user_status(db, auth, target.id):
+        return IntentResult(True, "Only the workspace owner can view another member's status.")
+    evidence = build_user_evidence(
+        db, tenant_id=auth.tenant_id, project_id=project_id, user=target
+    )
+    label = target.name or target.email
+    prompt = (
+        f"Write a status catch-up for {label}.\n\n"
+        f"EVIDENCE PACK:\n{evidence}"
+    )
+    return _run_agent_branch(db, auth, chat, prompt, forced_agent="status")

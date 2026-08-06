@@ -209,6 +209,155 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .confirm-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .confirm-row span { color: #aaa; font-size: 12px; }
 .confirm-row button { padding: 2px 10px; }
+
+.setup-card {
+  margin-top: 10px;
+  padding: 14px 14px 12px;
+  border: 1px solid #2f3d32;
+  border-radius: 10px;
+  background:
+    linear-gradient(165deg, rgba(55, 90, 65, 0.22), rgba(18, 22, 18, 0.92) 45%),
+    #141814;
+  max-width: 420px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+}
+.setup-kicker {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8fba96;
+  margin-bottom: 4px;
+}
+.setup-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: #f2f5f2;
+  margin-bottom: 4px;
+}
+.setup-hint {
+  font-size: 12px;
+  color: #9aa89b;
+  margin-bottom: 12px;
+  line-height: 1.35;
+}
+.setup-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: #b7c4b9;
+  margin-bottom: 10px;
+}
+.setup-desc {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 64px;
+  background: #0e110e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #e8e8e8;
+  padding: 8px 10px;
+  font: inherit;
+  line-height: 1.4;
+}
+.setup-desc:focus,
+.setup-sub-input:focus {
+  outline: none;
+  border-color: #4a7a55;
+}
+.setup-subs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #b7c4b9;
+  margin-bottom: 6px;
+}
+.setup-add-sub {
+  padding: 2px 8px;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid #3d523f;
+  color: #b7d0bb;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.setup-subs {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.setup-sub-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.setup-sub-input {
+  flex: 1;
+  background: #0e110e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #e8e8e8;
+  padding: 6px 8px;
+  font: inherit;
+}
+.setup-sub-rm {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #1a1a1a;
+  color: #aaa;
+  cursor: pointer;
+}
+.setup-actions {
+  display: flex;
+  gap: 8px;
+}
+.setup-save,
+.setup-skip {
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+.setup-save {
+  background: #2f6b3c;
+  border: 1px solid #3f8a4e;
+  color: #f4fff6;
+}
+.setup-skip {
+  background: transparent;
+  border: 1px solid #444;
+  color: #bbb;
+}
+.setup-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #9bb89f;
+}
+.obj-desc {
+  color: #c5cec6;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0 0 10px;
+  white-space: pre-wrap;
+}
+.obj-subtasks {
+  margin: 0 0 10px;
+  padding-left: 0;
+  list-style: none;
+  font-size: 13px;
+  color: #cfd6cf;
+}
+.obj-subtasks li { margin: 4px 0; }
+.obj-subtasks li.done { color: #889488; text-decoration: line-through; }
 aside li .swatch {
   flex: 0 0 auto;
   width: 8px;

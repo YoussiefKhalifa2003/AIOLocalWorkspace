@@ -10,6 +10,7 @@ AGENT_ROOM = {
     "coding": "coding",
     "code_review": "review",
     "checklist": "tasks",
+    "status": "general",
 }
 
 DEFAULT_ROOMS = [

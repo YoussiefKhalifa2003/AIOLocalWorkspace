@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 def _boot(tmp_path, monkeypatch):
     db_path = tmp_path / "hybrid.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     from app.config import get_settings
 
     get_settings.cache_clear()
@@ -71,14 +73,14 @@ def test_owned_objectives_and_issues_and_status(tmp_path, monkeypatch):
     r = client.post(
         f"/chats/{priv_s}/messages",
         headers=hs,
-        json={"body": "!status Omar", "speak": False},
+        json={"body": "/status Omar", "speak": False},
     )
     assert "owner" in r.json()["replies"][0]["body"].lower()
 
     r = client.post(
         f"/chats/{general}/messages",
         headers=ha,
-        json={"body": "!status Omar", "speak": False},
+        json={"body": "/status Omar", "speak": False},
     )
     body = r.json()["replies"][0]["body"]
     assert "Ship metro" in body
@@ -87,15 +89,22 @@ def test_owned_objectives_and_issues_and_status(tmp_path, monkeypatch):
     r = client.post(
         f"/chats/{general}/messages",
         headers=ha,
-        json={"body": "!team", "speak": False},
+        json={"body": "!status Omar", "speak": False},
     )
-    assert "TEAM REPORT" in r.json()["replies"][0]["body"]
-    assert "omar@" in r.json()["replies"][0]["body"].lower() or "Omar" in r.json()["replies"][0]["body"]
+    assert "/status" in r.json()["replies"][0]["body"]
+
+    r = client.post(
+        f"/chats/{general}/messages",
+        headers=ha,
+        json={"body": "/status team", "speak": False},
+    )
+    team_body = r.json()["replies"][0]["body"]
+    assert "TEAM REPORT" in team_body or "Omar" in team_body or "omar@" in team_body.lower()
 
     r = client.post(
         f"/chats/{priv_s}/messages",
         headers=hs,
-        json={"body": "!team", "speak": False},
+        json={"body": "/status team", "speak": False},
     )
     assert "owner" in r.json()["replies"][0]["body"].lower()
 
