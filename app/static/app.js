@@ -15,6 +15,7 @@
     tab: "chat",
     boardTimer: null,
     boardLoading: false,
+    boardFingerprint: "",
     projectId: Number(localStorage.getItem("aio_project") || 0) || 1,
     projects: [],
     isOwner: false,
@@ -168,7 +169,7 @@
         if (state.tab === "board" && state.projectId && !state.boardLoading) {
           void loadBoard({ quiet: true });
         }
-      }, 2000);
+      }, 3000);
     }
     if (tab === "models") void loadModels();
     if (tab === "analytics") void loadAnalytics();
@@ -321,6 +322,25 @@
     return Number(card.assignee_user_id) === Number(state.userId);
   }
 
+  function boardFingerprint(board, jobsToday) {
+    return JSON.stringify({
+      jobs: jobsToday,
+      cols: (board.columns || []).map((col) => [
+        col.id,
+        (col.cards || []).map((c) => [
+          c.id,
+          c.title,
+          c.progress_percent,
+          c.github_pr_url || "",
+          c.github_pr_number || 0,
+          c.open_issue_count || 0,
+          (c.claimed_paths || []).join(","),
+          c.owner_email || "",
+        ]),
+      ]),
+    });
+  }
+
   async function loadBoard(opts) {
     const quiet = !!(opts && opts.quiet);
     if (!state.projectId) return;
@@ -328,8 +348,6 @@
     state.boardLoading = true;
     try {
       const board = await api(`/projects/${state.projectId}/board`);
-      const root = $("boardColumns");
-      root.innerHTML = "";
       let jobsToday = "";
       try {
         const sum = await api(`/projects/${state.projectId}/jobs/summary`);
@@ -341,6 +359,15 @@
         ? ` · agent working on ${backlogCards.length} card${backlogCards.length === 1 ? "" : "s"}`
         : "";
       $("boardFooter").textContent = `${jobsToday}${workingNote}`;
+
+      const fp = boardFingerprint(board, jobsToday + workingNote);
+      if (quiet && fp === state.boardFingerprint) {
+        return;
+      }
+      state.boardFingerprint = fp;
+
+      const root = $("boardColumns");
+      root.innerHTML = "";
 
       const allCards = [];
       (board.columns || []).forEach((col) => {
@@ -378,6 +405,7 @@
                 `Objective #${oid}: agent started — stay on Board, it updates live`
               );
             }
+            state.boardFingerprint = "";
             await api(`/projects/${state.projectId}/objectives/${oid}`, {
               method: "PATCH",
               body: JSON.stringify({ status }),
@@ -385,6 +413,7 @@
             await loadBoard();
           } catch (e) {
             setVoiceStatus(String(e.message || e));
+            state.boardFingerprint = "";
             await loadBoard();
           }
         });
