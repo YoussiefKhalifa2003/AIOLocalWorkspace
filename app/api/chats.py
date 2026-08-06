@@ -300,6 +300,30 @@ def _truncate_messages_after(
     return removed
 
 
+def _delete_following_agent_replies(
+    db: Session, *, chat_id: int, tenant_id: int, after_id: int
+) -> list[int]:
+    """Soft-delete consecutive agent replies right after after_id (until next user msg)."""
+    later = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.chat_id == chat_id,
+            ChatMessage.tenant_id == tenant_id,
+            ChatMessage.id > after_id,
+            ChatMessage.deleted_at.is_(None),
+        )
+        .order_by(ChatMessage.id.asc())
+        .all()
+    )
+    removed: list[int] = []
+    for m in later:
+        if not m.agent_slug:
+            break
+        removed.append(m.id)
+        _soft_delete_message(db, m)
+    return removed
+
+
 @router.patch("/chats/{chat_id}/messages/{message_id}")
 def edit_message(
     chat_id: int,
@@ -356,10 +380,17 @@ def delete_message(
     db: Session = Depends(get_db),
 ):
     msg = _own_user_message(db, auth, chat_id, message_id)
+    # Drop the LLM/agent replies that followed this ask (stop at next user message)
+    removed_ids = _delete_following_agent_replies(
+        db, chat_id=chat_id, tenant_id=auth.tenant_id, after_id=msg.id
+    )
     _soft_delete_message(db, msg)
     db.commit()
     db.refresh(msg)
-    return message_to_dict(db, msg)
+    return {
+        "message": message_to_dict(db, msg),
+        "removed_ids": removed_ids,
+    }
 
 
 @router.post("/chats/{chat_id}/messages")
