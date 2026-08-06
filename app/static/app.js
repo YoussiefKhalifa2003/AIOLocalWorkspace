@@ -1769,7 +1769,14 @@
     const sendBtn = $("sendBtn");
     if (sendBtn) sendBtn.disabled = !!on;
     const input = $("input");
-    if (input) input.disabled = !!on;
+    if (!input) return;
+    input.disabled = !!on;
+    // Disabling the input drops focus — put it back so you can keep typing
+    if (!on) {
+      requestAnimationFrame(() => {
+        if (!input.disabled) input.focus();
+      });
+    }
   }
 
   function estimateWaitMs(body) {

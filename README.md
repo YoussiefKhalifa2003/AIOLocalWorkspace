@@ -1,79 +1,206 @@
-# AIO - LAN hybrid workplace
+# AIO
 
-Shared team chat + private agent rooms per person + Lead catch-up + objective Board. Same network only.
+**LAN hybrid workplace** — shared team chat, a private AI room per person, an objectives board, and Lead catch-up. Same network only.
 
-## Setup
+```
+#general  →  people talk, @pings, !commands (whisper)
+MY ROOM   →  /skills for AI, plain notes stay quiet
+Board     →  drag objectives across columns
+```
+
+---
+
+## Quick start
 
 ```bash
-cd /Users/yousef/Desktop/WORK
+git clone <your-repo-url>
+cd WORK
+
+python3 -m venv .venv
 source .venv/bin/activate
-# put GROQ_API_KEY and Gemini/OpenRouter key in .env
-rm -f aio.db
+pip install -r requirements.txt
+
+cp .env.example .env
+# add at least one LLM key (see Configuration)
+
 ./aio seed
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open: http://127.0.0.1:8000/app  
-LAN: http://YOUR_LAN_IP:8000/app
+| Where | URL |
+|-------|-----|
+| Local | http://127.0.0.1:8000/app |
+| LAN | http://YOUR_LAN_IP:8000/app |
 
-### Seed logins (shared API key `demo-key-a`)
+Reset demo data anytime:
 
-| email | role |
-|--------|------|
-| `a@local.test` | owner (Lead) |
-| `omar@local.test` | member |
-| `sara@local.test` | member |
+```bash
+rm -f aio.db && ./aio seed
+```
 
-## How it works
+---
 
-- **`#general`** - normal team chat. `@Omar` / `@team` ping people. `!add ...` and other `!` commands are **only visible to you**.
-- **MY ROOM** - type `/` for skills (`/code`, `/write`, `/research`...). Plain notes do not wake AI. Same `!` commands work here.
-- **Board** tab - see and drag objectives (or `!set <id> doing`).
-- **Agents** tab - pick which model powers each skill’s brain.
-- **Analytics** tab (owner) - job/metric tables
-- After skill work: **Yes/No** on matching objectives (`!done` / `!keep`)
-- **Lead catch-up** (owner): `!status Omar`, `!team`
-- GitHub: `GITHUB_TOKEN` + `GITHUB_REPO`; `./aio webhook-sim` for LAN demos
+## Demo logins
 
-### Optional env
+Password for all seeded users: **`demo`**
 
-| var | purpose |
-|-----|---------|
-| `GITHUB_TOKEN` | create PRs from agent_backlog |
-| `GITHUB_REPO` | `owner/repo` applied on seed |
-| `AGENT_MODEL_FAST` / `AGENT_MODEL_STRONG` | model tiers (Gemini path) |
-| `OPENROUTER_API_KEY` | OpenRouter - free models in Models tab ([keys](https://openrouter.ai/keys)) |
-| `GEMINI_API_KEY` | Gemini default / `gemini-env` path |
-| `OPENCODE_API_KEY` | optional OpenCode Zen (often needs billing) |
-| `CODING_BACKEND=llm\|opencode` | legacy coding shell (default `llm`) |
-| `AGENT_LLM_BACKEND=auto\|gemini\|openrouter\|opencode` | routing preference |
+| Email | Role |
+|-------|------|
+| `a@local.test` | Owner (Lead) |
+| `omar@local.test` | Member |
+| `sara@local.test` | Member |
 
-### Models tab
+---
 
-Header **Agents** - pick OpenRouter `:free` models or **Gemini (.env)** per skill brain. Set `OPENROUTER_API_KEY` from [openrouter.ai/keys](https://openrouter.ai/keys).
+## Mental model
 
-## Demo walkthrough (~2 min)
+| Prefix | Where | What it does |
+|--------|-------|----------------|
+| `@` | `#general` | Ping people (`@Omar`, `@team`) |
+| `/` | **MY ROOM** (mostly) | AI skills — `/code`, `/web`, `/status`, … |
+| `!` | Anywhere | Board / ops commands — **whisper** in channels (only you see them) |
 
-1. Login as `omar@local.test` / `demo-key-a` → open **#general**
-2. `!add Finish station notes`  -  `!issue Missing map PDF` (only you see replies)
-3. Open **Board** - see Omar’s card; drag own card
-4. Open **MY ROOM** → `/write one metro tip`
-5. Logout; login as `a@local.test` / `demo-key-a`
-6. In `#general` type `!status Omar` → remaining work + issue
-7. Invite a friend: MEMBERS **+** → they use email + `demo-key-a` on your LAN IP
+One line: **people in `#general`, agents in your private room, board via `!` or the Board tab.**
 
-## Mental model (one sentence each)
+---
 
-- `@` - ping people
-- `/` - AI skills in your private room only
-- `!` - board/ops commands (whisper in general)
+## Features
 
-## Voice
+### Chat
+- Team channels + per-user **MY ROOM**
+- `@` mentions with autocomplete
+- Attachments (PDF, images, txt/md) — PDF/text is extracted into the agent prompt
+- Edit your own messages (**ChatGPT-style**): later messages disappear and the ask is re-run
+- Delete your message and its following agent replies go with it
+- `/clear` / `!clear` to wipe chat history (channels: only for you)
+- Timestamps in Asia/Dubai; markdown replies
 
-- **speak replies** - Groq TTS on agent answers  
-- **voice input** - mic → Whisper → send
+### AI skills (private room)
+| Skill | Purpose |
+|-------|---------|
+| `/code` | Build or patch |
+| `/research` `/web` | Dig facts / look things up |
+| `/write` | Draft prose |
+| `/review` | Check a diff |
+| `/checklist` | Break work into ticks |
+| `/status <name>` | AI catch-up on a member (owner; also works in channels as whisper) |
+
+After skill work, you may get **Yes / No** on matching board objectives (`!done` / `!keep`).
+
+### Board
+- Columns: todo → doing → blocked → agent_backlog → in_review → done
+- Drag your cards, or use `!set <id> doing`
+- Owner can assign cards across the team
+
+### Agents tab
+- Pick which model powers each skill brain
+- OpenRouter `:free` models and/or **Gemini** from `.env`
+
+### Lead tools (owner)
+- `/status Omar` — remaining work, issues, private-room skill activity
+- Analytics tab — jobs / metrics
+- Invite links (`!invite`) — optional Teams webhook notify
+
+### Voice (optional)
+- **Speak replies** — Groq TTS on agent answers
+- **Mic input** — Whisper → send
+
+### GitHub (optional)
+- Webhook notices in `#general`, objective `#obj-N` links
+- `agent_backlog` → coding → PR (needs `GITHUB_TOKEN` + `GITHUB_REPO`)
+- LAN demo: `./aio webhook-sim` then `./aio drain`
+
+---
+
+## Commands (`!`)
+
+Type `!help` in chat. In `#general`, only **you** see command traffic.
+
+| Area | Examples |
+|------|----------|
+| Work | `!add …` · `!list` · `!set <id> doing` · `!done <id>` · `!remove <id>` · `!assign <id> <name>` |
+| Links | `!link <id> branch <name>` · `!link <id> pr <url>` |
+| Files | `!claim <path>` · `!release <path>` · `!go` |
+| Issues | `!issue …` · `!issues` · `!resolve <id>` |
+| Room | `!invite [N]` · `!clear` · `!help` |
+
+Catch-up: prefer **`/status`** (AI) over the old `!status` / `!team` stubs.
+
+---
+
+## Configuration
+
+Copy `.env.example` → `.env`. Useful keys:
+
+| Variable | Purpose |
+|----------|---------|
+| `GEMINI_API_KEY` | Gemini models (default path) |
+| `OPENROUTER_API_KEY` | Free model picker in Agents tab — [keys](https://openrouter.ai/keys) |
+| `GROQ_API_KEY` | TTS + Whisper |
+| `GITHUB_TOKEN` / `GITHUB_REPO` | PRs from agent backlog (`owner/repo`) |
+| `AGENT_MODEL_FAST` / `AGENT_MODEL_STRONG` | Model tiers |
+| `AGENT_LLM_BACKEND` | `auto` · `gemini` · `openrouter` · `opencode` |
+| `CODING_BACKEND` | `llm` (default) · `opencode` |
+| `INVITE_APP_URL` | Public base for invite links (`http://YOUR_LAN_IP:8000`) |
+| `TEAMS_WEBHOOK_URL` | Optional — post invite links to Teams |
+| `UPLOADS_DIR` | Attachment storage (default `data/uploads`) |
+| `DEMO_API_KEY` / `WORKSPACE_JOIN_KEY` | Seed / join key (default `demo-key-a`) |
+
+---
+
+## Two-minute demo
+
+1. Login as `omar@local.test` / `demo`
+2. **#general** → `!add Finish station notes` · `!issue Missing map PDF`
+3. **Board** — see Omar’s card; drag it
+4. **MY ROOM** → attach a PDF if you want → `/web summarize this` or `/write one metro tip`
+5. Edit an older ask — later replies vanish and the skill re-runs
+6. Logout → `a@local.test` / `demo`
+7. `/status Omar` — remaining work + private-room activity
+8. Invite: `!invite` or MEMBERS **+** → colleague opens the link on your LAN
+
+More copy-paste prompts: [`commands.txt`](commands.txt).
+
+---
+
+## Develop
+
+```bash
+source .venv/bin/activate
+pytest -q
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+CLI helpers (same venv):
+
+```bash
+./aio seed
+./aio drain
+./aio webhook-sim --title "Ship #obj-1" --action opened
+```
+
+Stack: **FastAPI · SQLite · SQLAlchemy · vanilla JS UI** at `/app`.
+
+---
 
 ## vs Buzz
 
-Buzz: @mention agents in shared chat.  
-AIO: `#general` for people (`@` pings), private `/skills` for AI, `!` whisper commands, Board tab.
+| | Buzz | AIO |
+|--|------|-----|
+| Agents | `@` agents in shared chat | `/skills` in **private** rooms |
+| People | Mixed with bots | `#general` is for humans (`@` pings) |
+| Ops | — | `!` whispers + Board tab |
+
+---
+
+## Non-goals (v1)
+
+- Lead reading another user’s private prompts  
+- Public SaaS / mobile app / WebSockets  
+- Auto-merge from chat · per-user GitHub OAuth  
+
+---
+
+## License
+
+Private / internal — adjust before publishing if you open-source.
