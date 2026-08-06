@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.db.models import Chat, ChatMember, ChatMessage, User, WorkspaceMember
+from app.db.models import Chat, ChatAttachment, ChatMember, ChatMessage, User, WorkspaceMember, utcnow
 from app.db.session import get_db
 from app.services.auth import AuthContext, get_auth
+from app.services.attachments import MAX_ATTACHMENTS_PER_MESSAGE, delete_file
 from app.services.chat_access import (
     chat_to_dict,
     ensure_channel_membership,
@@ -16,7 +20,7 @@ from app.services.chat_access import (
     require_chat_access,
 )
 from app.services.orchestrator import handle_chat_message
-from app.services.chat_visibility import message_to_dict, visible_messages_filter
+from app.services.chat_visibility import _iso_utc, message_to_dict, visible_messages_filter
 from app.services.mentions import record_mentions
 
 router = APIRouter(tags=["chats"])
@@ -33,8 +37,13 @@ class ChatPatch(BaseModel):
 
 
 class MessageIn(BaseModel):
-    body: str = Field(min_length=1)
+    body: str = ""
     speak: bool = False
+    attachment_ids: list[int] = Field(default_factory=list)
+
+
+class MessagePatch(BaseModel):
+    body: str = Field(min_length=1, max_length=20000)
 
 
 class ChatMemberIn(BaseModel):
@@ -178,6 +187,7 @@ def list_messages(
     auth: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
     after_id: int = 0,
+    since: str | None = None,
     limit: int = 100,
 ):
     require_chat_access(db, auth, chat_id)
@@ -196,8 +206,105 @@ def list_messages(
         .order_by(ChatMessage.id.asc())
         .limit(min(limit, 200))
     )
-    rows = q.all()
+    rows = list(q.all())
+    seen = {m.id for m in rows}
+
+    # Sync edits/deletes for messages the client already has
+    if since and after_id > 0:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError:
+            since_dt = None
+        if since_dt is not None:
+            mutated = (
+                db.query(ChatMessage)
+                .filter(
+                    ChatMessage.chat_id == chat_id,
+                    ChatMessage.tenant_id == auth.tenant_id,
+                    ChatMessage.id > floor,
+                    ChatMessage.id <= after_id,
+                    visible_messages_filter(auth.user_id),
+                    or_(
+                        ChatMessage.edited_at > since_dt,
+                        ChatMessage.deleted_at > since_dt,
+                    ),
+                )
+                .order_by(ChatMessage.id.asc())
+                .limit(100)
+                .all()
+            )
+            for m in mutated:
+                if m.id not in seen:
+                    rows.append(m)
+                    seen.add(m.id)
+            rows.sort(key=lambda m: m.id)
     return [message_to_dict(db, m) for m in rows]
+
+
+def _own_user_message(
+    db: Session, auth: AuthContext, chat_id: int, message_id: int
+) -> ChatMessage:
+    require_chat_access(db, auth, chat_id)
+    msg = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.id == message_id,
+            ChatMessage.chat_id == chat_id,
+            ChatMessage.tenant_id == auth.tenant_id,
+        )
+        .one_or_none()
+    )
+    if msg is None:
+        raise HTTPException(status_code=404, detail="message not found")
+    if msg.agent_slug or msg.sender_user_id != auth.user_id:
+        raise HTTPException(status_code=403, detail="can only change your own messages")
+    if msg.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="message already deleted")
+    return msg
+
+
+@router.patch("/chats/{chat_id}/messages/{message_id}")
+def edit_message(
+    chat_id: int,
+    message_id: int,
+    body: MessagePatch,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    msg = _own_user_message(db, auth, chat_id, message_id)
+    text = (body.body or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="body required")
+    msg.body = text
+    msg.edited_at = utcnow()
+    db.commit()
+    db.refresh(msg)
+    return message_to_dict(db, msg)
+
+
+@router.delete("/chats/{chat_id}/messages/{message_id}")
+def delete_message(
+    chat_id: int,
+    message_id: int,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    msg = _own_user_message(db, auth, chat_id, message_id)
+    # Soft-delete so everyone sees removal via poll sync; strip content
+    arts = (
+        db.query(ChatAttachment)
+        .filter(ChatAttachment.message_id == msg.id)
+        .all()
+    )
+    for a in arts:
+        delete_file(a.storage_path)
+        db.delete(a)
+    msg.body = ""
+    msg.audio_url = None
+    msg.deleted_at = utcnow()
+    db.commit()
+    db.refresh(msg)
+    return message_to_dict(db, msg)
 
 
 @router.post("/chats/{chat_id}/messages")
@@ -208,16 +315,49 @@ def post_message(
     db: Session = Depends(get_db),
 ):
     chat = require_chat_access(db, auth, chat_id)
+    text = (body.body or "").strip()
+    attachment_ids = list(dict.fromkeys(body.attachment_ids or []))  # stable unique
+    if not text and not attachment_ids:
+        raise HTTPException(status_code=400, detail="message body or attachments required")
+    if len(attachment_ids) > MAX_ATTACHMENTS_PER_MESSAGE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"at most {MAX_ATTACHMENTS_PER_MESSAGE} attachments per message",
+        )
+
+    linked: list[ChatAttachment] = []
+    if attachment_ids:
+        linked = (
+            db.query(ChatAttachment)
+            .filter(
+                ChatAttachment.id.in_(attachment_ids),
+                ChatAttachment.tenant_id == auth.tenant_id,
+                ChatAttachment.chat_id == chat_id,
+                ChatAttachment.uploader_user_id == auth.user_id,
+                ChatAttachment.message_id.is_(None),
+            )
+            .all()
+        )
+        if len(linked) != len(attachment_ids):
+            raise HTTPException(
+                status_code=400,
+                detail="invalid attachment_ids (must be yours, unlinked, same chat)",
+            )
+
     user_msg = ChatMessage(
         tenant_id=auth.tenant_id,
         chat_id=chat_id,
         sender_user_id=auth.user_id,
         agent_slug=None,
-        body=body.body.strip(),
+        body=text,
         visibility="public",
     )
     db.add(user_msg)
     db.flush()
+    for row in linked:
+        row.message_id = user_msg.id
+    db.flush()
+
     replies, created_chat_id, deleted_chat_id, cleared = handle_chat_message(
         db,
         auth=auth,
@@ -225,7 +365,7 @@ def post_message(
         user_message=user_msg,
         speak=body.speak,
     )
-    if (user_msg.visibility or "public") == "public" and not cleared:
+    if (user_msg.visibility or "public") == "public" and not cleared and text:
         record_mentions(
             db,
             tenant_id=auth.tenant_id,
@@ -247,6 +387,7 @@ def post_message(
                 "body": r.body,
                 "audio_url": r.audio_url,
                 "visibility": getattr(r, "visibility", None) or "public",
+                "created_at": _iso_utc(r.created_at),
             }
             for r in replies
         ],

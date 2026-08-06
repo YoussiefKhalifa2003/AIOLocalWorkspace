@@ -1227,6 +1227,11 @@ def handle_chat_message(
                 whisper=False,
             )
         ask = parsed.rest.strip() or parsed.skill or "help"
+        from app.services.attachment_context import build_attachments_prompt_block
+
+        attach_block = build_attachments_prompt_block(
+            db, message_id=user_message.id, tenant_id=auth.tenant_id
+        )
         ctx = recent_private_context(db, chat=chat, user_id=auth.user_id)
         prompt = ask
         if ctx:
@@ -1234,6 +1239,10 @@ def handle_chat_message(
                 f"Private room context (recent):\n{ctx}\n\n"
                 f"Skill=/{parsed.skill}. User ask:\n{ask}"
             )
+        else:
+            prompt = f"Skill=/{parsed.skill}. User ask:\n{ask}"
+        if attach_block:
+            prompt = f"{prompt}\n\n{attach_block}"
         result = _run_agent_branch(
             db, auth, chat, prompt, forced_agent=parsed.agent
         )

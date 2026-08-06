@@ -74,6 +74,13 @@ class LLMClient:
         if "writing" in system.lower():
             return f"OFFLINE DRAFT\n\nSummary of request:\n{user[:800]}\n\nRecommendation: proceed with a thin vertical slice."
         if "research" in system.lower():
+            # Prefer attached file content when present (tests + offline demos)
+            if "ATTACHED FILES" in user:
+                return (
+                    "OFFLINE RESEARCH NOTES\n"
+                    "Based on the attached file(s) in the user message:\n"
+                    f"{user[user.index('ATTACHED FILES'):user.index('ATTACHED FILES') + 1200]}\n"
+                )
             return (
                 "OFFLINE RESEARCH NOTES\n"
                 "- Market: local AI workspaces are crowded\n"

@@ -5,7 +5,8 @@ from __future__ import annotations
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.models import Chat, ChatClearCursor, ChatMention, ChatMessage, utcnow
+from app.db.models import Chat, ChatAttachment, ChatClearCursor, ChatMention, ChatMessage, utcnow
+from app.services.attachments import delete_file
 from app.services.auth import AuthContext
 
 
@@ -40,12 +41,21 @@ def set_clear_cursor(
     db.flush()
 
 
+def _delete_attachments_for_chat(db: Session, *, chat_id: int) -> None:
+    rows = db.query(ChatAttachment).filter(ChatAttachment.chat_id == chat_id).all()
+    for row in rows:
+        delete_file(row.storage_path)
+        db.delete(row)
+    db.flush()
+
+
 def wipe_chat_messages(db: Session, *, chat_id: int) -> int:
     """Hard-delete all messages in a chat (FK-safe). Returns deleted count."""
     msg_ids = [
         mid
         for (mid,) in db.query(ChatMessage.id).filter(ChatMessage.chat_id == chat_id).all()
     ]
+    _delete_attachments_for_chat(db, chat_id=chat_id)
     if msg_ids:
         db.query(ChatMention).filter(ChatMention.message_id.in_(msg_ids)).delete(
             synchronize_session=False

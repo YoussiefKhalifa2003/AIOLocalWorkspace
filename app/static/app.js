@@ -19,6 +19,9 @@
     unreadMentions: 0,
     mentionRows: [],
     boardCards: [],
+    pendingAttachments: [],
+    lastSyncAt: null,
+    editingMsgId: null,
   };
 
   // Distinct side-rail colors per person (stable by email)
@@ -435,6 +438,17 @@
     }
     if (last < src.length) blocks.push({ type: "md", text: src.slice(last) });
 
+    const flushList = (out, kind, items) => {
+      if (!items.length) return;
+      const tag = kind === "ol" ? "ol" : "ul";
+      out.push(
+        `<${tag} class="md-list">${items
+          .map((it) => `<li>${formatInlineMarkdown(it)}</li>`)
+          .join("")}</${tag}>`
+      );
+      items.length = 0;
+    };
+
     const out = [];
     blocks.forEach((block) => {
       if (block.type === "code") {
@@ -444,82 +458,90 @@
         );
         return;
       }
-      const chunks = block.text.split(/\n{2,}/);
-      chunks.forEach((chunk) => {
-        const trimmed = chunk.replace(/^\n+|\n+$/g, "");
-        if (!trimmed) return;
-        const lines = trimmed.split("\n");
 
-        if (lines.length === 1 && /^\s*(-{3,}|_{3,}|\*{3,})\s*$/.test(lines[0])) {
-          out.push("<hr class=\"md-hr\" />");
+      const lines = block.text.replace(/^\n+|\n+$/g, "").split("\n");
+      let listKind = null;
+      let listItems = [];
+      let para = [];
+
+      const flushPara = () => {
+        if (!para.length) return;
+        const text = para.join("\n").trim();
+        para = [];
+        if (!text) return;
+        out.push(`<p class="md-p">${formatInlineMarkdown(text).replace(/\n/g, "<br />")}</p>`);
+      };
+
+      lines.forEach((line) => {
+        const trimmed = line.trimEnd();
+        if (!trimmed.trim()) {
+          flushList(out, listKind, listItems);
+          listKind = null;
+          flushPara();
           return;
         }
 
-        const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
-        if (heading && lines.length === 1) {
+        if (/^\s*(-{3,}|_{3,}|\*{3,})\s*$/.test(trimmed)) {
+          flushList(out, listKind, listItems);
+          listKind = null;
+          flushPara();
+          out.push('<hr class="md-hr" />');
+          return;
+        }
+
+        const heading = trimmed.match(/^\s*(#{1,4})\s+(.+)$/);
+        if (heading) {
+          flushList(out, listKind, listItems);
+          listKind = null;
+          flushPara();
           const level = heading[1].length;
-          out.push(`<h${level} class="md-h">${formatInlineMarkdown(heading[2].trim())}</h${level}>`);
+          out.push(
+            `<h${level} class="md-h">${formatInlineMarkdown(heading[2].trim())}</h${level}>`
+          );
           return;
         }
 
-        if (lines.every((ln) => /^\s*>\s?/.test(ln) || ln.trim() === "")) {
-          const inner = lines
-            .map((ln) => ln.replace(/^\s*>\s?/, ""))
-            .join("\n");
-          out.push(`<blockquote class="md-quote">${formatInlineMarkdown(inner)}</blockquote>`);
+        const ul = trimmed.match(/^\s*[-*+]\s+(.+)$/);
+        if (ul) {
+          flushPara();
+          if (listKind && listKind !== "ul") {
+            flushList(out, listKind, listItems);
+          }
+          listKind = "ul";
+          listItems.push(ul[1]);
           return;
         }
 
-        if (lines.every((ln) => /^\s*[-*+]\s+/.test(ln) || ln.trim() === "")) {
-          const items = lines
-            .filter((ln) => /^\s*[-*+]\s+/.test(ln))
-            .map((ln) => `<li>${formatInlineMarkdown(ln.replace(/^\s*[-*+]\s+/, ""))}</li>`)
-            .join("");
-          out.push(`<ul class="md-list">${items}</ul>`);
+        const ol = trimmed.match(/^\s*\d+\.\s+(.+)$/);
+        if (ol) {
+          flushPara();
+          if (listKind && listKind !== "ol") {
+            flushList(out, listKind, listItems);
+          }
+          listKind = "ol";
+          listItems.push(ol[1]);
           return;
         }
 
-        if (lines.every((ln) => /^\s*\d+\.\s+/.test(ln) || ln.trim() === "")) {
-          const items = lines
-            .filter((ln) => /^\s*\d+\.\s+/.test(ln))
-            .map((ln) => `<li>${formatInlineMarkdown(ln.replace(/^\s*\d+\.\s+/, ""))}</li>`)
-            .join("");
-          out.push(`<ol class="md-list">${items}</ol>`);
+        const quote = trimmed.match(/^\s*>\s?(.*)$/);
+        if (quote) {
+          flushList(out, listKind, listItems);
+          listKind = null;
+          flushPara();
+          out.push(
+            `<blockquote class="md-quote">${formatInlineMarkdown(quote[1])}</blockquote>`
+          );
           return;
         }
 
-        // GFM-ish table: header | sep | rows
-        if (
-          lines.length >= 2 &&
-          lines[0].includes("|") &&
-          /^\s*\|?[\s:-]+\|[\s|:-]+\|?\s*$/.test(lines[1])
-        ) {
-          const splitRow = (row) =>
-            row
-              .trim()
-              .replace(/^\|/, "")
-              .replace(/\|$/, "")
-              .split("|")
-              .map((c) => c.trim());
-          const headers = splitRow(lines[0]);
-          const bodyRows = lines.slice(2).filter((ln) => ln.includes("|"));
-          const thead = `<thead><tr>${headers
-            .map((h) => `<th>${formatInlineMarkdown(h)}</th>`)
-            .join("")}</tr></thead>`;
-          const tbody = `<tbody>${bodyRows
-            .map((row) => {
-              const cells = splitRow(row);
-              return `<tr>${headers
-                .map((_, i) => `<td>${formatInlineMarkdown(cells[i] || "")}</td>`)
-                .join("")}</tr>`;
-            })
-            .join("")}</tbody>`;
-          out.push(`<div class="md-table-wrap"><table class="md-table">${thead}${tbody}</table></div>`);
-          return;
-        }
-
-        out.push(`<p class="md-p">${formatInlineMarkdown(trimmed).replace(/\n/g, "<br />")}</p>`);
+        // GFM table rows kept as plain paragraphs unless full table detected later — skip for status
+        flushList(out, listKind, listItems);
+        listKind = null;
+        para.push(trimmed);
       });
+
+      flushList(out, listKind, listItems);
+      flushPara();
     });
     return out.join("");
   }
@@ -999,35 +1021,164 @@
     }
   }
 
-  function renderMessages(rows, append) {
-    const box = $("messages");
-    if (!append) box.innerHTML = "";
-    rows.forEach((m) => {
-      const div = document.createElement("div");
-      div.className = "msg" + (m.agent ? " agent" : " user") + (m.visibility === "whisper" ? " whisper" : "");
-      div.dataset.msgId = String(m.id);
-      const color = colorForMessage(m);
-      div.style.borderLeftColor = color;
-      const who = m.agent ? `@${m.agent}` : (m.sender || "user");
-      const whisperTag = m.visibility === "whisper" ? " - only you" : "";
-      let bodyText = m.body || "";
-      const confirmMatch = bodyText.match(/\[\[confirm:([0-9,\s]+)\]\]/);
-      const confirmIds = confirmMatch
-        ? confirmMatch[1].split(",").map((s) => s.trim()).filter(Boolean)
-        : [];
-      const setupMatch = bodyText.match(/\[\[setup:(\d+)\]\]/);
-      const setupId = setupMatch ? setupMatch[1] : null;
-      bodyText = bodyText
-        .replace(/\n?\[\[confirm:[0-9,\s]+\]\]\s*$/, "")
-        .replace(/\n?\[\[setup:\d+\]\]\s*$/, "")
-        .trimEnd();
-      const titleFromBody = (bodyText.match(/Added objective #\d+:\s*(.+?)(?:\s*\(yours\))?$/m) || [])[1];
-      div.innerHTML =
-        `<div class="meta"><span class="who"></span>${whisperTag} <span class="msg-id"> - #${m.id}</span></div><div class="body"></div>`;
-      const whoEl = div.querySelector(".who");
-      whoEl.textContent = who;
-      whoEl.style.color = color;
-      setMessageBody(div.querySelector(".body"), bodyText);
+  const CHAT_TZ = "Asia/Dubai";
+
+  function parseMsgDate(iso) {
+    if (!iso) return null;
+    let s = String(iso).trim();
+    // SQLite/UTC rows often arrive naive ("2026-08-06 09:23:29") — treat as UTC
+    if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+      s = s.replace(" ", "T");
+      if (!s.endsWith("Z")) s += "Z";
+    }
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  function dubaiParts(d) {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: CHAT_TZ,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      weekday: "long",
+    }).formatToParts(d);
+    const get = (type) => (parts.find((p) => p.type === type) || {}).value;
+    return {
+      year: Number(get("year")),
+      month: Number(get("month")),
+      day: Number(get("day")),
+      weekday: get("weekday"),
+      hour: get("hour"),
+      minute: get("minute"),
+      dayPeriod: get("dayPeriod"),
+    };
+  }
+
+  function dayKey(d) {
+    const p = dubaiParts(d);
+    return `${p.year}-${p.month}-${p.day}`;
+  }
+
+  function formatMsgTime(d) {
+    return d.toLocaleTimeString("en-GB", {
+      timeZone: CHAT_TZ,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+
+  function formatDayLabel(d) {
+    const msg = dubaiParts(d);
+    const now = dubaiParts(new Date());
+    const msgUtc = Date.UTC(msg.year, msg.month - 1, msg.day);
+    const nowUtc = Date.UTC(now.year, now.month - 1, now.day);
+    const diffDays = Math.round((nowUtc - msgUtc) / 86400000);
+    if (diffDays === 0) return "Today";
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays > 1 && diffDays < 7) {
+      return d.toLocaleDateString("en-GB", {
+        timeZone: CHAT_TZ,
+        weekday: "long",
+        month: "short",
+        day: "numeric",
+      });
+    }
+    const opts = { timeZone: CHAT_TZ, month: "short", day: "numeric" };
+    if (msg.year !== now.year) opts.year = "numeric";
+    return d.toLocaleDateString("en-GB", opts);
+  }
+
+  function lastRenderedDayKey(box) {
+    const nodes = box.querySelectorAll(".msg[data-day]");
+    if (!nodes.length) return null;
+    return nodes[nodes.length - 1].dataset.day || null;
+  }
+
+  function appendDaySeparator(box, d) {
+    const sep = document.createElement("div");
+    sep.className = "msg-day";
+    sep.setAttribute("role", "separator");
+    const label = document.createElement("span");
+    label.textContent = formatDayLabel(d);
+    sep.appendChild(label);
+    box.appendChild(sep);
+  }
+
+  function isOwnMessage(m) {
+    if (m.agent) return false;
+    if (m.sender_user_id != null && state.userId != null) {
+      return Number(m.sender_user_id) === Number(state.userId);
+    }
+    if (m.sender_email && state.email) {
+      return String(m.sender_email).toLowerCase() === String(state.email).toLowerCase();
+    }
+    return false;
+  }
+
+  function fillMessageContent(div, m) {
+    const color = colorForMessage(m);
+    div.style.borderLeftColor = color;
+    const who = m.agent ? `@${m.agent}` : (m.sender || "user");
+    const whisperTag = m.visibility === "whisper" ? " - only you" : "";
+    const when = parseMsgDate(m.created_at);
+    const timeText = when ? formatMsgTime(when) : "";
+    const edited = !m.deleted_at && m.edited_at;
+    const mine = isOwnMessage(m) && !m.deleted_at;
+
+    div.className =
+      "msg" +
+      (m.agent ? " agent" : " user") +
+      (m.visibility === "whisper" ? " whisper" : "") +
+      (mine ? " mine" : "") +
+      (m.deleted_at ? " deleted" : "");
+
+    let bodyText = m.deleted_at ? "" : (m.body || "");
+    const confirmMatch = bodyText.match(/\[\[confirm:([0-9,\s]+)\]\]/);
+    const confirmIds = confirmMatch
+      ? confirmMatch[1].split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+    const setupMatch = bodyText.match(/\[\[setup:(\d+)\]\]/);
+    const setupId = setupMatch ? setupMatch[1] : null;
+    bodyText = bodyText
+      .replace(/\n?\[\[confirm:[0-9,\s]+\]\]\s*$/, "")
+      .replace(/\n?\[\[setup:\d+\]\]\s*$/, "")
+      .trimEnd();
+    const titleFromBody = (bodyText.match(/Added objective #\d+:\s*(.+?)(?:\s*\(yours\))?$/m) || [])[1];
+
+    div.innerHTML =
+      `<div class="meta"><span class="who"></span>${whisperTag}` +
+      `<span class="msg-time"></span>` +
+      `<span class="msg-edited"></span>` +
+      `<span class="msg-id"> · #${m.id}</span></div>` +
+      `<div class="body"></div>`;
+
+    const whoEl = div.querySelector(".who");
+    whoEl.textContent = who;
+    whoEl.style.color = color;
+    const timeEl = div.querySelector(".msg-time");
+    if (timeText) {
+      timeEl.textContent = ` · ${timeText}`;
+      timeEl.title = when.toLocaleString("en-GB", { timeZone: CHAT_TZ });
+    }
+    const editedEl = div.querySelector(".msg-edited");
+    if (edited) {
+      editedEl.textContent = " · edited";
+      editedEl.title = parseMsgDate(m.edited_at)
+        ? parseMsgDate(m.edited_at).toLocaleString("en-GB", { timeZone: CHAT_TZ })
+        : "edited";
+    }
+
+    const bodyEl = div.querySelector(".body");
+    if (m.deleted_at) {
+      bodyEl.classList.add("msg-deleted-label");
+      bodyEl.textContent = "message deleted";
+    } else {
+      setMessageBody(bodyEl, bodyText);
       if (setupId) {
         mountSetupCard(div, setupId, titleFromBody ? `#${setupId} ${titleFromBody}` : `Objective #${setupId}`);
       }
@@ -1059,19 +1210,277 @@
         audio.controls = true;
         audio.src = m.audio_url;
         div.appendChild(audio);
-        if ($("speakToggle").checked) {
-          audio.play().catch(() => {});
-        }
       }
+      if (m.attachments && m.attachments.length) {
+        mountMessageAttachments(div, m.attachments);
+      }
+    }
+
+    if (mine) {
+      const tools = document.createElement("div");
+      tools.className = "msg-tools";
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "msg-tool";
+      editBtn.textContent = "edit";
+      editBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        beginEditMessage(div, m);
+      };
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "msg-tool danger";
+      delBtn.textContent = "delete";
+      delBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        void deleteOwnMessage(m.id);
+      };
+      tools.appendChild(editBtn);
+      tools.appendChild(delBtn);
+      div.appendChild(tools);
+    }
+  }
+
+  function beginEditMessage(div, m) {
+    if (!state.chatId || m.deleted_at) return;
+    if (state.editingMsgId && Number(state.editingMsgId) !== Number(m.id)) {
+      // cancel other edit by re-polling that bubble later — force single edit
+      const prev = document.querySelector(`.msg[data-msg-id="${state.editingMsgId}"]`);
+      if (prev && prev._editCancel) prev._editCancel();
+    }
+    state.editingMsgId = m.id;
+    div.classList.add("editing");
+    const bodyEl = div.querySelector(".body");
+    const tools = div.querySelector(".msg-tools");
+    if (tools) tools.classList.add("hidden");
+    const original = m.body || "";
+    const form = document.createElement("div");
+    form.className = "msg-edit-form";
+    const input = document.createElement("textarea");
+    input.className = "msg-edit-input";
+    input.rows = Math.min(8, Math.max(2, String(original).split("\n").length));
+    input.value = original;
+    const row = document.createElement("div");
+    row.className = "msg-edit-actions";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "save";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "cancel";
+    row.appendChild(save);
+    row.appendChild(cancel);
+    form.appendChild(input);
+    form.appendChild(row);
+
+    const finish = () => {
+      state.editingMsgId = null;
+      div.classList.remove("editing");
+      div._editCancel = null;
+    };
+
+    div._editCancel = () => {
+      finish();
+      fillMessageContent(div, m);
+    };
+
+    cancel.onclick = () => div._editCancel();
+    save.onclick = async () => {
+      const next = input.value.trim();
+      if (!next) {
+        setVoiceStatus("message cannot be empty");
+        return;
+      }
+      try {
+        const updated = await api(`/chats/${state.chatId}/messages/${m.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ body: next }),
+        });
+        finish();
+        fillMessageContent(div, updated);
+      } catch (e) {
+        setVoiceStatus(String(e.message || e));
+      }
+    };
+    input.onkeydown = (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        div._editCancel();
+      }
+      if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
+        ev.preventDefault();
+        save.click();
+      }
+    };
+
+    if (bodyEl) bodyEl.replaceWith(form);
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+
+  async function deleteOwnMessage(messageId) {
+    if (!state.chatId) return;
+    if (!window.confirm("Delete this message for everyone?")) return;
+    try {
+      const updated = await api(`/chats/${state.chatId}/messages/${messageId}`, {
+        method: "DELETE",
+      });
+      const el = document.querySelector(`.msg[data-msg-id="${messageId}"]`);
+      if (el) fillMessageContent(el, updated);
+    } catch (e) {
+      setVoiceStatus(String(e.message || e));
+    }
+  }
+
+  function renderMessages(rows, append) {
+    const box = $("messages");
+    if (!append) box.innerHTML = "";
+    let prevDay = append ? lastRenderedDayKey(box) : null;
+    let shouldStick = !append;
+    rows.forEach((m) => {
+      const existing = append
+        ? box.querySelector(`.msg[data-msg-id="${m.id}"]`)
+        : null;
+      if (existing) {
+        // Don't clobber an in-progress edit
+        if (Number(state.editingMsgId) === Number(m.id)) return;
+        fillMessageContent(existing, m);
+        state.lastMsgId = Math.max(state.lastMsgId, m.id);
+        return;
+      }
+      const when = parseMsgDate(m.created_at);
+      const dk = when ? dayKey(when) : null;
+      if (dk && dk !== prevDay) {
+        appendDaySeparator(box, when);
+        prevDay = dk;
+      }
+      const div = document.createElement("div");
+      div.dataset.msgId = String(m.id);
+      if (dk) div.dataset.day = dk;
+      fillMessageContent(div, m);
       box.appendChild(div);
       state.lastMsgId = Math.max(state.lastMsgId, m.id);
+      shouldStick = true;
     });
-    box.scrollTop = box.scrollHeight;
+    if (shouldStick) box.scrollTop = box.scrollHeight;
+  }
+
+  function mountMessageAttachments(div, attachments) {
+    const wrap = document.createElement("div");
+    wrap.className = "msg-attachments";
+    attachments.forEach((a) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "msg-attach";
+      chip.title = a.filename || "attachment";
+      const label = document.createElement("span");
+      label.textContent = a.filename || `file #${a.id}`;
+      chip.appendChild(label);
+      const isImg = String(a.content_type || "").startsWith("image/");
+      if (isImg && a.url) {
+        const img = document.createElement("img");
+        img.alt = a.filename || "";
+        chip.insertBefore(img, label);
+        void authBlobUrl(a.url)
+          .then((url) => {
+            img.src = url;
+          })
+          .catch(() => {
+            img.remove();
+          });
+      }
+      chip.onclick = () => void openAttachment(a);
+      wrap.appendChild(chip);
+    });
+    div.appendChild(wrap);
+  }
+
+  async function authBlobUrl(path) {
+    const res = await fetch(path, { headers: headers(false) });
+    if (!res.ok) throw new Error("download failed");
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  }
+
+  async function openAttachment(a) {
+    try {
+      const url = await authBlobUrl(a.url);
+      const w = window.open(url, "_blank", "noopener,noreferrer");
+      if (!w) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = a.filename || "download";
+        link.click();
+      }
+    } catch (e) {
+      setVoiceStatus(String(e.message || e));
+    }
+  }
+
+  function renderPendingAttachments() {
+    const box = $("attachPending");
+    if (!box) return;
+    const rows = state.pendingAttachments || [];
+    box.innerHTML = "";
+    if (!rows.length) {
+      box.classList.add("hidden");
+      return;
+    }
+    box.classList.remove("hidden");
+    rows.forEach((a) => {
+      const chip = document.createElement("div");
+      chip.className = "attach-chip";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = a.filename;
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.textContent = "×";
+      rm.title = "remove";
+      rm.onclick = () => {
+        state.pendingAttachments = state.pendingAttachments.filter((x) => x.id !== a.id);
+        renderPendingAttachments();
+      };
+      chip.appendChild(name);
+      chip.appendChild(rm);
+      box.appendChild(chip);
+    });
+  }
+
+  async function uploadPendingFiles(fileList) {
+    if (!state.chatId || !fileList || !fileList.length) return;
+    const room = 5 - (state.pendingAttachments || []).length;
+    if (room <= 0) {
+      setVoiceStatus("at most 5 attachments per message");
+      return;
+    }
+    const files = Array.from(fileList).slice(0, room);
+    setComposerBusy(true);
+    try {
+      for (const file of files) {
+        const form = new FormData();
+        form.append("file", file, file.name);
+        const att = await api(`/chats/${state.chatId}/attachments`, {
+          method: "POST",
+          body: form,
+        });
+        state.pendingAttachments.push(att);
+      }
+      renderPendingAttachments();
+    } catch (e) {
+      setVoiceStatus(String(e.message || e));
+    } finally {
+      setComposerBusy(false);
+    }
   }
 
   async function selectChat(id) {
     state.chatId = id;
     state.lastMsgId = 0;
+    state.lastSyncAt = null;
+    state.editingMsgId = null;
+    state.pendingAttachments = [];
+    renderPendingAttachments();
     const meta = (state.chats || []).find((c) => Number(c.id) === Number(id));
     const title = meta
       ? (meta.kind === "private" ? "my private room" : `team #${meta.name}`)
@@ -1087,6 +1496,7 @@
       li.classList.toggle("active", Number(li.dataset.id) === Number(id));
     });
     const rows = await api(`/chats/${id}/messages?after_id=0`);
+    state.lastSyncAt = new Date().toISOString();
     renderMessages(rows, false);
   }
 
@@ -1207,7 +1617,11 @@
   async function poll() {
     if (!state.chatId || !state.apiKey) return;
     try {
-      const rows = await api(`/chats/${state.chatId}/messages?after_id=${state.lastMsgId}`);
+      const since = state.lastSyncAt ? `&since=${encodeURIComponent(state.lastSyncAt)}` : "";
+      const rows = await api(
+        `/chats/${state.chatId}/messages?after_id=${state.lastMsgId}${since}`
+      );
+      state.lastSyncAt = new Date().toISOString();
       if (rows.length) renderMessages(rows, true);
       await refreshMentions();
     } catch (_) { /* ignore transient */ }
@@ -1235,15 +1649,20 @@
     }
   }
 
-  async function sendBody(body) {
-    if (!body || !state.chatId) return;
-    const expectsLlm = looksLikeAgentWork(body);
+  async function sendBody(body, attachmentIds) {
+    const ids = attachmentIds || [];
+    if ((!body && !ids.length) || !state.chatId) return;
+    const expectsLlm = body && looksLikeAgentWork(body);
     if (expectsLlm) startLlmWait(body);
     else setComposerBusy(true);
     try {
       const data = await api(`/chats/${state.chatId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ body, speak: $("speakToggle").checked }),
+        body: JSON.stringify({
+          body: body || "",
+          speak: $("speakToggle").checked,
+          attachment_ids: ids,
+        }),
       });
       await afterMessageMeta(data);
     } finally {
@@ -1375,11 +1794,14 @@
   async function send(ev) {
     ev.preventDefault();
     const body = $("input").value.trim();
-    if (!body || !state.chatId) return;
+    const ids = (state.pendingAttachments || []).map((a) => a.id);
+    if ((!body && !ids.length) || !state.chatId) return;
     if ($("composer").classList.contains("busy")) return;
     $("input").value = "";
+    state.pendingAttachments = [];
+    renderPendingAttachments();
     try {
-      await sendBody(body);
+      await sendBody(body, ids);
     } catch (e) {
       setVoiceStatus(String(e.message || e));
     }
@@ -1538,6 +1960,15 @@
     showApp(false);
   };
   $("composer").onsubmit = send;
+  const attachBtn = $("attachBtn");
+  const attachInput = $("attachInput");
+  if (attachBtn && attachInput) {
+    attachBtn.onclick = () => attachInput.click();
+    attachInput.onchange = () => {
+      void uploadPendingFiles(attachInput.files);
+      attachInput.value = "";
+    };
+  }
   $("newChatBtn").onclick = newChat;
   $("inviteBtn").onclick = inviteMember;
   $("voiceToggle").onchange = syncMicUi;

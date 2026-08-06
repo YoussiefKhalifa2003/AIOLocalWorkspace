@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AIO</title>
-  <link rel="stylesheet" href="/static/styles.css?v=confirm1" />
+  <link rel="stylesheet" href="/static/styles.css?v=edit1" />
 </head>
 <body>
   <div id="login" class="screen">
@@ -64,6 +64,7 @@
           </div>
         </div>
         <form id="composer">
+          <div id="attachPending" class="attach-pending hidden"></div>
           <div class="composer-wrap">
             <div class="composer-field">
               <div class="composer-mirror" id="composerMirror" aria-hidden="true">
@@ -73,6 +74,8 @@
             </div>
             <ul id="mentionBox" class="mention-box hidden"></ul>
           </div>
+          <input id="attachInput" type="file" class="hidden" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,image/*,application/pdf,text/plain,text/markdown" />
+          <button id="attachBtn" type="button" title="attach file">attach</button>
           <button id="micBtn" type="button" title="hold to speak / click to stop" disabled>mic</button>
           <button type="submit" id="sendBtn">send</button>
         </form>
@@ -106,6 +109,6 @@
       <div id="analyticsBody" class="analytics-body"></div>
     </div>
   </div>
-  <script src="/static/app.js?v=confirm1"></script>
+  <script src="/static/app.js?v=edit1"></script>
 </body>
 </html>
