@@ -18,6 +18,7 @@
     isOwner: false,
     unreadMentions: 0,
     mentionRows: [],
+    boardCards: [],
   };
 
   // Distinct side-rail colors per person (stable by email)
@@ -295,6 +296,14 @@
       jobsToday = `jobs: ${sum.total}`;
     } catch (_) { /* ignore */ }
     $("boardFooter").textContent = jobsToday;
+
+    const allCards = [];
+    (board.columns || []).forEach((col) => {
+      (col.cards || []).forEach((card) => {
+        allCards.push({ ...card, status: col.id });
+      });
+    });
+    state.boardCards = allCards;
 
     (board.columns || []).forEach((col) => {
       const el = document.createElement("div");
@@ -893,17 +902,151 @@
 
   async function sendBody(body) {
     if (!body || !state.chatId) return;
-    const data = await api(`/chats/${state.chatId}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ body, speak: $("speakToggle").checked }),
-    });
-    await afterMessageMeta(data);
+    const expectsLlm = looksLikeAgentWork(body);
+    if (expectsLlm) startLlmWait(body);
+    else setComposerBusy(true);
+    try {
+      const data = await api(`/chats/${state.chatId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ body, speak: $("speakToggle").checked }),
+      });
+      await afterMessageMeta(data);
+    } finally {
+      stopLlmWait();
+      setComposerBusy(false);
+    }
+  }
+
+  function skillNameFromBody(body) {
+    const t = String(body || "").trim();
+    const m = t.match(/^\/(code|research|write|web|review|checklist)\b/i);
+    if (m) return m[1].toLowerCase();
+    const m2 = t.match(/^(?:force\s+)?(code|research|write|review)\b/i);
+    return m2 ? m2[1].toLowerCase() : "";
+  }
+
+  function looksLikeAgentWork(body) {
+    const t = String(body || "").trim();
+    if (!t) return false;
+    // Any private-room skill invocation
+    if (/^\/(code|research|write|web|review|checklist)\b/i.test(t)) return true;
+    if (/^(force\s+)?(code|research|write|review)\b/i.test(t)) return true;
+    // Any other leading slash in private room (unknown skill still hits server)
+    const meta = currentChatMeta();
+    if (meta && meta.kind === "private" && t.startsWith("/")) return true;
+    return false;
+  }
+
+  let llmWaitTimer = null;
+  let llmWaitStarted = 0;
+  let llmWaitExpectedMs = 60000;
+  let llmPendingEl = null;
+
+  function setComposerBusy(on) {
+    $("composer").classList.toggle("busy", !!on);
+    const sendBtn = $("sendBtn");
+    if (sendBtn) sendBtn.disabled = !!on;
+    const input = $("input");
+    if (input) input.disabled = !!on;
+  }
+
+  function estimateWaitMs(body) {
+    const skill = skillNameFromBody(body);
+    if (skill === "code") return 120000;
+    if (skill === "research" || skill === "web" || skill === "review") return 90000;
+    return 60000;
+  }
+
+  function showPendingBubble(skill) {
+    removePendingBubble();
+    const box = $("messages");
+    if (!box) return;
+    const div = document.createElement("div");
+    div.className = "msg agent llm-pending";
+    div.id = "llmPendingMsg";
+    const label = skill ? `/${skill}` : "agent";
+    div.innerHTML =
+      `<div class="meta"><span class="who">${label}</span> <span class="msg-id">working</span></div>` +
+      `<div class="body">Thinking… generating a reply</div>`;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+    llmPendingEl = div;
+  }
+
+  function removePendingBubble() {
+    if (llmPendingEl && llmPendingEl.parentNode) {
+      llmPendingEl.parentNode.removeChild(llmPendingEl);
+    }
+    llmPendingEl = null;
+    const stale = document.getElementById("llmPendingMsg");
+    if (stale) stale.remove();
+  }
+
+  function startLlmWait(body) {
+    stopLlmWait(false);
+    setComposerBusy(true);
+    llmWaitStarted = Date.now();
+    llmWaitExpectedMs = estimateWaitMs(body);
+    const skill = skillNameFromBody(body);
+    const box = $("llmWait");
+    const bar = $("llmWaitBar");
+    const label = $("llmWaitLabel");
+    const eta = $("llmWaitEta");
+    const hint = $("llmWaitHint");
+    if (!box || !bar) return;
+    box.classList.remove("hidden");
+    label.textContent = skill
+      ? `Running /${skill} — model is working…`
+      : "Agent working — model is generating…";
+    if (hint) {
+      hint.textContent = skill
+        ? `Please wait while /${skill} finishes (often 30–90s)`
+        : "Please wait — the model is generating a reply";
+    }
+    bar.style.width = "4%";
+    eta.textContent = "starting…";
+    showPendingBubble(skill);
+    llmWaitTimer = setInterval(() => {
+      const elapsed = Date.now() - llmWaitStarted;
+      const t = Math.min(1, elapsed / llmWaitExpectedMs);
+      const pct = Math.min(92, 4 + t * 88);
+      bar.style.width = `${pct}%`;
+      const left = Math.max(0, Math.ceil((llmWaitExpectedMs - elapsed) / 1000));
+      if (elapsed < llmWaitExpectedMs) {
+        eta.textContent = left > 5 ? `~${left}s left` : "almost done…";
+      } else {
+        eta.textContent = "still working…";
+        label.textContent = skill
+          ? `/${skill} is taking longer than usual…`
+          : "Taking longer than usual…";
+      }
+    }, 250);
+  }
+
+  function stopLlmWait(animateDone = true) {
+    if (llmWaitTimer) {
+      clearInterval(llmWaitTimer);
+      llmWaitTimer = null;
+    }
+    removePendingBubble();
+    const box = $("llmWait");
+    const bar = $("llmWaitBar");
+    if (bar && animateDone) bar.style.width = "100%";
+    if (box) {
+      const hide = () => {
+        box.classList.add("hidden");
+        if (bar) bar.style.width = "0%";
+      };
+      if (animateDone) setTimeout(hide, 220);
+      else hide();
+    }
   }
 
   async function send(ev) {
     ev.preventDefault();
     const body = $("input").value.trim();
     if (!body || !state.chatId) return;
+    if ($("composer").classList.contains("busy")) return;
     $("input").value = "";
     try {
       await sendBody(body);
@@ -1077,34 +1220,44 @@
     panel.classList.add("hidden");
   });
 
+  const STATUS_OPTS = ["todo", "doing", "blocked", "done", "agent_backlog", "in_review"];
+
   const COMMAND_CATALOG = [
-    { insert: "!add ", label: "!add", blurb: "new board card" },
-    { insert: "!list", label: "!list", blurb: "show my cards" },
-    { insert: "!set ", label: "!set", blurb: "move card status" },
-    { insert: "!done ", label: "!done", blurb: "mark card done" },
-    { insert: "!remove ", label: "!remove", blurb: "delete a card" },
-    { insert: "!assign ", label: "!assign", blurb: "give card away" },
-    { insert: "!link ", label: "!link", blurb: "attach branch/PR" },
-    { insert: "!claim ", label: "!claim", blurb: "lock a file" },
-    { insert: "!release ", label: "!release", blurb: "free a file" },
-    { insert: "!go", label: "!go", blurb: "run despite claim" },
-    { insert: "!issue ", label: "!issue", blurb: "log a blocker" },
-    { insert: "!issues", label: "!issues", blurb: "show blockers" },
-    { insert: "!resolve ", label: "!resolve", blurb: "close blocker" },
-    { insert: "!invitation", label: "!invitation", blurb: "new single-use invite" },
-    { insert: "!status ", label: "!status", blurb: "member catch-up" },
-    { insert: "!clear", label: "!clear", blurb: "wipe this chat" },
-    { insert: "!help", label: "!help", blurb: "list commands" },
+    { insert: "!add ", label: "!add", blurb: "new board card", args: ["<title>"] },
+    { insert: "!list", label: "!list", blurb: "show my cards", args: [] },
+    { insert: "!set ", label: "!set", blurb: "move card status", args: ["<id>", "<status>"] },
+    { insert: "!done ", label: "!done", blurb: "mark card done", args: ["<id>"] },
+    { insert: "!remove ", label: "!remove", blurb: "delete a card", args: ["<id>"] },
+    { insert: "!assign ", label: "!assign", blurb: "give card away", args: ["<id>", "<name>"] },
+    { insert: "!link ", label: "!link", blurb: "attach branch/PR", args: ["<id>", "branch|pr", "<value>"] },
+    { insert: "!claim ", label: "!claim", blurb: "lock a file", args: ["<path>"] },
+    { insert: "!release ", label: "!release", blurb: "free a file", args: ["<path>"] },
+    { insert: "!go", label: "!go", blurb: "run despite claim", args: [] },
+    { insert: "!issue ", label: "!issue", blurb: "log a blocker", args: ["<text>"] },
+    { insert: "!issues", label: "!issues", blurb: "show blockers", args: [] },
+    { insert: "!resolve ", label: "!resolve", blurb: "close blocker", args: ["<id>"] },
+    { insert: "!invitation", label: "!invitation", blurb: "new single-use invite", args: [] },
+    { insert: "!status ", label: "!status", blurb: "member catch-up", args: ["<name>"] },
+    { insert: "!clear", label: "!clear", blurb: "wipe this chat", args: [] },
+    { insert: "!help", label: "!help", blurb: "list commands", args: [] },
   ];
 
   const SKILL_CATALOG = [
-    { insert: "/research ", label: "/research", blurb: "dig facts & sources" },
-    { insert: "/web ", label: "/web", blurb: "look things up" },
-    { insert: "/code ", label: "/code", blurb: "build or patch" },
-    { insert: "/write ", label: "/write", blurb: "draft clear prose" },
-    { insert: "/review ", label: "/review", blurb: "check the diff" },
-    { insert: "/checklist ", label: "/checklist", blurb: "break into ticks" },
+    { insert: "/research ", label: "/research", blurb: "dig facts & sources", args: ["<ask>"] },
+    { insert: "/web ", label: "/web", blurb: "look things up", args: ["<ask>"] },
+    { insert: "/code ", label: "/code", blurb: "build or patch", args: ["<ask>"] },
+    { insert: "/write ", label: "/write", blurb: "draft clear prose", args: ["<ask>"] },
+    { insert: "/review ", label: "/review", blurb: "check the diff", args: ["<ask>"] },
+    { insert: "/checklist ", label: "/checklist", blurb: "break into ticks", args: ["<ask>"] },
   ];
+
+  const pickerState = {
+    open: false,
+    items: [],
+    index: 0,
+    triggerIndex: 0,
+    mode: null, // "prefix" | "arg"
+  };
 
   function currentChatMeta() {
     return (state.chats || []).find((c) => Number(c.id) === Number(state.chatId));
@@ -1138,21 +1291,134 @@
     }).slice(0, 16);
   }
 
-  function hideMentions() {
-    $("mentionBox").classList.add("hidden");
-    $("mentionBox").innerHTML = "";
+  function findCommandSpec(v) {
+    const m = String(v || "").match(/^(![a-z]+|\/[a-z]+)\b(.*)$/i);
+    if (!m) return null;
+    const label = m[1].toLowerCase();
+    const rest = m[2] || "";
+    const cat = [...COMMAND_CATALOG, ...SKILL_CATALOG].find(
+      (c) => c.label.toLowerCase() === label
+    );
+    if (!cat) return null;
+    return { cat, label, rest, args: cat.args || [] };
   }
 
-  function showPicker(items, triggerIndex, triggerChar) {
+  function parseArgTokens(rest) {
+    // leading space means args started; split on whitespace
+    if (!rest.startsWith(" ") && rest !== "") return null;
+    const trimmed = rest.replace(/^\s+/, "");
+    if (rest.startsWith(" ") && trimmed === "" && rest.length >= 1) {
+      return { tokens: [], partial: "", completeCount: 0 };
+    }
+    if (!rest.startsWith(" ")) return null;
+    const parts = trimmed.split(/\s+/);
+    const endsWithSpace = /\s$/.test(rest);
+    if (endsWithSpace) {
+      return { tokens: parts.filter(Boolean), partial: "", completeCount: parts.filter(Boolean).length };
+    }
+    const partial = parts[parts.length - 1] || "";
+    const complete = parts.slice(0, -1);
+    return { tokens: complete, partial, completeCount: complete.length };
+  }
+
+  function updateGhostHint() {
+    const input = $("input");
+    const typedEl = $("composerTyped");
+    const hintEl = $("composerHint");
+    if (!input || !typedEl || !hintEl) return;
+    const v = input.value;
+    typedEl.textContent = v;
+    const spec = findCommandSpec(v);
+    if (!spec || !spec.args.length) {
+      hintEl.textContent = "";
+      return;
+    }
+    // Need at least the command recognized; show remaining arg placeholders
+    const parsed = parseArgTokens(spec.rest);
+    if (parsed === null) {
+      // still typing command name, no ghost yet (or command without trailing space)
+      if (v.toLowerCase() === spec.label) {
+        hintEl.textContent = " " + spec.args.join(" ");
+      } else {
+        hintEl.textContent = "";
+      }
+      return;
+    }
+    const remaining = spec.args.slice(parsed.completeCount);
+    if (!remaining.length) {
+      hintEl.textContent = "";
+      return;
+    }
+    // If mid-token, show suffix of current arg hint only when partial empty
+    if (parsed.partial) {
+      hintEl.textContent = "";
+      return;
+    }
+    const pad = v.endsWith(" ") || v.toLowerCase() === spec.label ? "" : " ";
+    hintEl.textContent = pad + remaining.join(" ");
+  }
+
+  function hideMentions() {
+    pickerState.open = false;
+    pickerState.items = [];
+    pickerState.index = 0;
+    const box = $("mentionBox");
+    box.classList.add("hidden");
+    box.innerHTML = "";
+  }
+
+  function setPickerIndex(i) {
+    const items = pickerState.items;
+    if (!items.length) return;
+    pickerState.index = ((i % items.length) + items.length) % items.length;
+    const box = $("mentionBox");
+    const lis = [...box.querySelectorAll("li.picker-item")];
+    lis.forEach((li, idx) => li.classList.toggle("active", idx === pickerState.index));
+    const active = lis[pickerState.index];
+    if (active) active.scrollIntoView({ block: "nearest" });
+  }
+
+  function applyPickerItem(it) {
+    const input = $("input");
+    if (!it || !input) return;
+    const insert = String(it.insert || "");
+    if (pickerState.mode === "arg") {
+      const v = input.value;
+      // Replace trailing partial token (or append after trailing spaces)
+      const replaced = v.replace(/(\s+)(\S*)$/, (_, sp) => `${sp}${insert.replace(/^\s+/, "")}`);
+      if (replaced === v && /\s$/.test(v)) {
+        input.value = v + insert.replace(/^\s+/, "");
+      } else if (replaced === v) {
+        input.value = v.replace(/\s*$/, " ") + insert.replace(/^\s+/, "");
+      } else {
+        input.value = replaced;
+      }
+    } else {
+      const v = input.value;
+      input.value =
+        (pickerState.triggerIndex >= 0 ? v.slice(0, pickerState.triggerIndex) : "") + insert;
+    }
+    hideMentions();
+    input.focus();
+    updateGhostHint();
+    void refreshComposerAssist();
+  }
+
+  function showPicker(items, triggerIndex, mode) {
     const box = $("mentionBox");
     box.innerHTML = "";
     if (!items.length) {
       hideMentions();
       return;
     }
-    items.forEach((it) => {
+    pickerState.open = true;
+    pickerState.items = items;
+    pickerState.index = 0;
+    pickerState.triggerIndex = triggerIndex;
+    pickerState.mode = mode || "prefix";
+    items.forEach((it, idx) => {
       const li = document.createElement("li");
-      li.className = "picker-item";
+      li.className = "picker-item" + (idx === 0 ? " active" : "");
       const main = document.createElement("span");
       main.className = "picker-label";
       main.textContent = it.label;
@@ -1161,59 +1427,225 @@
       blurb.textContent = it.blurb || "";
       li.appendChild(main);
       if (it.blurb) li.appendChild(blurb);
-      li.onclick = () => {
-        const input = $("input");
-        const v = input.value;
-        input.value = (triggerIndex >= 0 ? v.slice(0, triggerIndex) : v) + it.insert;
-        hideMentions();
-        input.focus();
+      li.onmouseenter = () => setPickerIndex(idx);
+      li.onclick = (ev) => {
+        ev.preventDefault();
+        applyPickerItem(it);
       };
       box.appendChild(li);
     });
+    const foot = document.createElement("li");
+    foot.className = "picker-footer";
+    foot.textContent = "↑↓ navigate · Tab/Enter select · Esc close";
+    box.appendChild(foot);
     box.classList.remove("hidden");
   }
 
   function activePrefix(v) {
+    // Only while typing the token after @ ! / with no space yet
     const at = v.lastIndexOf("@");
     const bang = v.lastIndexOf("!");
     const slash = v.lastIndexOf("/");
     const idx = Math.max(at, bang, slash);
     if (idx < 0) return null;
+    // Prefer the trigger that starts the last "token" (no space after it)
     const after = v.slice(idx + 1);
     if (/\s/.test(after)) return null;
-    // Don't treat emails like a@b as @-picker mid-token after space rules already handle
-    const ch = v[idx];
-    return { ch, idx, after };
+    // If there's content before trigger without space (e.g. email), skip @ mid-word
+    if (idx > 0 && !/\s/.test(v[idx - 1]) && v[idx] === "@") return null;
+    return { ch: v[idx], idx, after };
+  }
+
+  async function ensureBoardCards() {
+    if ((state.boardCards || []).length) return;
+    if (!state.projectId) return;
+    try {
+      const board = await api(`/projects/${state.projectId}/board`);
+      const all = [];
+      (board.columns || []).forEach((col) => {
+        (col.cards || []).forEach((card) => all.push({ ...card, status: col.id }));
+      });
+      state.boardCards = all;
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function objectiveArgItems(partial) {
+    const p = (partial || "").toLowerCase();
+    return (state.boardCards || [])
+      .filter((c) => {
+        const id = String(c.id);
+        const title = String(c.title || "").toLowerCase();
+        return !p || id.startsWith(p) || title.includes(p);
+      })
+      .slice(0, 12)
+      .map((c) => ({
+        label: `#${c.id}`,
+        blurb: `${c.status || ""} · ${c.title || ""}`.trim(),
+        insert: `${c.id} `,
+      }));
+  }
+
+  function statusArgItems(partial) {
+    const p = (partial || "").toLowerCase();
+    return STATUS_OPTS.filter((s) => !p || s.startsWith(p)).map((s) => ({
+      label: s,
+      blurb: "status",
+      insert: `${s} `,
+    }));
+  }
+
+  function memberArgItems(partial) {
+    const p = (partial || "").toLowerCase();
+    return (state.members || [])
+      .map((m) => {
+        const handle = (m.name || "").trim() || (m.email || "").split("@")[0];
+        return { handle, email: m.email };
+      })
+      .filter((m) => m.handle && (!p || m.handle.toLowerCase().startsWith(p)))
+      .slice(0, 12)
+      .map((m) => ({
+        label: m.handle,
+        blurb: m.email || "",
+        insert: `${m.handle} `,
+      }));
+  }
+
+  async function maybeShowArgPicker() {
+    const v = $("input").value;
+    const spec = findCommandSpec(v);
+    if (!spec || !spec.args.length) return false;
+    const parsed = parseArgTokens(spec.rest);
+    if (!parsed) return false;
+    const argIdx = parsed.completeCount;
+    if (argIdx >= spec.args.length) {
+      hideMentions();
+      return false;
+    }
+    const hint = spec.args[argIdx];
+    const partial = parsed.partial;
+
+    if (hint === "<id>") {
+      await ensureBoardCards();
+      const items = objectiveArgItems(partial);
+      if (!items.length) return false;
+      showPicker(items, -1, "arg");
+      return true;
+    }
+    if (hint === "<status>") {
+      const items = statusArgItems(partial);
+      if (!items.length) return false;
+      showPicker(items, -1, "arg");
+      return true;
+    }
+    if (hint === "<name>") {
+      const items = memberArgItems(partial);
+      if (!items.length) return false;
+      showPicker(items, -1, "arg");
+      return true;
+    }
+    if (hint === "branch|pr") {
+      const opts = ["branch", "pr"]
+        .filter((s) => !partial || s.startsWith(partial.toLowerCase()))
+        .map((s) => ({ label: s, blurb: "link type", insert: `${s} ` }));
+      if (!opts.length) return false;
+      showPicker(opts, -1, "arg");
+      return true;
+    }
+    // Free text args: no picker, ghost only
+    hideMentions();
+    return false;
+  }
+
+  async function refreshComposerAssist() {
+    updateGhostHint();
+    const v = $("input").value;
+    const hit = activePrefix(v);
+    if (hit) {
+      const meta = currentChatMeta();
+      if (hit.ch === "@") {
+        showPicker(peopleCandidates(hit.after), hit.idx, "prefix");
+        return;
+      }
+      if (hit.ch === "!") {
+        showPicker(filterCatalog(COMMAND_CATALOG, hit.after), hit.idx, "prefix");
+        return;
+      }
+      if (hit.ch === "/") {
+        if (!meta || meta.kind !== "private") {
+          hideMentions();
+          setVoiceStatus("skills (/) only work in your private room");
+          return;
+        }
+        setVoiceStatus("");
+        showPicker(filterCatalog(SKILL_CATALOG, hit.after), hit.idx, "prefix");
+        return;
+      }
+    }
+    // Argument stage for completed command tokens
+    const showed = await maybeShowArgPicker();
+    if (!showed && !activePrefix(v)) {
+      // keep closed unless arg picker opened
+      if (!pickerState.open) hideMentions();
+    }
   }
 
   $("input").addEventListener("input", () => {
-    const v = $("input").value;
-    const hit = activePrefix(v);
-    if (!hit) {
-      hideMentions();
-      return;
-    }
-    const meta = currentChatMeta();
-    if (hit.ch === "@") {
-      showPicker(peopleCandidates(hit.after), hit.idx, "@");
-      return;
-    }
-    if (hit.ch === "!") {
-      showPicker(filterCatalog(COMMAND_CATALOG, hit.after), hit.idx, "!");
-      return;
-    }
-    if (hit.ch === "/") {
-      if (!meta || meta.kind !== "private") {
+    void refreshComposerAssist();
+  });
+
+  $("input").addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") {
+      if (pickerState.open) {
+        ev.preventDefault();
         hideMentions();
-        setVoiceStatus("skills (/) only work in your private room");
+      }
+      return;
+    }
+
+    if (pickerState.open && pickerState.items.length) {
+      if (ev.key === "ArrowDown") {
+        ev.preventDefault();
+        setPickerIndex(pickerState.index + 1);
         return;
       }
-      setVoiceStatus("");
-      showPicker(filterCatalog(SKILL_CATALOG, hit.after), hit.idx, "/");
+      if (ev.key === "ArrowUp") {
+        ev.preventDefault();
+        setPickerIndex(pickerState.index - 1);
+        return;
+      }
+      if (ev.key === "Tab" || ev.key === "Enter") {
+        // Enter: accept picker instead of sending when open
+        if (ev.key === "Enter" || ev.key === "Tab") {
+          ev.preventDefault();
+          applyPickerItem(pickerState.items[pickerState.index]);
+          return;
+        }
+      }
     }
-  });
-  $("input").addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") hideMentions();
+
+    // Tab with ghost hint only (no picker): jump caret to end visually / accept nothing hard
+    if (ev.key === "Tab" && !pickerState.open) {
+      const hintEl = $("composerHint");
+      const hint = (hintEl && hintEl.textContent) || "";
+      if (hint.trim()) {
+        ev.preventDefault();
+        // Open arg picker for next slot if possible
+        void (async () => {
+          const showed = await maybeShowArgPicker();
+          if (!showed) {
+            // Soft nudge: ensure trailing space so ghost shows next arg
+            const input = $("input");
+            if (input && !/\s$/.test(input.value)) {
+              input.value += " ";
+              updateGhostHint();
+              await maybeShowArgPicker();
+            }
+          }
+        })();
+      }
+    }
   });
 
   syncMicUi();

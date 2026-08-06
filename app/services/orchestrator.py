@@ -99,6 +99,10 @@ def _progress_bar(done: int, total: int, width: int = 20) -> str:
 def _candidate_objectives(
     db: Session, *, tenant_id: int, project_id: int, user_id: int, request_text: str
 ) -> list[Objective]:
+    """Objectives that this request is actually about. Empty if none clearly match.
+
+    Avoids asking 'is objective N met?' for unrelated open cards after freeform /code.
+    """
     rows = (
         db.query(Objective)
         .filter(
@@ -112,16 +116,57 @@ def _candidate_objectives(
     )
     if not rows:
         return []
-    req_words = {w for w in re.findall(r"[a-z0-9]+", request_text.lower()) if len(w) > 2}
-    scored: list[tuple[int, Objective]] = []
-    for obj in rows:
+
+    text = request_text or ""
+    # Explicit ids in the prompt: "objective 7", "#7", "obj-7"
+    explicit_ids = {
+        int(x)
+        for x in re.findall(
+            r"(?:objective|obj(?:ective)?|#)\s*[-:]?\s*(\d+)", text, flags=re.I
+        )
+    }
+    if explicit_ids:
+        hit = [o for o in rows if o.id in explicit_ids]
+        if hit:
+            return hit[:3]
+
+    # Prefer open cards already in agent flow
+    active_statuses = {"agent_backlog", "in_review", "doing"}
+    active = [o for o in rows if (o.status or "") in active_statuses]
+
+    req_words = {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2}
+    # Drop skill verbs that create false overlaps
+    stop = {
+        "code",
+        "coding",
+        "write",
+        "writing",
+        "research",
+        "review",
+        "checklist",
+        "please",
+        "help",
+        "make",
+        "create",
+        "fix",
+        "update",
+        "add",
+        "the",
+        "and",
+        "for",
+        "with",
+    }
+    req_words -= stop
+
+    def score(obj: Objective) -> int:
         title_words = {w for w in re.findall(r"[a-z0-9]+", obj.title.lower()) if len(w) > 2}
-        score = len(req_words & title_words)
-        scored.append((score, obj))
-    scored.sort(key=lambda x: (-x[0], -x[1].id))
-    # Prefer overlaps; otherwise most recent open objectives
-    matched = [o for s, o in scored if s > 0][:3]
-    return matched or [o for _, o in scored[:3]]
+        return len(req_words & title_words)
+
+    pool = active or rows
+    scored = sorted(((score(o), o) for o in pool), key=lambda x: (-x[0], -x[1].id))
+    # Require real overlap - never fall back to "newest unrelated"
+    matched = [o for s, o in scored if s > 0][:1]
+    return matched
 
 
 def _with_confirm_footer(reply: str, objectives: list[Objective]) -> tuple[str, list[int]]:

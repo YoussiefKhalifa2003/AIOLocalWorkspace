@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AIO</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=discord1" />
 </head>
 <body>
   <div id="login" class="screen">
@@ -53,13 +53,29 @@
       <main>
         <div id="chatTitle" class="chat-title"></div>
         <div id="messages" class="messages"></div>
+        <div id="llmWait" class="llm-wait hidden" aria-live="polite" role="status">
+          <div class="llm-wait-pulse" aria-hidden="true"></div>
+          <div class="llm-wait-copy">
+            <div class="llm-wait-row">
+              <span id="llmWaitLabel" class="llm-wait-label">Agent working…</span>
+              <span id="llmWaitEta" class="llm-wait-eta"></span>
+            </div>
+            <div class="llm-wait-track"><div id="llmWaitBar" class="llm-wait-bar"></div></div>
+            <div id="llmWaitHint" class="llm-wait-hint">Please wait — the model is generating a reply</div>
+          </div>
+        </div>
         <form id="composer">
           <div class="composer-wrap">
-            <input id="input" type="text" autocomplete="off" placeholder="chat - @people - !commands" />
+            <div class="composer-field">
+              <div class="composer-mirror" id="composerMirror" aria-hidden="true">
+                <span class="composer-typed" id="composerTyped"></span><span class="composer-hint" id="composerHint"></span>
+              </div>
+              <input id="input" type="text" autocomplete="off" spellcheck="false" placeholder="chat - @people - !commands - Tab to autocomplete" />
+            </div>
             <ul id="mentionBox" class="mention-box hidden"></ul>
           </div>
           <button id="micBtn" type="button" title="hold to speak / click to stop" disabled>mic</button>
-          <button type="submit">send</button>
+          <button type="submit" id="sendBtn">send</button>
         </form>
         <div id="voiceStatus" class="voice-status"></div>
       </main>
@@ -91,6 +107,6 @@
       <div id="analyticsBody" class="analytics-body"></div>
     </div>
   </div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=discord1"></script>
 </body>
 </html>
