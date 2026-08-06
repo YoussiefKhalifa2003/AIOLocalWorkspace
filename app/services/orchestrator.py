@@ -23,7 +23,9 @@ from app.db.models import ChatMember, WorkspaceMember
 AGENT_ALIASES = {
     "lead": "lead",
     "orchestrator": "lead",
-    "research": "research",
+    "ask": "ask",
+    "research": "ask",
+    "web": "ask",
     "writing": "writing",
     "write": "writing",
     "code": "coding",
@@ -102,7 +104,9 @@ _CONFIRM_STOP = frozenset(
         "coding",
         "write",
         "writing",
+        "ask",
         "research",
+        "web",
         "review",
         "checklist",
         "please",
@@ -184,7 +188,7 @@ _CONFIRM_STOP = frozenset(
 )
 
 # Agents whose output may complete an objective; others never get Yes/No.
-_CONFIRM_AGENTS = frozenset({"coding", "writing", "checklist", "research"})
+_CONFIRM_AGENTS = frozenset({"coding", "writing", "checklist", "ask"})
 
 
 def _confirm_tokens(text: str) -> set[str]:
@@ -217,13 +221,13 @@ def _normalize_request_for_confirm(request_text: str) -> str:
     text = _user_ask_for_confirm(request_text)
     text = text.strip()
     text = re.sub(
-        r"^(?:force\s+)?/(?:code|research|write|writing|review|checklist|web|status)\b\s*",
+        r"^(?:force\s+)?/(?:code|ask|research|write|writing|review|checklist|web|status)\b\s*",
         "",
         text,
         flags=re.I,
     )
     text = re.sub(
-        r"^(?:force\s+)?(?:code|research|write|writing|review|checklist)\b[:\s]+",
+        r"^(?:force\s+)?(?:code|ask|research|write|writing|review|checklist)\b[:\s]+",
         "",
         text,
         flags=re.I,
@@ -300,7 +304,7 @@ def _candidate_objectives(
 ) -> list[Objective]:
     """Objectives this request clearly targets. Empty unless match is strong.
 
-    Covers freeform /code|/research against open todo/doing cards (e.g. CNN obj +
+    Covers freeform /code|/ask against open todo/doing cards (e.g. CNN obj +
     '/code write me CNN skeleton') while avoiding unrelated Yes/No prompts.
     """
     from sqlalchemy import or_

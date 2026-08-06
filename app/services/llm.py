@@ -63,7 +63,7 @@ class LLMClient:
                 }
             )
         if "JSON" in system and "agents" in system.lower():
-            return json.dumps({"agents": ["research"], "reason": "offline_stub"})
+            return json.dumps({"agents": ["ask"], "reason": "offline_stub"})
         if "code review" in system.lower():
             return (
                 "OFFLINE CODE REVIEW\n"
@@ -73,16 +73,16 @@ class LLMClient:
             )
         if "writing" in system.lower():
             return f"OFFLINE DRAFT\n\nSummary of request:\n{user[:800]}\n\nRecommendation: proceed with a thin vertical slice."
-        if "research" in system.lower():
+        if "helpful workplace assistant" in system.lower() or "research agent" in system.lower():
             # Prefer attached file content when present (tests + offline demos)
             if "ATTACHED FILES" in user:
                 return (
-                    "OFFLINE RESEARCH NOTES\n"
+                    "OFFLINE ASK REPLY\n"
                     "Based on the attached file(s) in the user message:\n"
                     f"{user[user.index('ATTACHED FILES'):user.index('ATTACHED FILES') + 1200]}\n"
                 )
             return (
-                "OFFLINE RESEARCH NOTES\n"
+                "OFFLINE ASK REPLY\n"
                 "- Market: local AI workspaces are crowded\n"
                 "- Differentiator: auto-routing + quiet rooms + tenant walls\n"
                 f"- Query: {user[:400]}"

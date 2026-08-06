@@ -9,16 +9,12 @@ from sqlalchemy.orm import Session
 from app.db.models import Chat, ChatMessage
 from app.services.chat_visibility import visible_messages_filter
 
+# Public skills (shown in `/` picker). Keep this list short.
 SKILLS: dict[str, dict] = {
-    "research": {
-        "agent": "research",
-        "blurb": "dig facts & sources",
-        "label": "/research",
-    },
-    "web": {
-        "agent": "research",
-        "blurb": "look things up",
-        "label": "/web",
+    "ask": {
+        "agent": "ask",
+        "blurb": "just ask anything",
+        "label": "/ask",
     },
     "code": {
         "agent": "coding",
@@ -47,6 +43,12 @@ SKILLS: dict[str, dict] = {
     },
 }
 
+# Old names still work; they route to /ask
+_SKILL_ALIASES: dict[str, str] = {
+    "web": "ask",
+    "research": "ask",
+}
+
 
 @dataclass
 class ParsedSkill:
@@ -67,18 +69,19 @@ def parse_skill(text: str) -> ParsedSkill:
             skill=None,
             agent=None,
             rest="",
-            hint=f"Skills: {names}. Example: /code fix login.",
+            hint=f"Skills: {names}. Example: /ask what is AIO?",
         )
     parts = body.split(None, 1)
     key = parts[0].lower().strip("/")
     rest = parts[1] if len(parts) > 1 else ""
+    key = _SKILL_ALIASES.get(key, key)
     meta = SKILLS.get(key)
     if meta is None:
         return ParsedSkill(
             skill=None,
             agent=None,
             rest=raw,
-            hint=f"Unknown skill `/{key}`. Try /code, /write, /research, /web, /review, /checklist, /status.",
+            hint=f"Unknown skill `/{key}`. Try /ask, /code, /write, /review, /checklist, /status.",
         )
     return ParsedSkill(skill=key, agent=meta["agent"], rest=rest)
 

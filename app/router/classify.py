@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from app.config import get_settings
 from app.services.llm import LLMClient, LLMError
 
-VALID_AGENTS = ("research", "writing", "coding", "code_review", "checklist", "status")
+VALID_AGENTS = ("ask", "writing", "coding", "code_review", "checklist", "status")
+_LEGACY_AGENT = {"research": "ask"}
 
 
 @dataclass
@@ -17,12 +18,34 @@ class RoutePlan:
     used_llm: bool
 
 
+def _normalize_agents(agents: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for a in agents:
+        a = _LEGACY_AGENT.get(a, a)
+        if a in VALID_AGENTS and a not in seen:
+            seen.add(a)
+            ordered.append(a)
+    return ordered
+
+
 def _keyword_fallback(text: str) -> RoutePlan:
     lower = text.lower()
     agents: list[str] = []
 
-    wants_research = any(
-        k in lower for k in ("research", "look up", "find out", "investigate", "competitor")
+    wants_ask = any(
+        k in lower
+        for k in (
+            "research",
+            "look up",
+            "find out",
+            "investigate",
+            "competitor",
+            "what is",
+            "explain",
+            "how do",
+            "why ",
+        )
     )
     wants_coding = any(
         k in lower
@@ -54,7 +77,7 @@ def _keyword_fallback(text: str) -> RoutePlan:
     if (
         any(k in lower for k in ("write", "draft"))
         and not wants_coding
-        and not wants_research
+        and not wants_ask
     ):
         wants_writing = True
 
@@ -76,20 +99,20 @@ def _keyword_fallback(text: str) -> RoutePlan:
         )
     )
 
-    if wants_coding and not wants_research:
+    if wants_coding and not wants_ask:
         agents = ["coding"]
         if wants_tasks or "then" in lower:
             agents.append("checklist")
-    elif wants_code_review and not wants_research and not wants_writing:
+    elif wants_code_review and not wants_ask and not wants_writing:
         agents = ["code_review"]
         if wants_tasks or "then" in lower:
             agents.append("checklist")
-    elif wants_research and wants_writing:
-        agents = ["research", "writing"]
+    elif wants_ask and wants_writing:
+        agents = ["ask", "writing"]
         if wants_tasks:
             agents.append("checklist")
-    elif wants_research:
-        agents = ["research"]
+    elif wants_ask:
+        agents = ["ask"]
         if wants_tasks:
             agents.append("checklist")
     elif wants_writing:
@@ -99,15 +122,9 @@ def _keyword_fallback(text: str) -> RoutePlan:
     elif wants_tasks:
         agents = ["checklist"]
     else:
-        agents = ["research"]
+        agents = ["ask"]
 
-    seen: set[str] = set()
-    ordered = []
-    for a in agents:
-        if a in VALID_AGENTS and a not in seen:
-            seen.add(a)
-            ordered.append(a)
-    return RoutePlan(agents=ordered, reason="keyword_fallback", used_llm=False)
+    return RoutePlan(agents=_normalize_agents(agents), reason="keyword_fallback", used_llm=False)
 
 
 def _parse_agents_json(raw: str) -> list[str] | None:
@@ -125,7 +142,7 @@ def _parse_agents_json(raw: str) -> list[str] | None:
     agents = data.get("agents") if isinstance(data, dict) else None
     if not isinstance(agents, list):
         return None
-    cleaned = [a for a in agents if a in VALID_AGENTS]
+    cleaned = _normalize_agents([str(a) for a in agents])
     return cleaned or None
 
 
@@ -144,6 +161,7 @@ def classify_request(text: str, llm: LLMClient | None = None) -> RoutePlan:
         "You route work to specialist agents. Return ONLY JSON like "
         '{"agents":["coding"],"reason":"..."}.\n'
         f"Valid agents: {list(VALID_AGENTS)}.\n"
+        "ask = general Q&A / explanations. "
         "coding = write/implement source code. writing = prose/docs/reports. "
         "code_review = review existing diffs/PRs. "
         "If the user asks to write Python/JS/code/functions, use coding NOT writing.\n"

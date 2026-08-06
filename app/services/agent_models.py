@@ -22,7 +22,7 @@ def get_prefs_map(db: Session, tenant_id: int) -> dict[str, str]:
         out = {
             "coding": "deepseek-v4-flash-free",
             "code_review": "big-pickle",
-            "research": "ling-3.0-flash-free",
+            "ask": "ling-3.0-flash-free",
             "writing": "mimo-v2.5-free",
             "checklist": "north-mini-code-free",
             "status": "ling-3.0-flash-free",
@@ -32,11 +32,14 @@ def get_prefs_map(db: Session, tenant_id: int) -> dict[str, str]:
         out = {a: "gemini-env" for a in DEFAULT_OPENROUTER_PREFS}
     rows = db.query(AgentModelPref).filter(AgentModelPref.tenant_id == tenant_id).all()
     for r in rows:
-        out[r.agent_type] = r.model_id
+        key = "ask" if r.agent_type == "research" else r.agent_type
+        out[key] = r.model_id
     return out
 
 
 def set_pref(db: Session, *, tenant_id: int, agent_type: str, model_id: str) -> AgentModelPref:
+    if agent_type == "research":
+        agent_type = "ask"
     if agent_type not in AGENT_TYPES:
         raise ValueError(f"unknown agent_type {agent_type}")
     mid = model_id.strip()
@@ -90,13 +93,24 @@ def resolve_agent_model(
         return from_id(payload_model.strip())
 
     if db is not None and tenant_id is not None:
+        types = [agent_type]
+        if agent_type == "ask":
+            types.append("research")  # legacy prefs
         pref = (
             db.query(AgentModelPref)
-            .filter(AgentModelPref.tenant_id == tenant_id, AgentModelPref.agent_type == agent_type)
-            .one_or_none()
+            .filter(
+                AgentModelPref.tenant_id == tenant_id,
+                AgentModelPref.agent_type.in_(types),
+            )
+            .order_by(AgentModelPref.agent_type.asc())  # prefer ask over research if both
+            .all()
         )
-        if pref and pref.model_id:
-            return from_id(pref.model_id)
+        # Prefer exact agent_type match
+        chosen = next((p for p in pref if p.agent_type == agent_type), None) or (
+            pref[0] if pref else None
+        )
+        if chosen and chosen.model_id:
+            return from_id(chosen.model_id)
 
     force = (settings.agent_llm_backend or "auto").lower()
     if force == "gemini":

@@ -195,32 +195,33 @@ def _maybe_post_review_to_general(db: Session, job: Job, content: str) -> None:
     )
 
 
-def run_research(db: Session, job: Job, llm: LLMClient) -> None:
+def run_ask(db: Session, job: Job, llm: LLMClient) -> None:
     payload = parse_json(job.payload_json, {})
     text = payload.get("text") or payload.get("source_text") or ""
     content = _agent_chat(
         db,
         job,
         llm,
-        agent_type="research",
+        agent_type="ask",
         messages=[
             {
                 "role": "system",
                 "content": _sys(
-                    "You are a research agent. Produce concise factual notes with bullets. "
+                    "You are a helpful workplace assistant. Answer clearly and directly. "
+                    "Use short paragraphs or bullets when useful. "
                     "If ATTACHED FILES are present, treat them as the primary source when the user "
-                    "refers to \"this\" / the file / the document. Do not invent an unrelated paper."
+                    "refers to \"this\" / the file / the document. Do not invent unrelated sources."
                 ),
             },
             {"role": "user", "content": text},
         ],
     )
-    art = _save_artifact(db, job, "Research notes", content)
+    art = _save_artifact(db, job, "Ask reply", content)
     post_agent_output(
         db,
         tenant_id=job.tenant_id,
         project_id=job.project_id,
-        agent_type="research",
+        agent_type="ask",
         body=content,
         job_id=job.id,
     )
@@ -231,7 +232,7 @@ def run_research(db: Session, job: Job, llm: LLMClient) -> None:
         request_id=job.request_id,
         job_id=job.id,
         event_type="agent_done",
-        message=f"research artifact {art.id}",
+        message=f"ask artifact {art.id}",
     )
 
 
@@ -517,7 +518,8 @@ def run_status(db: Session, job: Job, llm: LLMClient) -> None:
 
 
 AGENTS = {
-    "research": run_research,
+    "ask": run_ask,
+    "research": run_ask,  # legacy jobs / prefs
     "writing": run_writing,
     "coding": run_coding,
     "code_review": run_code_review,
