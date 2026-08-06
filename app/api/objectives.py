@@ -198,6 +198,10 @@ def get_board(
         get_project_for_tenant(db, auth.tenant_id, project_id)
     except IsolationError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Recover cards stuck in agent_backlog after a restart mid-run
+    from app.services.agent_backlog import kick_stale_agent_backlog
+
+    kick_stale_agent_backlog(db, project_id=project_id)
     return build_board(db, tenant_id=auth.tenant_id, project_id=project_id)
 
 

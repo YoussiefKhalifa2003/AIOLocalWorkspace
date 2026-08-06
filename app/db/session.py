@@ -7,17 +7,24 @@ from app.config import get_settings
 from app.db.models import Base
 
 _settings = get_settings()
-connect_args = {"check_same_thread": False} if _settings.database_url.startswith("sqlite") else {}
+_is_sqlite = _settings.database_url.startswith("sqlite")
+connect_args: dict = {}
+if _is_sqlite:
+    # Polling + writes contend on one file; wait instead of failing with "database is locked"
+    connect_args = {"check_same_thread": False, "timeout": 30}
 engine = create_engine(_settings.database_url, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, _connection_record):
-    if _settings.database_url.startswith("sqlite"):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+    if not _is_sqlite:
+        return
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.close()
 
 
 def _sqlite_migrate() -> None:
