@@ -114,7 +114,7 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; background:
   background: #111;
 }
 .msg {
-  max-width: 720px;
+  max-width: 100%;
   margin: 0 0 14px;
   border-left: 2px solid #3a3a3a;
   padding: 6px 0 6px 12px;
@@ -216,8 +216,9 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; background:
 .msg-day {
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: 720px;
+  gap: 12px;
+  width: 100%;
+  max-width: none;
   margin: 22px 0 14px;
   color: #6f7a70;
   font-size: 11px;
@@ -227,9 +228,10 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; background:
 .msg-day::before,
 .msg-day::after {
   content: "";
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 24px;
   height: 1px;
-  background: #262b26;
+  background: #2a302a;
 }
 .msg-day span {
   flex: 0 0 auto;
@@ -505,7 +507,7 @@ aside li .swatch {
   flex-wrap: wrap;
   gap: 6px;
   padding: 0 0 2px;
-  max-width: 720px;
+  max-width: 100%;
 }
 .attach-pending.hidden { display: none; }
 .attach-chip {
@@ -787,11 +789,24 @@ header .tab.active { color: #eee; border-color: #888; background: #1a1a1a; }
   flex-direction: column;
   overflow: hidden;
 }
+.board-view {
+  /* columns row fills; detail panel overlays as a side strip when open */
+  position: relative;
+}
+.board-view .board-panel:not(.hidden) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 28px; /* above footer */
+  z-index: 5;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.45);
+}
 .models-body {
   padding: 20px 24px 40px;
   overflow: auto;
   width: 100%;
-  max-width: 720px;
+  max-width: 1100px;
+  box-sizing: border-box;
 }
 .roster-top {
   display: flex;
@@ -851,7 +866,7 @@ header .tab.active { color: #eee; border-color: #888; background: #1a1a1a; }
   font-size: 12px;
   line-height: 1.5;
   margin: 0;
-  max-width: 36em;
+  max-width: 48em;
 }
 .roster-who .job {
   display: block;
@@ -892,13 +907,15 @@ header .tab.active { color: #eee; border-color: #888; background: #1a1a1a; }
 .board-columns {
   flex: 1;
   display: flex;
-  gap: 8px;
-  padding: 12px;
+  gap: 10px;
+  padding: 12px 14px;
   overflow-x: auto;
   align-items: stretch;
+  min-height: 0;
 }
 .board-col {
-  flex: 0 0 200px;
+  flex: 1 1 0;
+  min-width: 168px;
   border: 1px solid #333;
   background: #0c0c0c;
   display: flex;
@@ -958,7 +975,7 @@ header .tab.active { color: #eee; border-color: #888; background: #1a1a1a; }
   height: 100%;
 }
 .dash {
-  max-width: 880px;
+  max-width: 1100px;
   padding: 28px 32px 48px;
 }
 .dash-head {
@@ -1085,7 +1102,9 @@ header .tab.active { color: #eee; border-color: #888; background: #1a1a1a; }
   font: inherit;
   white-space: pre-wrap;
 }
-@media (max-width: 800px) {
-  .dash-stats { grid-template-columns: repeat(3, 1fr); }
-  .dash-assign { grid-template-columns: 1fr; }
+@media (max-width: 900px) {
+  .board-col {
+    flex: 0 0 180px;
+    min-width: 180px;
+  }
 }
