@@ -1382,10 +1382,12 @@
     if (!state.chatId) return;
     if (!window.confirm("Delete this message for everyone?")) return;
     try {
-      await api(`/chats/${state.chatId}/messages/${messageId}`, {
+      const data = await api(`/chats/${state.chatId}/messages/${messageId}`, {
         method: "DELETE",
       });
-      removeMessagesFromDom([messageId], null);
+      const removed = [messageId, ...((data && data.removed_ids) || [])];
+      removeMessagesFromDom(removed, null);
+      state.lastSyncAt = new Date().toISOString();
     } catch (e) {
       setVoiceStatus(String(e.message || e));
     }

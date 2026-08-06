@@ -82,8 +82,10 @@ def test_edit_and_delete_own_message(tmp_path, monkeypatch):
 
     deleted = client.delete(f"/chats/{g}/messages/{mid}", headers=ha)
     assert deleted.status_code == 200
-    assert deleted.json()["deleted_at"]
-    assert deleted.json()["body"] == ""
+    data_del = deleted.json()
+    assert data_del["message"]["deleted_at"]
+    assert data_del["message"]["body"] == ""
+    assert data_del["removed_ids"] == []
 
     # Soft-deleted messages are hidden from normal list
     msgs2 = client.get(f"/chats/{g}/messages?after_id=0", headers=ho).json()
@@ -95,6 +97,64 @@ def test_edit_and_delete_own_message(tmp_path, monkeypatch):
         headers=ho,
     ).json()
     assert any(m["id"] == mid and m["deleted_at"] for m in sync)
+
+
+def test_delete_removes_following_agent_replies(tmp_path, monkeypatch):
+    client, info = _boot(tmp_path, monkeypatch)
+    ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
+    g = info["chat_general"]
+    tenant_id = info["tenant_a"]
+    user_a = info["user_a"]
+
+    ask = client.post(
+        f"/chats/{g}/messages",
+        headers=ha,
+        json={"body": "/web research about xyz", "speak": False},
+    ).json()["user_message_id"]
+
+    # Simulate LLM reply + a later human message that must survive
+    import app.db.session as sess
+    from app.db.models import ChatMessage
+
+    db = sess.SessionLocal()
+    try:
+        reply = ChatMessage(
+            tenant_id=tenant_id,
+            chat_id=g,
+            sender_user_id=None,
+            agent_slug="research",
+            body="here is research about xyz",
+            visibility="public",
+        )
+        later = ChatMessage(
+            tenant_id=tenant_id,
+            chat_id=g,
+            sender_user_id=user_a,
+            agent_slug=None,
+            body="unrelated follow-up",
+            visibility="public",
+        )
+        db.add(reply)
+        db.add(later)
+        db.commit()
+        db.refresh(reply)
+        db.refresh(later)
+        reply_id, later_id = reply.id, later.id
+    finally:
+        db.close()
+
+    deleted = client.delete(f"/chats/{g}/messages/{ask}", headers=ha)
+    assert deleted.status_code == 200
+    data = deleted.json()
+    assert data["message"]["deleted_at"]
+    assert reply_id in data["removed_ids"]
+    assert later_id not in data["removed_ids"]
+
+    msgs = client.get(f"/chats/{g}/messages?after_id=0", headers=ha).json()
+    ids = {m["id"] for m in msgs}
+    assert ask not in ids
+    assert reply_id not in ids
+    assert later_id in ids
 
 
 def test_edit_truncates_later_messages(tmp_path, monkeypatch):
