@@ -126,6 +126,7 @@ _CONFIRM_STOP = frozenset(
         "implementation",
         "objective",
         "objectives",
+        "obj",
         "task",
         "tasks",
         "work",
@@ -168,11 +169,22 @@ _CONFIRM_STOP = frozenset(
         "our",
         "your",
         "their",
+        "build",
+        "building",
+        "built",
+        "skeleton",
+        "simple",
+        "basic",
+        "overview",
+        "website",
+        "site",
+        "project",
+        "projects",
     }
 )
 
 # Agents whose output may complete an objective; others never get Yes/No.
-_CONFIRM_AGENTS = frozenset({"coding", "writing", "checklist"})
+_CONFIRM_AGENTS = frozenset({"coding", "writing", "checklist", "research"})
 
 
 def _confirm_tokens(text: str) -> set[str]:
@@ -183,9 +195,27 @@ def _confirm_tokens(text: str) -> set[str]:
     }
 
 
+def _user_ask_for_confirm(request_text: str) -> str:
+    """Pull the real user ask out of LLM prompts (drop private-room context)."""
+    text = (request_text or "").strip()
+    # Private /skill prompts: "... Skill=/code. User ask:\n<actual>"
+    m = re.search(r"User ask:\s*(.*)\Z", text, flags=re.I | re.S)
+    if m:
+        return m.group(1).strip()
+    # Drop injected chat history if present without the marker above
+    if re.match(r"Private room context\b", text, flags=re.I):
+        # Prefer last non-empty line after context dump
+        parts = re.split(r"\n\s*\n", text, maxsplit=1)
+        if len(parts) > 1:
+            return parts[-1].strip()
+        return ""
+    return text
+
+
 def _normalize_request_for_confirm(request_text: str) -> str:
     """Strip skill prefixes / evidence noise so matching uses the user's intent."""
-    text = (request_text or "").strip()
+    text = _user_ask_for_confirm(request_text)
+    text = text.strip()
     text = re.sub(
         r"^(?:force\s+)?/(?:code|research|write|writing|review|checklist|web|status)\b\s*",
         "",
@@ -206,6 +236,59 @@ def _normalize_request_for_confirm(request_text: str) -> str:
     return text.strip()
 
 
+def _explicit_objective_ids(text: str) -> set[int]:
+    ids: set[int] = set()
+    for m in re.finditer(
+        r"(?:objective|obj)\s*#?\s*[-:]?\s*(\d+)|#obj-(\d+)|obj-(\d+)",
+        text,
+        flags=re.I,
+    ):
+        for g in m.groups():
+            if g:
+                ids.add(int(g))
+    return ids
+
+
+def _score_objective_match(
+    obj: Objective,
+    req_words: set[str],
+    subtask_titles: list[str],
+) -> int:
+    title_words = _confirm_tokens(obj.title)
+    desc_words = _confirm_tokens(obj.description or "")
+    task_words: set[str] = set()
+    for t in subtask_titles:
+        task_words |= _confirm_tokens(t)
+    if not (title_words or desc_words or task_words):
+        return 0
+
+    title_hit = req_words & title_words
+    other_hit = (req_words & (desc_words | task_words)) - title_hit
+    if not title_hit and not other_hit:
+        return 0
+
+    s = 0
+    for w in title_hit:
+        s += 4
+        if len(w) >= 5:
+            s += 2
+        if len(w) >= 7:
+            s += 2
+    for w in other_hit:
+        s += 2
+        if len(w) >= 6:
+            s += 1
+
+    # Short titles: one domain keyword (cnn, keras, gucci…) is enough
+    if title_words:
+        coverage = len(title_hit) / len(title_words)
+        if coverage >= 0.5:
+            s += 6
+        elif coverage >= 0.34 and len(title_words) <= 4 and title_hit:
+            s += 5
+    return s
+
+
 def _candidate_objectives(
     db: Session,
     *,
@@ -217,7 +300,8 @@ def _candidate_objectives(
 ) -> list[Objective]:
     """Objectives this request clearly targets. Empty unless match is strong.
 
-    Avoids asking 'objective met?' for unrelated open cards after freeform /code.
+    Covers freeform /code|/research against open todo/doing cards (e.g. CNN obj +
+    '/code write me CNN skeleton') while avoiding unrelated Yes/No prompts.
     """
     from sqlalchemy import or_
 
@@ -238,39 +322,24 @@ def _candidate_objectives(
     if not rows:
         return []
 
-    # Strongest signal: objective already linked to this work request
-    if request_id is not None:
-        linked = [o for o in rows if o.request_id == request_id]
-        if linked:
-            return linked[:1]
-
     text = _normalize_request_for_confirm(request_text)
     if not text:
         return []
 
-    # Explicit ids only from intentional phrasing (not bare "#7")
-    explicit_ids: set[int] = set()
-    for m in re.finditer(
-        r"(?:objective|obj)\s*#?\s*[-:]?\s*(\d+)|#obj-(\d+)|obj-(\d+)",
-        text,
-        flags=re.I,
-    ):
-        for g in m.groups():
-            if g:
-                explicit_ids.add(int(g))
+    # Explicit ids only from the user's ask — never from private-room chat context
+    explicit_ids = _explicit_objective_ids(text)
     if explicit_ids:
         hit = [o for o in rows if o.id in explicit_ids]
         if hit:
             return hit[:1]
 
-    # Prefer cards already in agent flow; never use idle todo as fallback pool
-    active_statuses = {"agent_backlog", "in_review", "doing"}
-    pool = [o for o in rows if (o.status or "") in active_statuses]
-    if not pool:
+    req_words = _confirm_tokens(text)
+    if not req_words:
         return []
 
-    req_words = _confirm_tokens(text)
-    if len(req_words) < 2:
+    # Open board cards — include todo (common: create card, then /code without dragging)
+    pool = [o for o in rows if (o.status or "") in {"todo", "doing", "agent_backlog", "in_review"}]
+    if not pool:
         return []
 
     subtask_map: dict[int, list[str]] = {}
@@ -288,29 +357,18 @@ def _candidate_objectives(
             subtask_map.setdefault(it.objective_id, []).append(it.title)
 
     def score(obj: Objective) -> int:
-        title_words = _confirm_tokens(obj.title)
-        desc_words = _confirm_tokens(obj.description or "")
-        task_words: set[str] = set()
-        for t in subtask_map.get(obj.id, []):
-            task_words |= _confirm_tokens(t)
-        all_obj = title_words | desc_words | task_words
-        if not all_obj:
-            return 0
+        return _score_objective_match(obj, req_words, subtask_map.get(obj.id, []))
 
-        title_hit = req_words & title_words
-        other_hit = (req_words & (desc_words | task_words)) - title_hit
-        s = 3 * len(title_hit) + len(other_hit)
-        # Long distinctive tokens count more
-        s += sum(2 for w in title_hit if len(w) >= 6)
-        s += sum(1 for w in other_hit if len(w) >= 6)
-        # Majority of title words must appear for a soft phrase match bonus
-        if title_words and len(title_hit) >= max(2, (len(title_words) + 1) // 2):
-            s += 5
-        return s
+    # request_id link only if the user ask also resonates with that card
+    if request_id is not None:
+        linked = [o for o in pool if o.request_id == request_id]
+        linked_hit = [o for o in linked if score(o) >= 6]
+        if linked_hit:
+            return linked_hit[:1]
 
     scored = sorted(((score(o), o) for o in pool), key=lambda x: (-x[0], -x[1].id))
-    # High bar: never ask on a single weak word overlap
-    matched = [o for s, o in scored if s >= 5][:1]
+    # Need a real topical hit — generic "/code fix the bug" stays empty
+    matched = [o for s, o in scored if s >= 6][:1]
     return matched
 
 
@@ -1052,6 +1110,16 @@ def _run_agent_branch(
             request_text=text,
             request_id=req.id,
         )
+        if cands:
+            from app.services.board import set_objective_status
+
+            for obj in cands:
+                # Tie this freeform agent run to the board card for /status evidence
+                if obj.request_id is None:
+                    obj.request_id = req.id
+                if (obj.status or "") == "todo":
+                    set_objective_status(obj, "doing")
+            db.flush()
     body, confirm_ids = _with_confirm_footer(body, cands)
     return IntentResult(
         True,

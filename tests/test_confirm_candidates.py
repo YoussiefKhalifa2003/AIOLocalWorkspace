@@ -68,7 +68,7 @@ def _objs(db, *, tenant_id, project_id, user_id, specs: list[dict]) -> list[Obje
     return out
 
 
-def test_confirm_skips_unrelated_and_idle(tmp_path, monkeypatch):
+def test_confirm_skips_unrelated(tmp_path, monkeypatch):
     _, info, SessionLocal = _boot(tmp_path, monkeypatch)
     db = SessionLocal()
     try:
@@ -92,17 +92,6 @@ def test_confirm_skips_unrelated_and_idle(tmp_path, monkeypatch):
                 project_id=pid,
                 user_id=uid,
                 request_text="/code fix the bug in the api",
-            )
-            == []
-        )
-
-        assert (
-            _candidate_objectives(
-                db,
-                tenant_id=tid,
-                project_id=pid,
-                user_id=uid,
-                request_text="/code unrelated backlog idea",
             )
             == []
         )
@@ -141,7 +130,112 @@ def test_confirm_skips_unrelated_and_idle(tmp_path, monkeypatch):
         db.close()
 
 
-def test_confirm_prefers_linked_request(tmp_path, monkeypatch):
+def test_confirm_freeform_matches_todo_cnn_and_research(tmp_path, monkeypatch):
+    """Omar case: todo card + /code|/research with the same topic → ask confirm."""
+    _, info, SessionLocal = _boot(tmp_path, monkeypatch)
+    db = SessionLocal()
+    try:
+        tid, pid, uid = info["tenant_a"], info["project_a"], info["user_a"]
+        objs = _objs(
+            db,
+            tenant_id=tid,
+            project_id=pid,
+            user_id=uid,
+            specs=[
+                {"title": "build a CNN code", "status": "todo"},
+                {"title": "objective research about clothing brands", "status": "todo"},
+                {"title": "build a portfolio website", "status": "todo"},
+            ],
+        )
+
+        cnn = _candidate_objectives(
+            db,
+            tenant_id=tid,
+            project_id=pid,
+            user_id=uid,
+            request_text="/code write me CNN skeleton code",
+        )
+        assert len(cnn) == 1
+        assert cnn[0].id == objs[0].id
+
+        brands = _candidate_objectives(
+            db,
+            tenant_id=tid,
+            project_id=pid,
+            user_id=uid,
+            request_text="/research Clothing Brands Research Gucci Chanel",
+        )
+        assert len(brands) == 1
+        assert brands[0].id == objs[1].id
+
+        # Unrelated freeform should not latch onto portfolio
+        assert (
+            _candidate_objectives(
+                db,
+                tenant_id=tid,
+                project_id=pid,
+                user_id=uid,
+                request_text="/code print hello world",
+            )
+            == []
+        )
+    finally:
+        db.close()
+
+
+def test_confirm_ignores_private_context_objective_mentions(tmp_path, monkeypatch):
+    """Omar bug: chat context 'Added objective #13' must not steal confirm from CNN ask."""
+    _, info, SessionLocal = _boot(tmp_path, monkeypatch)
+    db = SessionLocal()
+    try:
+        tid, pid, uid = info["tenant_a"], info["project_a"], info["user_a"]
+        objs = _objs(
+            db,
+            tenant_id=tid,
+            project_id=pid,
+            user_id=uid,
+            specs=[
+                {"title": "build a CNN code", "status": "todo"},
+                {"title": "obj 20", "status": "doing", "request_id": None},
+            ],
+        )
+        prompt = (
+            "Private room context (recent):\n"
+            "lead: Added objective #13: obj 20 (yours)\n"
+            "you: !list\n\n"
+            "Skill=/code. User ask:\n"
+            "build me a cnn code"
+        )
+        # Even if a stale link points at the wrong card for this request id
+        req = WorkRequest(
+            tenant_id=tid,
+            project_id=pid,
+            user_id=uid,
+            text=prompt,
+            status="queued",
+        )
+        db.add(req)
+        db.commit()
+        db.refresh(req)
+        objs[1].request_id = req.id
+        db.commit()
+
+        hit = _candidate_objectives(
+            db,
+            tenant_id=tid,
+            project_id=pid,
+            user_id=uid,
+            request_text=prompt,
+            request_id=req.id,
+        )
+        assert len(hit) == 1
+        assert hit[0].id == objs[0].id
+        assert "cnn" in hit[0].title.lower()
+    finally:
+        db.close()
+
+
+def test_confirm_prefers_linked_request_when_ask_matches(tmp_path, monkeypatch):
     _, info, SessionLocal = _boot(tmp_path, monkeypatch)
     db = SessionLocal()
     try:
@@ -176,9 +270,22 @@ def test_confirm_prefers_linked_request(tmp_path, monkeypatch):
             tenant_id=tid,
             project_id=pid,
             user_id=uid,
-            request_text="/code totally different words",
+            request_text="/code finish linked card alpha",
             request_id=req.id,
         )
         assert [o.id for o in hit] == [objs[0].id]
+
+        # Stale link + unrelated ask → no confirm (don't trust request_id alone)
+        assert (
+            _candidate_objectives(
+                db,
+                tenant_id=tid,
+                project_id=pid,
+                user_id=uid,
+                request_text="/code totally different words",
+                request_id=req.id,
+            )
+            == []
+        )
     finally:
         db.close()
