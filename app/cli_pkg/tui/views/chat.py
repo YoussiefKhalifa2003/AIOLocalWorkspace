@@ -11,7 +11,7 @@ from rich.markup import escape
 from textual import events, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Input, Label, ListItem, ListView, Static
+from textual.widgets import Input, Label, ListItem, ListView, ProgressBar, Static
 
 from app.cli_pkg.tui.client import ApiClient, ApiError
 
@@ -208,6 +208,15 @@ class Composer(Input):
         self.picker.close()
 
 
+def skill_name_from_body(body: str) -> str:
+    text = (body or "").strip()
+    m = _SKILL_RE.match(text)
+    if m:
+        return m.group(1).lower().replace("-", "").replace("_", "")
+    m2 = re.match(r"^(?:force\s+)?(code|ask|deepresearch|research|write|review)\b", text, re.I)
+    return m2.group(1).lower() if m2 else ""
+
+
 def looks_like_agent_work(body: str, chat_kind: str) -> bool:
     text = (body or "").strip()
     if not text or _CLEAR_RE.match(text):
@@ -323,7 +332,9 @@ class ChatView(Vertical):
         self._views: dict[int, MessageView] = {}
         self._last_id = 0
         self._last_sync = ""
-        self._sending = False
+        # Per-chat in-flight sends / LLM jobs (other rooms stay typable)
+        self._sending_chats: set[int] = set()
+        self._llm_jobs: dict[int, str] = {}
         self._pending: Static | None = None
         self._setup_opened: set[int] = set()
         self._setup_busy = False
@@ -334,6 +345,10 @@ class ChatView(Vertical):
         self.transcript = VerticalScroll(id="transcript")
         self.title_bar = Static("", id="chat-title", markup=True)
         self.picker = CommandPicker()
+        self.llm_label = Static("", id="llm-wait-label", markup=True)
+        self.llm_bar = ProgressBar(
+            total=None, show_eta=False, show_percentage=False, id="llm-wait-bar"
+        )
         self.composer = Composer(
             self.picker,
             placeholder="type /  !  or  @  for a menu · enter to send · esc for shortcuts",
@@ -351,10 +366,14 @@ class ChatView(Vertical):
                 yield self.title_bar
                 yield self.transcript
                 yield self.picker
+                with Vertical(id="llm-wait"):
+                    yield self.llm_label
+                    yield self.llm_bar
                 yield self.composer
 
     def on_mount(self) -> None:
         self.set_interval(self.POLL_SECONDS, self.poll_messages)
+        self._sync_llm_ui()
 
     # sidebar -------------------------------------------------------------
 
@@ -378,10 +397,12 @@ class ChatView(Vertical):
         index = self.chat_list.index or 0
         self.chat_list.clear()
         for chat in self.chats:
+            cid = int(chat["id"])
+            working = " [dim]…[/dim]" if cid in self._llm_jobs else ""
             label = (
-                f"[#7dd3fc]#[/#7dd3fc] {escape(str(chat.get('name') or ''))}"
+                f"[#7dd3fc]#[/#7dd3fc] {escape(str(chat.get('name') or ''))}{working}"
                 if chat.get("kind") == "channel"
-                else "[#c4b5fd]◆[/#c4b5fd] my room"
+                else f"[#c4b5fd]◆[/#c4b5fd] my room{working}"
             )
             item = ListItem(Static(label, markup=True))
             item.chat = chat
@@ -408,13 +429,54 @@ class ChatView(Vertical):
         self._last_id = 0
         self._last_sync = ""
         self.transcript.remove_children()
+        self._pending = None
         chat = self.current_chat
         if chat.get("kind") == "private":
             self.title_bar.update("[b]my room[/b]  [dim]/skills run here · notes stay quiet[/dim]")
         else:
             name = escape(str(chat.get("name") or ""))
             self.title_bar.update(f"[b]#{name}[/b]  [dim]@people · !commands[/dim]")
+        self._sync_llm_ui()
         self.poll_messages()
+
+    def _active_llm_skill(self) -> str | None:
+        if self.chat_id is None:
+            return None
+        return self._llm_jobs.get(int(self.chat_id))
+
+    def _sync_llm_ui(self) -> None:
+        """Show indeterminate progress only for the room that has an LLM job."""
+        skill = self._active_llm_skill()
+        wait = self.query_one("#llm-wait", Vertical)
+        if skill is None:
+            wait.display = False
+            self.llm_label.update("")
+            if self._pending is not None:
+                try:
+                    self._pending.remove()
+                except Exception:
+                    pass
+                self._pending = None
+            self.composer.disabled = False
+            return
+        wait.display = True
+        label = skill.lstrip("/")
+        self.llm_label.update(
+            f"[b #7dd3fc]/{escape(label)}[/] [dim]model working…[/dim]  "
+            "[dim i]other chats stay open[/dim i]"
+        )
+        # Remount a thinking bubble if this room's transcript was rebuilt
+        if self._pending is None or self._pending not in self.transcript.children:
+            self._pending = Static(
+                f"[b #7dd3fc]@{escape(label)}[/] [dim]thinking…[/dim]\n"
+                "[dim i]generating a reply — switch rooms to keep chatting[/dim i]",
+                markup=True,
+                classes="pending-msg",
+            )
+            self.transcript.mount(self._pending)
+            self.call_after_refresh(self.transcript.scroll_end, animate=False)
+        self.composer.disabled = True
+        self._render_chat_list()
 
     # messages ------------------------------------------------------------
 
@@ -453,6 +515,11 @@ class ChatView(Vertical):
             self._views[mid] = view
             self.transcript.mount(view)
             self._maybe_open_setup(row)
+        # Keep / remount thinking bubble if this room still has an LLM job
+        if self._active_llm_skill() and (
+            self._pending is None or self._pending not in self.transcript.children
+        ):
+            self._sync_llm_ui()
         if rows and at_bottom:
             self.call_after_refresh(self.transcript.scroll_end, animate=False)
 
@@ -533,7 +600,11 @@ class ChatView(Vertical):
         if event.input is not self.composer:
             return
         body = event.value.strip()
-        if not body or self.chat_id is None or self._sending:
+        if not body or self.chat_id is None:
+            return
+        chat_id = int(self.chat_id)
+        # Only block the room that already has a job / send in flight
+        if chat_id in self._sending_chats or chat_id in self._llm_jobs:
             return
         if body == "?":
             self.composer.value = ""
@@ -541,24 +612,26 @@ class ChatView(Vertical):
             return
         self.composer.value = ""
         self.picker.close()
-        self._start_send(body)
+        self._start_send(chat_id, body)
 
-    def _start_send(self, body: str) -> None:
-        self._sending = True
-        self.composer.disabled = True
-        working = looks_like_agent_work(body, str(self.current_chat.get("kind") or ""))
+    def _start_send(self, chat_id: int, body: str) -> None:
+        self._sending_chats.add(chat_id)
+        chat = next((c for c in self.chats if int(c["id"]) == chat_id), {})
+        working = looks_like_agent_work(body, str(chat.get("kind") or ""))
         if working:
-            skill = body.split()[0]
-            self._pending = Static(
-                f"[b #7dd3fc]@{escape(skill.lstrip('/'))}[/] [dim]thinking…[/dim]\n"
-                "[dim i]the model is generating a reply — this can take a minute[/dim i]",
-                markup=True,
-                classes="pending-msg",
-            )
-            self.transcript.mount(self._pending)
-            self.call_after_refresh(self.transcript.scroll_end, animate=False)
-            self.app.set_status(f"[#7dd3fc]{escape(skill)} running…[/]")
-        self._send_worker(int(self.chat_id), body)
+            skill = skill_name_from_body(body) or body.split()[0].lstrip("/")
+            self._llm_jobs[chat_id] = skill
+            if self.chat_id == chat_id:
+                self._sync_llm_ui()
+            else:
+                self._render_chat_list()
+            if self.chat_id != chat_id:
+                self.app.set_status(f"[#7dd3fc]/{escape(skill)} running in another room…[/]")
+            else:
+                self.app.set_status(f"[#7dd3fc]/{escape(skill)} running…[/]")
+        elif self.chat_id == chat_id:
+            self.composer.disabled = True
+        self._send_worker(chat_id, body)
 
     @work(thread=True, group="chat-send")
     def _send_worker(self, chat_id: int, body: str) -> None:
@@ -570,31 +643,45 @@ class ChatView(Vertical):
         self.app.call_from_thread(self._after_send, chat_id, data, error)
 
     def _after_send(self, chat_id: int, data: dict, error: str) -> None:
-        self._sending = False
-        self.composer.disabled = False
-        self.composer.focus()
-        if self._pending is not None:
-            self._pending.remove()
-            self._pending = None
+        self._sending_chats.discard(chat_id)
+        self._llm_jobs.pop(chat_id, None)
+        viewing = self.chat_id == chat_id
+        if viewing:
+            if self._pending is not None:
+                try:
+                    self._pending.remove()
+                except Exception:
+                    pass
+                self._pending = None
+            self._sync_llm_ui()
+            self.composer.disabled = False
+            self.composer.focus()
+        else:
+            self._render_chat_list()
+            self._sync_llm_ui()
         if error:
             self.app.set_status(f"[red]{escape(error)}[/red]")
             return
         if data.get("cleared"):
-            self._views.clear()
-            self._last_id = 0
-            self._last_sync = ""
-            self.transcript.remove_children()
+            if viewing:
+                self._views.clear()
+                self._last_id = 0
+                self._last_sync = ""
+                self.transcript.remove_children()
             self.app.set_status("chat cleared")
         created = data.get("created_chat_id")
         deleted = data.get("deleted_chat_id")
         if created or deleted:
             self.app.refresh_workspace()
-            if deleted and int(deleted) == chat_id:
+            if deleted and int(deleted) == chat_id and viewing:
                 self.chat_id = None
                 return
-            if created:
+            if created and viewing:
                 self.select_chat(int(created))
                 return
         self.app.set_status("")
-        self.poll_messages()
+        if viewing:
+            self.poll_messages()
+        else:
+            self.app.set_status(f"[dim]agent finished in chat #{chat_id}[/dim]")
         self.app.refresh_workspace()

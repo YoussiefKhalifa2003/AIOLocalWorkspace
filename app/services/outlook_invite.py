@@ -4,7 +4,8 @@ Requires:
   .venv/bin/python -m playwright install chromium
   aio outlook-login   # one-time interactive sign-in; saves session to data/outlook_auth.json
 
-Only addresses allowed by INVITE_ALLOWED_DOMAIN (default tatweermea.com) are accepted.
+Only addresses allowed by INVITE_ALLOWED_DOMAIN are accepted when that env is set.
+Empty INVITE_ALLOWED_DOMAIN = any valid email.
 """
 
 from __future__ import annotations
@@ -56,14 +57,16 @@ def outlook_configured() -> bool:
 def build_invite_email(*, invite_url: str, max_uses: int, workspace: str) -> tuple[str, str]:
     uses = max(1, int(max_uses or 1))
     seats = "1 use" if uses == 1 else f"{uses} uses"
-    domain = invite_allowed_domain() or "tatweermea.com"
+    domain = invite_allowed_domain()
     subject = f"Join {workspace} workspace"
     body = (
         f"You've been invited to the {workspace} workspace ({seats}).\n\n"
         f"Open this link on the same network as the server to register:\n"
         f"{invite_url}\n\n"
-        f"Use your @{domain} email."
+        f"After signup, use the CLI: aio login  then  ./aio"
     )
+    if domain:
+        body += f"\n\nUse your @{domain} email when registering."
     return subject, body
 
 

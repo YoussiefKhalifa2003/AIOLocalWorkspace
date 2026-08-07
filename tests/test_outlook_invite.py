@@ -37,7 +37,7 @@ def _boot(tmp_path, monkeypatch, *, domain: str = "tatweermea.com"):
     return TestClient(app), info
 
 
-def test_assert_domain_allows_only_tatweer(monkeypatch):
+def test_assert_domain_allows_only_tatweer_when_set(monkeypatch):
     monkeypatch.setenv("INVITE_ALLOWED_DOMAIN", "tatweermea.com")
     from app.config import get_settings
 
@@ -54,8 +54,19 @@ def test_assert_domain_allows_only_tatweer(monkeypatch):
         assert "tatweermea.com" in str(exc)
 
 
-def test_invite_email_rejects_foreign_domain(tmp_path, monkeypatch):
-    client, info = _boot(tmp_path, monkeypatch)
+def test_empty_domain_allows_any_email(monkeypatch):
+    monkeypatch.setenv("INVITE_ALLOWED_DOMAIN", "")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    from app.services.invite_domain import assert_allowed_invite_email, is_allowed_invite_email
+
+    assert is_allowed_invite_email("omar@gmail.com")
+    assert assert_allowed_invite_email("friend@gmail.com") == "friend@gmail.com"
+
+
+def test_invite_email_rejects_foreign_domain_when_locked(tmp_path, monkeypatch):
+    client, info = _boot(tmp_path, monkeypatch, domain="tatweermea.com")
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
     r = client.post(
         "/workspace/invite-email",
@@ -66,8 +77,27 @@ def test_invite_email_rejects_foreign_domain(tmp_path, monkeypatch):
     assert "tatweermea.com" in r.json()["detail"]
 
 
+def test_invite_email_allows_gmail_when_unlocked(tmp_path, monkeypatch):
+    client, info = _boot(tmp_path, monkeypatch, domain="")
+    ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
+
+    def fake_send(**kwargs):
+        return {"ok": True, "skipped": False, "to": str(kwargs.get("to_email") or "").lower()}
+
+    monkeypatch.setattr("app.services.outlook_invite.send_invite_via_outlook", fake_send)
+
+    r = client.post(
+        "/workspace/invite-email",
+        headers=ha,
+        json={"email": "friend@gmail.com", "max_uses": 1},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["outlook"]["ok"] is True
+    assert r.json()["emailed_to"] == "friend@gmail.com"
+
+
 def test_invite_email_sends_when_outlook_ok(tmp_path, monkeypatch):
-    client, info = _boot(tmp_path, monkeypatch)
+    client, info = _boot(tmp_path, monkeypatch, domain="tatweermea.com")
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
 
     def fake_send(**kwargs):
@@ -91,8 +121,8 @@ def test_invite_email_sends_when_outlook_ok(tmp_path, monkeypatch):
     assert data["emailed_to"] == "colleague@tatweermea.com"
 
 
-def test_register_rejects_non_domain(tmp_path, monkeypatch):
-    client, info = _boot(tmp_path, monkeypatch)
+def test_register_rejects_non_domain_when_locked(tmp_path, monkeypatch):
+    client, info = _boot(tmp_path, monkeypatch, domain="tatweermea.com")
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
     link = client.post("/workspace/invite-link?max_uses=1", headers=ha).json()
     token = link["token"]
@@ -102,3 +132,16 @@ def test_register_rejects_non_domain(tmp_path, monkeypatch):
     )
     assert bad.status_code == 400
     assert "tatweermea.com" in bad.json()["detail"]
+
+
+def test_register_allows_gmail_when_unlocked(tmp_path, monkeypatch):
+    client, info = _boot(tmp_path, monkeypatch, domain="")
+    ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
+    link = client.post("/workspace/invite-link?max_uses=1", headers=ha).json()
+    token = link["token"]
+    ok = client.post(
+        f"/join/{token}/register.json",
+        json={"email": "outsider@gmail.com", "password": "demo", "name": "Outsider"},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["email"] == "outsider@gmail.com"

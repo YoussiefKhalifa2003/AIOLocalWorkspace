@@ -83,6 +83,9 @@ Header { background: $panel; }
 .agent-msg { border-left: outer $accent 30%; padding-left: 1; }
 .whisper-msg { color: $text-muted; }
 .pending-msg { color: $accent; }
+#llm-wait { height: auto; padding: 0 1 1 1; display: none; }
+#llm-wait-label { height: 1; color: $accent; }
+#llm-wait-bar { width: 100%; height: 1; margin: 0 0 1 0; }
 #composer { border: round $panel-lighten-2; }
 #composer:focus { border: round $accent; }
 #picker {
@@ -254,7 +257,7 @@ class LoginScreen(Screen[Credentials]):
         try:
             data = login(email, password, self.base_url)
             creds = Credentials(
-                base_url=self.base_url,
+                api_base_url=self.base_url,
                 email=str(data.get("email") or email),
                 api_key=str(data.get("api_key") or ""),
                 user_id=int(data.get("user_id") or 0),

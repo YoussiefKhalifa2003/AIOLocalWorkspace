@@ -360,23 +360,31 @@ class ObjectiveSetupModal(ModalScreen[dict[str, Any] | None]):
 
 
 class InviteEmailModal(ModalScreen[dict[str, Any] | None]):
-    """Ask for a @tatweermea.com address (+ seats), then email the invite via Outlook."""
+    """Ask for an email (+ seats), then send the invite via Outlook."""
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, domain: str = "tatweermea.com") -> None:
+    def __init__(self, domain: str = "") -> None:
         super().__init__()
-        self.domain = domain
+        self.domain = (domain or "").lstrip("@")
 
     def compose(self) -> ComposeResult:
+        if self.domain:
+            hint = (
+                f"[dim]Only @{escape(self.domain)} addresses. "
+                "Outlook Web sends the mail (free — no SMTP billing).[/dim]"
+            )
+            placeholder = f"colleague@{self.domain}"
+        else:
+            hint = (
+                "[dim]Any email. Outlook Web sends the mail "
+                "(free — no SMTP billing).[/dim]"
+            )
+            placeholder = "colleague@email.com"
         with Vertical(id="confirm-box"):
             yield Label("Email invite", id="confirm-title")
-            yield Static(
-                f"[dim]Only @{escape(self.domain)} addresses. "
-                "Outlook Web sends the mail (free — no SMTP billing).[/dim]",
-                markup=True,
-            )
-            yield Input(placeholder=f"colleague@{self.domain}", id="invite-email")
+            yield Static(hint, markup=True)
+            yield Input(placeholder=placeholder, id="invite-email")
             yield Input(value="1", placeholder="seats (1-50)", id="invite-seats")
             with Horizontal():
                 yield Button("Send invite", variant="primary", id="invite-send")

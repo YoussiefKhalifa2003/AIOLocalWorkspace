@@ -67,7 +67,7 @@ def _join_page(*, token: str, error: str = "") -> HTMLResponse:
 </style></head>
 <body>
   <h1>Join AIO</h1>
-  <p class="sub">Create your account. This link works for one person only. Your name is how teammates will @ you.</p>
+  <p class="sub">Create your account once. After signup you'll use the CLI (<code>aio login</code> then <code>./aio</code>). Your name is how teammates will @ you.</p>
   {err}
   <form method="post" action="/join/{token}/register" id="reg">
     <label>Name (required - your @handle)</label>
@@ -80,7 +80,7 @@ def _join_page(*, token: str, error: str = "") -> HTMLResponse:
     <input name="password2" type="password" required minlength="4" autocomplete="new-password" />
     <button type="submit">Create account</button>
   </form>
-  <p class="sub" style="margin-top:1.25rem">Already have an account? <a href="/app">Log in</a></p>
+  <p class="sub" style="margin-top:1.25rem">Already have an account? Use the CLI: <code>aio login</code></p>
   <script>
   document.getElementById('reg').addEventListener('submit', function(e) {{
     var p = this.password.value, p2 = this.password2.value;
@@ -92,28 +92,29 @@ def _join_page(*, token: str, error: str = "") -> HTMLResponse:
 
 
 def _join_success(result: dict) -> HTMLResponse:
-    import json as _json
+    from app.services.workspace_invite import invite_public_base_url
 
     email = result["email"]
-    api_key = result["api_key"]
     name = result["name"]
+    base = invite_public_base_url()
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Welcome</title>
+<title>Done — AIO</title>
 <style>
-  body{{font-family:system-ui,sans-serif;max-width:22rem;margin:3rem auto;padding:0 1rem;line-height:1.5}}
-  h1{{font-size:1.35rem;color:#0f7b3a}}
+  body{{font-family:system-ui,sans-serif;max-width:28rem;margin:3rem auto;padding:0 1rem;line-height:1.5;color:#111;background:#f7f7f5}}
+  h1{{font-size:1.35rem;color:#0f7b3a;margin:0 0 .5rem}}
+  .sub{{color:#555;font-size:.95rem}}
+  pre{{background:#1a1a1a;color:#f5f5f5;padding:1rem;border-radius:8px;overflow-x:auto;font-size:.9rem;line-height:1.6}}
+  code{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}}
 </style></head>
 <body>
-  <h1>Welcome, {_escape(name)}</h1>
-  <p>Account created. Opening AIO…</p>
-  <script>
-  localStorage.setItem('aio_email', {_json.dumps(email)});
-  localStorage.setItem('aio_key', {_json.dumps(api_key)});
-  localStorage.setItem('aio_uid', {_json.dumps(str(result['user_id']))});
-  location.replace('/app');
-  </script>
-  <p><a href="/app">Open AIO</a></p>
+  <h1>Done</h1>
+  <p class="sub">Account created for <b>{_escape(name)}</b> ({_escape(email)}).</p>
+  <p class="sub">AIO is CLI-first. On a machine with the project (and network access to the server), run:</p>
+  <pre>aio login --email {_escape(email)}
+./aio</pre>
+  <p class="sub">Server: <code>{_escape(base)}</code></p>
+  <p class="sub">If login asks for a password, use the one you just set. You only needed this signup link once.</p>
 </body></html>"""
     return HTMLResponse(html)
 

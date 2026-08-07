@@ -251,12 +251,12 @@ def outlook_login() -> None:
         typer.echo("  .venv/bin/python -m playwright install chromium")
         raise typer.Exit(1) from exc
     typer.echo(f"Saved session to {path or outlook_storage_path()}")
-    typer.echo("Invites: ./aio invite-email someone@tatweermea.com")
+    typer.echo("Invites: ./aio invite-email colleague@example.com")
 
 
 @app.command("invite-email")
 def invite_email_cmd(
-    email: str = typer.Argument(..., help="Must be @tatweermea.com"),
+    email: str = typer.Argument(..., help="Colleague email to invite"),
     seats: int = typer.Option(1, "--seats", "-n", help="Invite link uses (1-50)"),
 ) -> None:
     """Mint an invite link and email it via Outlook (visible Chromium window)."""

@@ -1,4 +1,8 @@
-"""Invite email domain allowlist — only @tatweermea.com (configurable)."""
+"""Optional invite email domain allowlist.
+
+Empty INVITE_ALLOWED_DOMAIN = any valid email. When set (e.g. tatweermea.com),
+only that domain may be invited or used to register via invite.
+"""
 
 from __future__ import annotations
 

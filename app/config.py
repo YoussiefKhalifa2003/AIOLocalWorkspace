@@ -74,9 +74,10 @@ class Settings(BaseSettings):
     # Microsoft Teams Incoming Webhook / Workflow URL (optional; blank = skip)
     teams_webhook_url: str = ""
 
-    # Invite emails: domain lock + free Outlook Web via Playwright (no SMTP billing)
-    # Empty INVITE_ALLOWED_DOMAIN disables the check (local/demo tests).
-    invite_allowed_domain: str = "tatweermea.com"
+    # Invite emails: optional domain lock + free Outlook Web via Playwright (no SMTP billing)
+    # Empty INVITE_ALLOWED_DOMAIN = any email can be invited / register (recommended).
+    # Set e.g. tatweermea.com to re-enable the lock.
+    invite_allowed_domain: str = ""
     outlook_invite_enabled: bool = True
     outlook_storage_state: str = "data/outlook_auth.json"
     # False = show the Chromium window while composing/sending (recommended)
