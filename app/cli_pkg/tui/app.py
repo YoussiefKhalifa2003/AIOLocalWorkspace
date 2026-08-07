@@ -102,15 +102,48 @@ Header { background: $panel; }
 #board { height: 1fr; }
 #columns { width: 1fr; height: 1fr; }
 BoardColumn {
-    width: 30; height: 1fr;
+    width: 32; height: 1fr;
     border: round $panel-lighten-2; padding: 0 1;
 }
 BoardColumn:focus-within { border: round $accent; }
-#detail { width: 38; border: round $panel-lighten-2; padding: 0 1; }
+#detail { width: 40; border: round $panel-lighten-2; padding: 0 1; }
+.detail-label { color: $text-muted; text-style: bold; margin-top: 1; height: 1; }
+#detail-header { margin-bottom: 1; }
+#detail-actions { margin-top: 1; color: $text-muted; }
+#detail-bar { width: 100%; height: 1; margin: 0 0 1 0; }
 ListView { background: transparent; }
 ListItem { padding: 0 1; background: transparent; }
-ListItem.-highlight { background: $accent 25%; }
-ListView:focus > ListItem.-highlight { background: $accent 45%; }
+ListItem.board-card {
+    border: round $panel-lighten-2;
+    margin: 0 0 1 0;
+    padding: 0 1;
+    height: auto;
+    background: $surface;
+}
+ListItem.board-card.-highlight {
+    border: round $accent;
+    background: $accent 20%;
+}
+ListView:focus > ListItem.board-card.-highlight {
+    border: round $accent;
+    background: $accent 35%;
+}
+.card-body { height: auto; }
+
+/* setup / invite modals ------------------------------------------------- */
+#setup-box {
+    width: 72; height: auto; max-height: 90%; padding: 1 2;
+    border: thick $accent; background: $surface;
+}
+#setup-box TextArea { height: 6; margin-bottom: 1; }
+#setup-subs-head { height: 3; }
+#setup-subs-head Button { margin-left: 1; }
+#setup-subs { height: auto; max-height: 10; }
+.setup-sub-row { height: 3; margin-bottom: 0; }
+.setup-sub-row Input { width: 1fr; }
+.setup-rm { width: 5; min-width: 5; }
+#setup-actions { height: 3; margin-top: 1; }
+#setup-actions Button { margin-right: 1; }
 
 /* agents ---------------------------------------------------------------- */
 .agent-row { height: 3; padding: 0 1; }

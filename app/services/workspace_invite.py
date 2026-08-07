@@ -50,18 +50,41 @@ def rotate_invite_token(db: Session, tenant: Tenant, *, max_uses: int = 1) -> st
     return tenant.invite_token  # type: ignore[return-value]
 
 
-def mint_invite_link(db: Session, tenant: Tenant, *, max_uses: int = 1) -> dict:
-    """Create a new invite link with max_uses seats (invalidates any previous link)."""
+def mint_invite_link(
+    db: Session,
+    tenant: Tenant,
+    *,
+    max_uses: int = 1,
+    email: str | None = None,
+    send_email: bool = False,
+) -> dict:
+    """Create a new invite link with max_uses seats (invalidates any previous link).
+
+    When send_email=True, email must be @INVITE_ALLOWED_DOMAIN and Outlook Web
+    (Playwright) delivers the link. Failures are returned in the `outlook` field —
+    the link is still minted.
+    """
     uses = clamp_invite_uses(max_uses)
     token = rotate_invite_token(db, tenant, max_uses=uses)
     url = f"{invite_public_base_url()}/join/{token}"
     from app.services.teams_notify import notify_invite_link
 
+    workspace = tenant.name or "AIO"
     teams = notify_invite_link(
         invite_url=url,
         max_uses=uses,
-        workspace=(tenant.name or "AIO"),
+        workspace=workspace,
     )
+    outlook: dict = {"ok": False, "skipped": True, "reason": "not requested"}
+    if send_email:
+        from app.services.outlook_invite import send_invite_via_outlook
+
+        outlook = send_invite_via_outlook(
+            to_email=email or "",
+            invite_url=url,
+            max_uses=uses,
+            workspace=workspace,
+        )
     return {
         "invite_url": url,
         "token": token,
@@ -70,6 +93,8 @@ def mint_invite_link(db: Session, tenant: Tenant, *, max_uses: int = 1) -> dict:
         "uses_left": uses,
         "single_use": uses == 1,
         "teams": teams,
+        "outlook": outlook,
+        "emailed_to": (outlook.get("to") if outlook.get("ok") else None),
     }
 
 

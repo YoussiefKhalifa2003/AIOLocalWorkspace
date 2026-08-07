@@ -334,9 +334,12 @@ def register_via_invite_token(
     if tenant is None:
         raise ValueError("invalid or expired invite link")
 
-    email_norm = email.strip().lower().strip("<>\"'.,;:!?)(")
-    if "@" not in email_norm or "." not in email_norm.split("@")[-1]:
-        raise ValueError("invalid email")
+    from app.services.invite_domain import assert_allowed_invite_email
+
+    try:
+        email_norm = assert_allowed_invite_email(email)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
     if len(password or "") < 4:
         raise ValueError("password must be at least 4 characters")
 

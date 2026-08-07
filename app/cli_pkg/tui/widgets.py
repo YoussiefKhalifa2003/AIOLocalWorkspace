@@ -4,47 +4,47 @@ from __future__ import annotations
 
 from typing import Any
 
+from rich.markup import escape
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, ListItem, ListView, Static
-
-BADGE_ORDER = ("working", "pr", "repo", "branch", "blockers")
+from textual.widgets import Button, Input, Label, ListItem, ListView, ProgressBar, Static, TextArea
 
 
-def card_badges(card: dict[str, Any]) -> str:
+def card_badges(card: dict[str, Any], *, compact: bool = True) -> str:
+    """Compact badges for the card face; keep the noisiest bits off the board."""
     bits: list[str] = []
     if card.get("status") == "agent_backlog":
-        bits.append("[green]agent working[/green]")
+        bits.append("[green]working[/green]")
     if card.get("pr_number"):
         bits.append(f"[cyan]PR #{card['pr_number']}[/cyan]")
     elif card.get("status") == "in_review":
-        bits.append("[dim]no PR yet[/dim]")
-    if card.get("repo_url"):
-        bits.append("[#60a5fa]repo[/#60a5fa]")
-    if card.get("github_branch"):
-        branch = str(card["github_branch"]).split("/")[-1]
-        bits.append(f"[#c084fc]{branch[:14]}[/#c084fc]")
+        bits.append("[dim]no PR[/dim]")
     if card.get("open_issue_count"):
-        bits.append(f"[red]{card['open_issue_count']} blocker[/red]")
+        bits.append(f"[red]{card['open_issue_count']}⚠[/red]")
     if card.get("can_merge"):
-        bits.append("[yellow]mergeable[/yellow]")
-    return "  ".join(bits)
+        bits.append("[yellow]merge[/yellow]")
+    if not compact and card.get("repo_url"):
+        bits.append("[#60a5fa]repo[/#60a5fa]")
+    return " · ".join(bits)
 
 
 class CardItem(ListItem):
-    def __init__(self, card: dict[str, Any]) -> None:
-        from rich.markup import escape
+    """One board card: bordered tile with title + short meta."""
 
+    def __init__(self, card: dict[str, Any]) -> None:
         self.card = card
         title = escape(str(card.get("title") or ""))
-        owner = escape(str(card.get("owner_email") or "").split("@")[0])
-        pct = card.get("progress_percent") or 0
+        if len(title) > 42:
+            title = title[:41] + "…"
+        owner = escape(str(card.get("owner_email") or "").split("@")[0] or "-")
+        pct = int(card.get("progress_percent") or 0)
         badges = card_badges(card)
-        body = f"[b]#{card['id']}[/b]  {title}\n[dim]{owner} · {pct}%[/dim]"
+        body = f"[b]#{card['id']}[/b]  {title}\n[dim]{owner}[/dim]  [dim]{pct}%[/dim]"
         if badges:
             body += f"\n{badges}"
-        super().__init__(Static(body, markup=True))
+        super().__init__(Static(body, markup=True, classes="card-body"))
+        self.add_class("board-card")
 
 
 class BoardColumn(VerticalScroll):
@@ -53,7 +53,7 @@ class BoardColumn(VerticalScroll):
     def __init__(self, status: str) -> None:
         super().__init__(id=f"col-{status}")
         self.status = status
-        self.border_title = status
+        self.border_title = status.replace("_", " ")
         self.list_view = ListView()
 
     def compose(self) -> ComposeResult:
@@ -64,7 +64,8 @@ class BoardColumn(VerticalScroll):
         self.list_view.clear()
         for card in cards:
             self.list_view.append(CardItem(card))
-        self.border_title = f"{self.status} ({len(cards)})"
+        label = self.status.replace("_", " ")
+        self.border_title = f"{label} · {len(cards)}"
         if cards:
             self.list_view.index = min(index, len(cards) - 1)
 
@@ -80,45 +81,257 @@ class BoardColumn(VerticalScroll):
         return getattr(item, "card", None)
 
 
+def _progress_bar(pct: int, width: int = 16) -> str:
+    pct = max(0, min(100, int(pct)))
+    filled = int(round(width * pct / 100))
+    return "█" * filled + "░" * (width - filled)
+
+
 class DetailPane(VerticalScroll):
+    """Sectioned card inspector — only shows what exists."""
+
     def __init__(self) -> None:
         super().__init__(id="detail")
-        self.border_title = "detail"
-        self.body = Static("Select a card.", markup=True)
+        self.border_title = "card"
+        self.header = Static("Select a card.", id="detail-header", markup=True)
+        self.meta = Static("", id="detail-meta", markup=True)
+        self.progress = Static("", id="detail-progress", markup=True)
+        self.github = Static("", id="detail-github", markup=True)
+        self.extra = Static("", id="detail-extra", markup=True)
+        self.actions = Static("", id="detail-actions", markup=True)
+        self._bar = ProgressBar(total=100, show_eta=False, show_percentage=False, id="detail-bar")
 
     def compose(self) -> ComposeResult:
-        yield self.body
+        yield self.header
+        yield self.meta
+        yield Label("progress", classes="detail-label")
+        yield self._bar
+        yield self.progress
+        yield Label("github", classes="detail-label")
+        yield self.github
+        yield self.extra
+        yield self.actions
 
-    def show(self, card: dict[str, Any] | None) -> None:
+    def show(self, card: dict[str, Any] | None, *, is_owner: bool = False) -> None:
         if not card:
-            self.body.update("Select a card.")
+            self.border_title = "card"
+            self.header.update("[dim]Select a card to inspect it.[/dim]")
+            self.meta.update("")
+            self.progress.update("")
+            self.github.update("[dim]—[/dim]")
+            self.extra.update("")
+            self.actions.update(
+                "[dim]j/k cards · h/l columns[/dim]"
+                + ("\n[dim]s move · a agent · n new[/dim]" if is_owner else "")
+            )
+            self._bar.update(progress=0)
             return
-        lines = [
-            f"[b]#{card['id']} {card.get('title') or ''}[/b]",
-            f"[dim]{card.get('status')}[/dim]",
-            "",
-        ]
+
+        oid = card["id"]
+        title = escape(str(card.get("title") or ""))
+        status = escape(str(card.get("status") or "-").replace("_", " "))
+        self.border_title = f"#{oid}"
+        self.header.update(f"[b]#{oid}[/b]  {title}\n[dim]{status}[/dim]")
+
+        owner = escape(str(card.get("owner_email") or "-"))
+        blockers = int(card.get("open_issue_count") or 0)
+        meta_bits = [f"[dim]owner[/dim]  {owner}"]
+        if blockers:
+            meta_bits.append(f"[red]{blockers} blocker{'s' if blockers != 1 else ''}[/red]")
+        self.meta.update("\n".join(meta_bits))
+
+        pct = int(card.get("progress_percent") or 0)
+        closed = int(card.get("checklist_closed") or 0)
+        total = int(card.get("checklist_total") or 0)
+        self._bar.update(total=100, progress=pct)
+        self.progress.update(
+            f"{_progress_bar(pct)}  [b]{pct}%[/b]"
+            + (f"  [dim]{closed}/{total} subtasks[/dim]" if total else "")
+        )
+
+        gh_lines: list[str] = []
+        if card.get("repo_url"):
+            gh_lines.append(f"[dim]repo[/dim]    {escape(str(card['repo_url']))}")
+        if card.get("pr_url"):
+            gh_lines.append(
+                f"[dim]pr[/dim]      [cyan]#{card.get('pr_number') or '?'}[/cyan]  "
+                f"{escape(str(card['pr_url']))}"
+            )
+        branch = card.get("github_branch") or card.get("branch_url")
+        if branch:
+            gh_lines.append(f"[dim]branch[/dim]  {escape(str(branch))}")
+        if card.get("github_merged_at"):
+            gh_lines.append(f"[dim]merged[/dim]  {escape(str(card['github_merged_at']))}")
+        gh_lines.append(f"[dim]path[/dim]    data/workspaces/obj-{oid}")
+        self.github.update("\n".join(gh_lines) if gh_lines else "[dim]no github links[/dim]")
+
+        extra: list[str] = []
         if card.get("description"):
-            lines += [str(card["description"]), ""]
-        lines += [
-            f"owner:     {card.get('owner_email') or '-'}",
-            f"progress:  {card.get('progress_percent', 0)}% "
-            f"({card.get('checklist_closed', 0)}/{card.get('checklist_total', 0)})",
-            f"blockers:  {card.get('open_issue_count', 0)}",
-            f"repo:      {card.get('repo_url') or '-'}",
-            f"pr:        {card.get('pr_url') or '-'}",
-            f"branch:    {card.get('branch_url') or card.get('github_branch') or '-'}",
-            f"merged:    {card.get('github_merged_at') or '-'}",
-            f"workspace: data/workspaces/obj-{card['id']}",
-        ]
+            extra += ["[dim]notes[/dim]", escape(str(card["description"])), ""]
         subs = card.get("subtasks") or []
         if subs:
-            lines += ["", "subtasks:"]
-            lines += [f"  [{'x' if t['done'] else ' '}] {t['title']}" for t in subs]
+            extra.append("[dim]subtasks[/dim]")
+            extra += [
+                f"  [{'x' if t.get('done') else ' '}] {escape(str(t.get('title') or ''))}"
+                for t in subs
+            ]
         claims = card.get("claimed_paths") or []
         if claims:
-            lines += ["", "claims:"] + [f"  {p}" for p in claims]
-        self.body.update("\n".join(lines))
+            if extra:
+                extra.append("")
+            extra.append("[dim]claims[/dim]")
+            extra += [f"  {escape(str(p))}" for p in claims]
+        self.extra.update("\n".join(extra).rstrip())
+
+        hints: list[str] = ["[dim]j/k[/dim] cards  [dim]h/l[/dim] columns"]
+        if is_owner:
+            hints.append("[dim]s[/dim] move  [dim]a[/dim] agent  [dim]n[/dim] new")
+            if card.get("can_merge"):
+                hints.append("[yellow]m[/yellow] merge & done")
+            elif card.get("pr_url"):
+                hints.append("[dim]o[/dim] open PR  [dim]y[/dim] copy")
+        elif card.get("pr_url"):
+            hints.append("[dim]o[/dim] open PR  [dim]y[/dim] copy")
+        else:
+            hints.append("[dim]view only · owner moves cards[/dim]")
+        self.actions.update("\n".join(hints))
+
+
+class ObjectiveSetupModal(ModalScreen[dict[str, Any] | None]):
+    """Post-create brief: description + optional subtasks (or skip)."""
+
+    BINDINGS = [("escape", "skip", "Skip")]
+
+    def __init__(self, objective_id: int, title: str) -> None:
+        super().__init__()
+        self.objective_id = objective_id
+        self._title = title
+        self._sub_count = 0
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="setup-box"):
+            yield Label(f"New objective #{self.objective_id}", id="confirm-title")
+            yield Static(
+                f"[b]{escape(self._title)}[/b]\n"
+                "[dim]Optional — add a short brief and subtasks, or skip.[/dim]",
+                markup=True,
+            )
+            yield Label("Description")
+            yield TextArea(id="setup-desc")
+            with Horizontal(id="setup-subs-head"):
+                yield Label("Subtasks")
+                yield Button("+ add", id="setup-add-sub")
+            yield Vertical(id="setup-subs")
+            with Horizontal(id="setup-actions"):
+                yield Button("Save", variant="primary", id="setup-save")
+                yield Button("Skip", id="setup-skip")
+
+    def on_mount(self) -> None:
+        self.query_one("#setup-desc", TextArea).focus()
+
+    def _add_sub(self) -> None:
+        self._sub_count += 1
+        box = self.query_one("#setup-subs", Vertical)
+        row = Horizontal(classes="setup-sub-row")
+        inp = Input(placeholder="Subtask…", id=f"setup-sub-{self._sub_count}")
+        rm = Button("×", id=f"setup-rm-{self._sub_count}", classes="setup-rm")
+        box.mount(row)
+        row.mount(inp)
+        row.mount(rm)
+        inp.focus()
+
+    def _collect_subtasks(self) -> list[str]:
+        out: list[str] = []
+        for inp in self.query("#setup-subs Input"):
+            val = str(getattr(inp, "value", "") or "").strip()
+            if val:
+                out.append(val)
+        return out
+
+    def _save(self) -> None:
+        desc = self.query_one("#setup-desc", TextArea).text
+        self.dismiss({"dismiss": False, "description": desc, "subtasks": self._collect_subtasks()})
+
+    def action_skip(self) -> None:
+        self.dismiss({"dismiss": True})
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id or ""
+        if bid == "setup-add-sub":
+            self._add_sub()
+            return
+        if bid.startswith("setup-rm-"):
+            row = event.button.parent
+            if row is not None:
+                row.remove()
+            return
+        if bid == "setup-save":
+            self._save()
+            return
+        if bid == "setup-skip":
+            self.dismiss({"dismiss": True})
+
+
+class InviteEmailModal(ModalScreen[dict[str, Any] | None]):
+    """Ask for a @tatweermea.com address (+ seats), then email the invite via Outlook."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, domain: str = "tatweermea.com") -> None:
+        super().__init__()
+        self.domain = domain
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-box"):
+            yield Label("Email invite", id="confirm-title")
+            yield Static(
+                f"[dim]Only @{escape(self.domain)} addresses. "
+                "Outlook Web sends the mail (free — no SMTP billing).[/dim]",
+                markup=True,
+            )
+            yield Input(placeholder=f"colleague@{self.domain}", id="invite-email")
+            yield Input(value="1", placeholder="seats (1-50)", id="invite-seats")
+            with Horizontal():
+                yield Button("Send invite", variant="primary", id="invite-send")
+                yield Button("Link only", id="invite-link-only")
+                yield Button("Cancel", id="invite-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#invite-email", Input).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id or ""
+        if bid == "invite-cancel":
+            self.dismiss(None)
+            return
+        email = self.query_one("#invite-email", Input).value.strip()
+        seats_raw = self.query_one("#invite-seats", Input).value.strip() or "1"
+        try:
+            seats = max(1, min(50, int(seats_raw)))
+        except ValueError:
+            seats = 1
+        if bid == "invite-link-only":
+            self.dismiss({"email": "", "seats": seats, "send_email": False})
+            return
+        if not email:
+            self.query_one("#invite-email", Input).focus()
+            return
+        self.dismiss({"email": email, "seats": seats, "send_email": True})
+
+    def on_input_submitted(self) -> None:
+        email = self.query_one("#invite-email", Input).value.strip()
+        seats_raw = self.query_one("#invite-seats", Input).value.strip() or "1"
+        try:
+            seats = max(1, min(50, int(seats_raw)))
+        except ValueError:
+            seats = 1
+        if not email:
+            self.query_one("#invite-email", Input).focus()
+            return
+        self.dismiss({"email": email, "seats": seats, "send_email": True})
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class ConfirmModal(ModalScreen[bool]):
@@ -219,12 +432,11 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
 
 [b]Board[/b]
   j k          card up/down     h l    column left/right
-  n            new objective    s      move to a status
-  a            hand to a coding agent
-  m            merge the PR and finish the card (owner)
-  o            open PR in a browser      y  copy PR link
+  Owner only:  n new · s move · a agent · m merge
+  Anyone:      o open PR · y copy PR link
+  After n / !add a setup popup asks for description + subtasks.
 
-[b]People[/b]  owners: make owner / make member / remove, and mint invite links.
+[b]People[/b]  owners: email invite (@domain only via Outlook), roles, remove.
 [b]Agents[/b]  pick the model behind each /skill, then Save.
 [b]Dashboard[/b]  owner-only tables: people, models, tokens, open work.
 [b]Live[/b]  owner-only charts: gauges, sparklines, WIP bars (polls every 2s).
@@ -257,8 +469,6 @@ class MentionsModal(ModalScreen[int]):
         self._mentions = mentions
 
     def compose(self) -> ComposeResult:
-        from rich.markup import escape
-
         with Vertical(id="confirm-box"):
             yield Label(f"Mentions ({len(self._mentions)})", id="confirm-title")
             if not self._mentions:

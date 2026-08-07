@@ -236,6 +236,17 @@ def doctor() -> None:
         typer.echo(f"{failures} check(s) need attention")
 
 
+@app.command("outlook-login")
+def outlook_login() -> None:
+    """One-time Outlook Web sign-in for free invite emails (Playwright, no SMTP billing)."""
+    from app.services.outlook_invite import interactive_outlook_login, outlook_storage_path
+
+    typer.echo("Opening Outlook in Chromium…")
+    path = interactive_outlook_login(headed=True)
+    typer.echo(f"Saved session to {path or outlook_storage_path()}")
+    typer.echo("Invites: !invite someone@tatweermea.com   or People → Invite")
+
+
 @app.command()
 def seed() -> None:
     init_db()
