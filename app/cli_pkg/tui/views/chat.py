@@ -14,9 +14,10 @@ from rich.markup import escape
 from textual import events, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Input, Label, ListItem, ListView, Markdown, ProgressBar, Static
+from textual.widgets import Button, Input, Label, ListItem, ListView, Markdown, ProgressBar, Static
 
 from app.cli_pkg.tui.client import ApiClient, ApiError
+from app.cli_pkg.tui.file_picker import pick_attachment_files
 
 # Mirrors looksLikeAgentWork() in the web client: which sends spin up a model.
 _SKILL_RE = re.compile(
@@ -50,6 +51,8 @@ COMMANDS: tuple[Candidate, ...] = (
     Candidate("!issues", "!issues", "show blockers"),
     Candidate("!resolve ", "!resolve", "close blocker"),
     Candidate("!invite ", "!invite", "invite link or email@domain"),
+    Candidate("!attach", "!attach", "open file picker"),
+    Candidate("!attach-clear", "!attach-clear", "clear staged files"),
     Candidate("!clear", "!clear", "clear chat (you only in #general)"),
     Candidate("!help", "!help", "list commands"),
 )
@@ -196,6 +199,14 @@ class Composer(Input):
                 event.stop()
                 return
         elif event.key == "escape":
+            chat_view = getattr(self.app, "chat_view", None)
+            if chat_view is not None and getattr(chat_view, "_pending_attachments", None):
+                chat_view._pending_attachments.pop()
+                chat_view._render_pending_attachments()
+                self.app.set_status("removed last attachment")
+                event.prevent_default()
+                event.stop()
+                return
             # Step out of the message box so the plain letter shortcuts work.
             self.screen.focus_next()
             event.prevent_default()
@@ -496,6 +507,9 @@ class ChatView(Vertical):
     """Sidebar + transcript + composer."""
 
     POLL_SECONDS = 1.5
+    BINDINGS = [
+        ("ctrl+f", "attach_file", "attach file"),
+    ]
 
     def __init__(self, client: ApiClient) -> None:
         super().__init__(id="chat")
@@ -511,8 +525,10 @@ class ChatView(Vertical):
         self._sending_chats: set[int] = set()
         self._llm_jobs: dict[int, str] = {}
         self._pending: Static | None = None
+        self._pending_attachments: list[dict[str, Any]] = []
         self._setup_opened: set[int] = set()
         self._setup_busy = False
+        self._attach_busy = False
 
         self.sidebar = VerticalScroll(id="chat-sidebar")
         self.chat_list = ListView(id="chat-list")
@@ -524,11 +540,13 @@ class ChatView(Vertical):
         self.llm_bar = ProgressBar(
             total=None, show_eta=False, show_percentage=False, id="llm-wait-bar"
         )
+        self.attach_pending = Static("", id="attach-pending", markup=True)
         self.composer = Composer(
             self.picker,
-            placeholder="type /  !  or  @  for a menu · enter to send · esc for shortcuts",
+            placeholder="type /  !  or  @  · Attach button · enter to send",
             id="composer",
         )
+        self.attach_btn = Button("Attach", id="chat-attach", variant="primary")
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="chat-body"):
@@ -544,11 +562,15 @@ class ChatView(Vertical):
                 with Vertical(id="llm-wait"):
                     yield self.llm_label
                     yield self.llm_bar
-                yield self.composer
+                yield self.attach_pending
+                with Horizontal(id="composer-row"):
+                    yield self.composer
+                    yield self.attach_btn
 
     def on_mount(self) -> None:
         self.set_interval(self.POLL_SECONDS, self.poll_messages)
         self._sync_llm_ui()
+        self._render_pending_attachments()
 
     # sidebar -------------------------------------------------------------
 
@@ -605,14 +627,140 @@ class ChatView(Vertical):
         self._last_sync = ""
         self.transcript.remove_children()
         self._pending = None
+        self._pending_attachments = []
+        self._render_pending_attachments()
         chat = self.current_chat
         if chat.get("kind") == "private":
-            self.title_bar.update("[b]my room[/b]  [dim]/skills run here · notes stay quiet[/dim]")
+            self.title_bar.update("[b]my room[/b]  [dim]/skills · Attach · notes stay quiet[/dim]")
         else:
             name = escape(str(chat.get("name") or ""))
-            self.title_bar.update(f"[b]#{name}[/b]  [dim]@people · !commands[/dim]")
+            self.title_bar.update(f"[b]#{name}[/b]  [dim]@people · !commands · Attach[/dim]")
         self._sync_llm_ui()
         self.poll_messages()
+
+    # attachments ---------------------------------------------------------
+
+    def _render_pending_attachments(self) -> None:
+        rows = self._pending_attachments
+        if not rows:
+            self.attach_pending.update("")
+            self.attach_pending.display = False
+            return
+        names = ", ".join(escape(str(a.get("filename") or f"#{a.get('id')}")) for a in rows)
+        self.attach_pending.display = True
+        self.attach_pending.update(
+            f"[b]attached[/b] {names}  "
+            f"[dim]({len(rows)}/5) · Attach add · esc clear last · !attach-clear[/dim]"
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "chat-attach":
+            event.stop()
+            self.action_attach_file()
+
+    def action_attach_file(self) -> None:
+        """Open the OS file chooser (Attach button / ctrl+f / !attach)."""
+        self._start_attach_picker()
+
+    def _start_attach_picker(self) -> None:
+        if self.chat_id is None:
+            self.app.set_status("[yellow]pick a chat first[/yellow]")
+            return
+        remaining = 5 - len(self._pending_attachments)
+        if remaining <= 0:
+            self.app.set_status("[yellow]at most 5 attachments per message[/yellow]")
+            return
+        if self._attach_busy:
+            return
+        self._attach_busy = True
+        self.attach_btn.disabled = True
+        self.app.set_status("[dim]choose a file…[/dim]")
+        self._pick_and_upload_worker(int(self.chat_id), remaining)
+
+    def _upload_pending(self, path: str) -> None:
+        """Upload a known path (optional !attach <path> for scripts/tests)."""
+        if self.chat_id is None:
+            return
+        if len(self._pending_attachments) >= 5:
+            self.app.set_status("[yellow]at most 5 attachments per message[/yellow]")
+            return
+        if self._attach_busy:
+            return
+        self._attach_busy = True
+        self.attach_btn.disabled = True
+        self.app.set_status(f"[dim]uploading {escape(path)}…[/dim]")
+        self._upload_paths_worker(int(self.chat_id), [path])
+
+    @work(thread=True, group="chat-attach")
+    def _pick_and_upload_worker(self, chat_id: int, max_files: int) -> None:
+        try:
+            paths = pick_attachment_files(title="Attach file to chat", max_files=max_files)
+        except Exception as exc:
+            self.app.call_from_thread(self._finish_attach_batch, chat_id, [], str(exc))
+            return
+        if not paths:
+            self.app.call_from_thread(self._finish_attach_batch, chat_id, [], "")
+            return
+        self._upload_paths_sync(chat_id, [str(p) for p in paths])
+
+    @work(thread=True, group="chat-attach")
+    def _upload_paths_worker(self, chat_id: int, paths: list[str]) -> None:
+        self._upload_paths_sync(chat_id, paths)
+
+    def _upload_paths_sync(self, chat_id: int, paths: list[str]) -> None:
+        uploaded: list[dict] = []
+        error = ""
+        for path in paths:
+            try:
+                att = self.client.upload_attachment(chat_id, path)
+                uploaded.append(att)
+            except ApiError as exc:
+                error = str(exc)
+                break
+        self.app.call_from_thread(self._finish_attach_batch, chat_id, uploaded, error)
+
+    def _finish_attach_batch(self, chat_id: int, uploaded: list[dict], error: str) -> None:
+        self._attach_busy = False
+        self.attach_btn.disabled = False
+        if self.chat_id != chat_id:
+            self.app.set_status("[yellow]chat changed — attachment discarded[/yellow]")
+            self.composer.focus()
+            return
+        for att in uploaded:
+            if att.get("id") is None:
+                continue
+            if not any(int(a.get("id") or 0) == int(att["id"]) for a in self._pending_attachments):
+                self._pending_attachments.append(att)
+        self._render_pending_attachments()
+        if error:
+            self.app.set_status(f"[red]attach failed: {escape(error)}[/red]")
+        elif uploaded:
+            names = ", ".join(str(a.get("filename") or "") for a in uploaded)
+            self.app.set_status(f"[green]attached {escape(names)}[/green]")
+        else:
+            self.app.set_status("attach cancelled")
+        self.composer.focus()
+
+    def _clear_pending_attachments(self) -> None:
+        self._pending_attachments = []
+        self._render_pending_attachments()
+        self.app.set_status("attachments cleared")
+
+    def _try_local_attach_command(self, body: str) -> bool:
+        """Handle !attach / !attach-clear in the TUI (local disk → upload)."""
+        lower = body.strip()
+        if lower in ("!attach-clear", "!attach clear", "!attach-clear "):
+            self._clear_pending_attachments()
+            return True
+        m = re.match(r"^!attach(?:\s+(.+))?$", body.strip(), re.I)
+        if not m:
+            return False
+        path = (m.group(1) or "").strip().strip('"').strip("'")
+        if not path:
+            self._start_attach_picker()
+        else:
+            self._upload_pending(path)
+        return True
 
     def _active_llm_skill(self) -> str | None:
         if self.chat_id is None:
@@ -775,7 +923,7 @@ class ChatView(Vertical):
         if event.input is not self.composer:
             return
         body = event.value.strip()
-        if not body or self.chat_id is None:
+        if self.chat_id is None:
             return
         chat_id = int(self.chat_id)
         # Only block the room that already has a job / send in flight
@@ -785,16 +933,29 @@ class ChatView(Vertical):
             self.composer.value = ""
             self.app.action_help()
             return
+        if body and self._try_local_attach_command(body):
+            self.composer.value = ""
+            self.picker.close()
+            return
+        if not body and not self._pending_attachments:
+            return
         self.composer.value = ""
         self.picker.close()
         self._start_send(chat_id, body)
 
     def _start_send(self, chat_id: int, body: str) -> None:
+        attachment_ids = [
+            int(a["id"]) for a in self._pending_attachments if a.get("id") is not None
+        ]
+        # Consume pending so a retry doesn't double-send the same ids
+        self._pending_attachments = []
+        self._render_pending_attachments()
+
         self._sending_chats.add(chat_id)
         chat = next((c for c in self.chats if int(c["id"]) == chat_id), {})
         working = looks_like_agent_work(body, str(chat.get("kind") or ""))
         if working:
-            skill = skill_name_from_body(body) or body.split()[0].lstrip("/")
+            skill = skill_name_from_body(body) or (body.split()[0].lstrip("/") if body else "skill")
             self._llm_jobs[chat_id] = skill
             if self.chat_id == chat_id:
                 self._sync_llm_ui()
@@ -806,12 +967,12 @@ class ChatView(Vertical):
                 self.app.set_status(f"[#7dd3fc]/{escape(skill)} running…[/]")
         elif self.chat_id == chat_id:
             self.composer.disabled = True
-        self._send_worker(chat_id, body)
+        self._send_worker(chat_id, body, attachment_ids)
 
     @work(thread=True, group="chat-send")
-    def _send_worker(self, chat_id: int, body: str) -> None:
+    def _send_worker(self, chat_id: int, body: str, attachment_ids: list[int]) -> None:
         try:
-            data = self.client.send_message(chat_id, body)
+            data = self.client.send_message(chat_id, body, attachment_ids=attachment_ids)
             error = ""
         except ApiError as exc:
             data, error = {}, str(exc)

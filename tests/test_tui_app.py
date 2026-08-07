@@ -124,6 +124,52 @@ def test_messages_uses_after_id_and_since_cursors(mock_http):
     assert seen["since"] == "2026-01-01T00:00:00Z"
 
 
+def test_resolve_attach_path_and_upload(tmp_path, monkeypatch, mock_http):
+    from app.cli_pkg.tui.client import resolve_attach_path
+
+    missing = tmp_path / "nope.py"
+    with pytest.raises(ApiError, match="not found"):
+        resolve_attach_path(missing)
+
+    py = tmp_path / "sample.py"
+    py.write_text("x = 1\n", encoding="utf-8")
+    assert resolve_attach_path(py) == py.resolve()
+    assert resolve_attach_path(f'"{py}"') == py.resolve()
+
+    monkeypatch.chdir(tmp_path)
+    assert resolve_attach_path("sample.py").name == "sample.py"
+
+    with pytest.raises(ApiError, match="not a file"):
+        resolve_attach_path(tmp_path)
+
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["method"] = request.method
+        assert b"sample.py" in request.content or b"filename" in request.headers.get(
+            "content-type", ""
+        ).encode()
+        # multipart body contains filename
+        assert b"sample.py" in request.content
+        return httpx.Response(
+            200,
+            json={
+                "id": 9,
+                "filename": "sample.py",
+                "content_type": "text/x-python",
+                "url": "/attachments/9",
+            },
+        )
+
+    mock_http(handler)
+    out = ApiClient(project_id=1, api_key="k", base_url="http://api").upload_attachment(3, py)
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/chats/3/attachments"
+    assert out["id"] == 9
+    assert out["filename"] == "sample.py"
+
+
 def test_save_agent_models_sends_bulk_prefs(mock_http):
     seen: dict = {}
 

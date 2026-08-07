@@ -89,6 +89,35 @@ def test_upload_message_download_and_auth(tmp_path, monkeypatch):
     )
 
 
+def test_upload_python_and_link_on_message(tmp_path, monkeypatch):
+    client, info = _boot(tmp_path, monkeypatch)
+    ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
+    chat = info["chat_private_a"]
+    code = b"def auth():\n    return True\n"
+
+    up = client.post(
+        f"/chats/{chat}/attachments",
+        headers=ha,
+        files={"file": ("auth.py", code, "text/plain")},
+    )
+    assert up.status_code == 200, up.text
+    att = up.json()
+    assert att["filename"] == "auth.py"
+    assert att["content_type"] == "text/x-python"
+
+    sent = client.post(
+        f"/chats/{chat}/messages",
+        headers=ha,
+        json={"body": "please review this file", "speak": False, "attachment_ids": [att["id"]]},
+    )
+    assert sent.status_code == 200, sent.text
+    mid = sent.json()["user_message_id"]
+    msgs = client.get(f"/chats/{chat}/messages?after_id=0", headers=ha).json()
+    mine = next(m for m in msgs if m["id"] == mid)
+    assert len(mine["attachments"]) == 1
+    assert mine["attachments"][0]["filename"] == "auth.py"
+
+
 def test_reject_bad_type_and_hijack(tmp_path, monkeypatch):
     client, info = _boot(tmp_path, monkeypatch)
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}

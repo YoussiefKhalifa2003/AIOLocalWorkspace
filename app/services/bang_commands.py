@@ -54,6 +54,8 @@ Issues
 Room
   !invite [N]                          mint invite link (N uses, default 1)
   !invite <email@domain> [N]           mint + email via Outlook (domain-locked)
+  !attach                     CLI: open file picker (or click Attach)
+  !attach-clear               CLI: clear staged files
   !status / !team          use /status instead (AI catch-up)
   !clear                   clear this chat (channels: only for you)
   !help                    this list
@@ -152,6 +154,13 @@ def try_bang_command(db: Session, auth: AuthContext, chat: Chat, text: str, Inte
 
     if lower in ("help", "commands", "?"):
         return IntentResult(True, HELP_TEXT)
+
+    if lower.startswith("attach"):
+        return IntentResult(
+            True,
+            "Attach files in the CLI with the **Attach** button (or `ctrl+f` / `!attach`) "
+            "to open a file picker, then send your message. On the web UI, use the paperclip.",
+        )
 
     # !add <title>
     m = re.match(r"add\s+(.+)$", lower)

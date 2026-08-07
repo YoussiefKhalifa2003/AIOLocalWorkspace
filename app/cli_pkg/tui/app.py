@@ -88,8 +88,20 @@ MessageView .msg-chart { height: 18; width: 100%; }
 #llm-wait { height: auto; padding: 0 1 1 1; display: none; }
 #llm-wait-label { height: 1; color: $accent; }
 #llm-wait-bar { width: 100%; height: 1; margin: 0 0 1 0; }
-#composer { border: round $panel-lighten-2; }
-#composer:focus { border: round $accent; }
+#attach-pending {
+    height: auto;
+    padding: 0 1;
+    color: $accent;
+    display: none;
+}
+#composer-row {
+    height: auto;
+    padding: 0 1 1 1;
+    align: left middle;
+}
+#composer-row #composer { width: 1fr; border: round $panel-lighten-2; }
+#composer-row #composer:focus { border: round $accent; }
+#chat-attach { width: 12; margin-left: 1; height: 3; }
 #picker {
     height: auto; max-height: 10; margin: 0 1;
     border: round $accent; background: $surface;
@@ -302,6 +314,7 @@ class AioApp(App[None]):
         ("ctrl+e", "tab_people", ""),
         ("ctrl+d", "tab_dashboard", ""),
         ("ctrl+v", "tab_live", ""),
+        ("ctrl+f", "attach_file", "attach"),
         ("1", "tab_chat", ""),
         ("2", "tab_board", ""),
         ("3", "tab_agents", ""),
@@ -575,6 +588,10 @@ class AioApp(App[None]):
 
     def action_board_edit(self) -> None:
         self._board_action("edit_card")
+
+    def action_attach_file(self) -> None:
+        self.show_tab("chat")
+        self.chat_view.action_attach_file()
 
 
 # Kept so `from ... import AioTui` in older scripts still works.
