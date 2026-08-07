@@ -330,7 +330,10 @@ def board_fingerprint(board: dict[str, Any], jobs_today: Any = "") -> str:
                         [
                             c.get("id"),
                             c.get("title"),
+                            c.get("description") or "",
                             c.get("progress_percent"),
+                            c.get("checklist_closed") or 0,
+                            c.get("checklist_total") or 0,
                             c.get("pr_url") or "",
                             c.get("pr_number") or 0,
                             c.get("repo_url") or "",
@@ -339,6 +342,11 @@ def board_fingerprint(board: dict[str, Any], jobs_today: Any = "") -> str:
                             c.get("open_issue_count") or 0,
                             ",".join(c.get("claimed_paths") or []),
                             c.get("owner_email") or "",
+                            # Subtask titles + done flags so setup/edits redraw the board.
+                            [
+                                [t.get("id"), t.get("title"), 1 if t.get("done") else 0]
+                                for t in (c.get("subtasks") or [])
+                            ],
                         ]
                         for c in col.get("cards", [])
                     ],

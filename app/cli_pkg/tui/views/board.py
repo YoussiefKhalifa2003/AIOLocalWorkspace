@@ -43,6 +43,35 @@ class BoardView(Horizontal):
     def is_owner(self) -> bool:
         return bool(getattr(self.app, "ws", None) and self.app.ws.is_owner)
 
+    @property
+    def my_user_id(self) -> int:
+        ws = getattr(self.app, "ws", None)
+        if ws is None:
+            return 0
+        return int(ws.me.get("user_id") or 0)
+
+    def can_edit_card(self, card: dict[str, Any] | None) -> bool:
+        """Workspace owners edit any card; members only their own."""
+        if not card:
+            return False
+        if self.is_owner:
+            return True
+        me = self.my_user_id
+        if not me:
+            return False
+        return me in {
+            int(card.get("user_id") or 0),
+            int(card.get("assignee_user_id") or 0),
+        }
+
+    def _show_detail(self, card: dict[str, Any] | None = None) -> None:
+        card = self.current_card if card is None else card
+        self.detail.show(
+            card,
+            is_owner=self.is_owner,
+            can_edit=self.can_edit_card(card),
+        )
+
     def compose(self) -> ComposeResult:
         with HorizontalScroll(id="columns"):
             for status in self._order:
@@ -73,7 +102,7 @@ class BoardView(Horizontal):
             return
         if not self._sync_column_from_list(event.list_view):
             return
-        self.detail.show(self.current_card, is_owner=self.is_owner)
+        self._show_detail()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if self._applying:
@@ -82,13 +111,13 @@ class BoardView(Horizontal):
             return
         if not self._detail_open:
             self.toggle_detail()
-        self.detail.show(self.current_card, is_owner=self.is_owner)
+        self._show_detail()
 
     def apply(self, board: dict[str, Any], jobs_today: int) -> None:
         self.board = board
         fp = board_fingerprint(board, jobs_today)
         if fp == self._fingerprint:
-            self.detail.show(self.current_card, is_owner=self.is_owner)
+            self._show_detail()
             return
         self._fingerprint = fp
         self._applying = True
@@ -106,7 +135,7 @@ class BoardView(Horizontal):
 
     def _finish_apply(self) -> None:
         self._applying = False
-        self.detail.show(self.current_card, is_owner=self.is_owner)
+        self._show_detail()
 
     def invalidate(self) -> None:
         self._fingerprint = ""
@@ -131,7 +160,7 @@ class BoardView(Horizontal):
         column = self.current_column
         column.list_view.focus()
         column.scroll_visible(animate=False)
-        self.detail.show(self.current_card, is_owner=self.is_owner)
+        self._show_detail()
 
     def focus_selected(self) -> None:
         self.focus_column(self._index)
@@ -142,16 +171,47 @@ class BoardView(Horizontal):
     def move_card(self, delta: int) -> None:
         lv = self.current_column.list_view
         lv.action_cursor_down() if delta > 0 else lv.action_cursor_up()
-        self.detail.show(self.current_card, is_owner=self.is_owner)
+        self._show_detail()
 
     def refresh_detail(self) -> None:
-        self.detail.show(self.current_card, is_owner=self.is_owner)
+        self._show_detail()
 
     def _require_owner(self) -> bool:
         if self.is_owner:
             return True
         self.app.set_status("[yellow]owner only — members can browse the board[/yellow]")
         return False
+
+    def edit_card(self) -> None:
+        """Edit description + subtasks on your card (or any card if workspace owner)."""
+        card = self.current_card
+        if not card:
+            self.app.set_status("pick a card first")
+            return
+        if not self.can_edit_card(card):
+            self.app.set_status("[yellow]you can only edit your own cards[/yellow]")
+            return
+        oid = int(card["id"])
+        title = str(card.get("title") or "")
+        desc = str(card.get("description") or "")
+        subs = [str(t.get("title") or "") for t in (card.get("subtasks") or [])]
+
+        def done(result: dict[str, Any] | None) -> None:
+            if result is None or result.get("dismiss"):
+                self.app.set_status("edit cancelled")
+                return
+            self._setup_worker(oid, result)
+
+        self.app.push_screen(
+            ObjectiveSetupModal(
+                oid,
+                title,
+                description=desc,
+                subtasks=subs,
+                editing=True,
+            ),
+            done,
+        )
 
     def add_card(self) -> None:
         if not self._require_owner():
@@ -191,16 +251,18 @@ class BoardView(Horizontal):
         try:
             if result.get("dismiss"):
                 self.client.setup_objective(objective_id, dismiss=True)
+                msg = f"#{objective_id} setup skipped"
             else:
                 self.client.setup_objective(
                     objective_id,
                     description=str(result.get("description") or ""),
                     subtasks=list(result.get("subtasks") or []),
                 )
+                n = len([s for s in (result.get("subtasks") or []) if str(s).strip()])
+                msg = f"#{objective_id} saved ({n} subtask{'s' if n != 1 else ''})"
         except ApiError as exc:
-            self.app.call_from_thread(
-                self.app.set_status, f"[red]setup failed: {escape(str(exc))}[/red]"
-            )
+            msg = f"[red]setup failed: {escape(str(exc))}[/red]"
+        self.app.call_from_thread(self.app.after_mutation, msg)
 
     def change_status(self) -> None:
         if not self._require_owner():

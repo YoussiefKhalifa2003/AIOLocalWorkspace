@@ -34,8 +34,13 @@ class CardItem(ListItem):
             title = title[:35] + "…"
         owner = escape(str(card.get("owner_email") or "").split("@")[0] or "-")
         pct = int(card.get("progress_percent") or 0)
+        closed = int(card.get("checklist_closed") or 0)
+        total = int(card.get("checklist_total") or 0)
         badge = card_badges(card)
-        body = f"[b]#{card['id']}[/b]  {title}\n[dim]{owner} · {pct}%[/dim]"
+        meta = f"[dim]{owner} · {pct}%[/dim]"
+        if total:
+            meta += f"  [dim]{closed}/{total} tasks[/dim]"
+        body = f"[b]#{card['id']}[/b]  {title}\n{meta}"
         if badge:
             body += f"  {badge}"
         super().__init__(Static(body, markup=True, classes="card-body"))
@@ -96,43 +101,68 @@ class DetailPane(VerticalScroll):
         super().__init__(id="detail")
         self.border_title = "detail"
         self._card: dict[str, Any] | None = None
+        self._can_edit = False
         self.header = Static("Select a card.", id="detail-header", markup=True)
         self.meta = Static("", id="detail-meta", markup=True)
         self.progress = Static("", id="detail-progress", markup=True)
+        self.desc = Static("", id="detail-desc", markup=True)
+        self.subs = Static("", id="detail-subs", markup=True)
         self.links = Vertical(id="detail-links")
-        self.extra = Static("", id="detail-extra", markup=True)
         self.actions = Static("", id="detail-actions", markup=True)
         self._bar = ProgressBar(total=100, show_eta=False, show_percentage=False, id="detail-bar")
         self._prog_label = Label("progress", classes="detail-label", id="detail-prog-label")
+        self._desc_label = Label("description", classes="detail-label", id="detail-desc-label")
+        self._subs_label = Label("subtasks", classes="detail-label", id="detail-subs-label")
         self._links_label = Label("links", classes="detail-label", id="detail-links-label")
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="detail-toolbar"):
             yield Static("[b]detail[/b]", id="detail-title", markup=True)
+            yield Button("Edit", id="detail-edit")
             yield Button("Hide", id="detail-hide")
         yield self.header
         yield self.meta
         yield self._prog_label
         yield self._bar
         yield self.progress
+        yield self._desc_label
+        yield self.desc
+        yield self._subs_label
+        yield self.subs
         yield self._links_label
         yield self.links
-        yield self.extra
         yield self.actions
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "detail-hide":
-            parent = self.parent
+        bid = event.button.id or ""
+        parent = self.parent
+        if bid == "detail-hide":
             if parent is not None and hasattr(parent, "toggle_detail"):
                 parent.toggle_detail()  # type: ignore[union-attr]
             event.stop()
+            return
+        if bid == "detail-edit":
+            if parent is not None and hasattr(parent, "edit_card"):
+                parent.edit_card()  # type: ignore[union-attr]
+            event.stop()
 
-    def show(self, card: dict[str, Any] | None, *, is_owner: bool = False) -> None:
+    def show(
+        self,
+        card: dict[str, Any] | None,
+        *,
+        is_owner: bool = False,
+        can_edit: bool = False,
+    ) -> None:
         self._card = card
-        # Clear previous link widgets so clicks stay in sync with the selected card.
+        self._can_edit = can_edit
         try:
             self.links.remove_children()
-        except Exception:  # noqa: BLE001 - may not be mounted yet
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            self.query_one("#detail-edit", Button).display = bool(card and can_edit)
+        except Exception:  # noqa: BLE001
             pass
 
         if not card:
@@ -140,7 +170,8 @@ class DetailPane(VerticalScroll):
             self.header.update("[dim]Click a card, or use j/k · h/l.[/dim]")
             self.meta.update("")
             self.progress.update("")
-            self.extra.update("")
+            self.desc.update("")
+            self.subs.update("")
             self.actions.update(
                 "[dim]i[/dim] hide/show detail"
                 + ("  [dim]n[/dim] new" if is_owner else "")
@@ -168,10 +199,23 @@ class DetailPane(VerticalScroll):
         self._bar.update(total=100, progress=pct)
         self.progress.update(
             f"{_progress_bar(pct)}  [b]{pct}%[/b]"
-            + (f"  [dim]{closed}/{total}[/dim]" if total else "")
+            + (f"  [dim]{closed}/{total}[/dim]" if total else "  [dim]no subtasks yet[/dim]")
         )
 
-        has_link = False
+        desc = str(card.get("description") or "").strip()
+        self.desc.update(escape(desc) if desc else "[dim]No description yet.[/dim]")
+
+        subs = card.get("subtasks") or []
+        if subs:
+            self.subs.update(
+                "\n".join(
+                    f"  [{'x' if t.get('done') else ' '}] {escape(str(t.get('title') or ''))}"
+                    for t in subs
+                )
+            )
+        else:
+            self.subs.update("[dim]No subtasks yet.[/dim]")
+
         repo = str(card.get("repo_url") or "").strip()
         pr = str(card.get("pr_url") or "").strip()
         branch = str(card.get("github_branch") or "").strip()
@@ -184,17 +228,19 @@ class DetailPane(VerticalScroll):
                 self.links.mount(
                     Link(f"repo  {_short_url(repo)}", url=repo, tooltip=repo, classes="detail-link")
                 )
-                has_link = True
             if pr:
                 label = f"PR #{card.get('pr_number') or '?'}  {_short_url(pr)}"
                 self.links.mount(Link(label, url=pr, tooltip=pr, classes="detail-link"))
-                has_link = True
             if branch_url:
                 blabel = branch or _short_url(branch_url)
                 self.links.mount(
-                    Link(f"branch  {blabel}", url=branch_url, tooltip=branch_url, classes="detail-link")
+                    Link(
+                        f"branch  {blabel}",
+                        url=branch_url,
+                        tooltip=branch_url,
+                        classes="detail-link",
+                    )
                 )
-                has_link = True
             self.links.mount(
                 Static(f"[dim]path[/dim]  data/workspaces/obj-{oid}", markup=True)
             )
@@ -202,71 +248,81 @@ class DetailPane(VerticalScroll):
             pass
         self._links_label.display = True
 
-        extra: list[str] = []
-        if card.get("description"):
-            extra += ["[dim]notes[/dim]", escape(str(card["description"]))]
-        subs = card.get("subtasks") or []
-        if subs:
-            if extra:
-                extra.append("")
-            extra.append("[dim]subtasks[/dim]")
-            extra += [
-                f"  [{'x' if t.get('done') else ' '}] {escape(str(t.get('title') or ''))}"
-                for t in subs
-            ]
-        self.extra.update("\n".join(extra).rstrip())
-
-        hints = ["[dim]i[/dim] hide detail  [dim]g[/dim] open repo  [dim]o[/dim] open PR"]
+        hints = ["[dim]i[/dim] hide  [dim]g[/dim] repo  [dim]o[/dim] PR"]
+        if can_edit:
+            hints.append("[cyan]e[/cyan] edit description & subtasks")
         if is_owner:
             hints.append("[dim]s[/dim] move  [dim]a[/dim] agent  [dim]n[/dim] new")
             if card.get("can_merge"):
                 hints.append("[yellow]m[/yellow] merge & done")
+        elif not can_edit:
+            hints.append("[dim]view only on others' cards[/dim]")
         self.actions.update("\n".join(hints))
-        _ = has_link
 
 
 class ObjectiveSetupModal(ModalScreen[dict[str, Any] | None]):
-    """Post-create brief: description + optional subtasks (or skip)."""
+    """Create/edit description + subtasks (Skip only on first create)."""
 
-    BINDINGS = [("escape", "skip", "Skip")]
+    BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, objective_id: int, title: str) -> None:
+    def __init__(
+        self,
+        objective_id: int,
+        title: str,
+        *,
+        description: str = "",
+        subtasks: list[str] | None = None,
+        editing: bool = False,
+    ) -> None:
         super().__init__()
         self.objective_id = objective_id
         self._title = title
+        self._description = description or ""
+        self._initial_subs = [s for s in (subtasks or []) if str(s).strip()]
+        self._editing = editing
         self._sub_count = 0
 
     def compose(self) -> ComposeResult:
+        head = "Edit objective" if self._editing else "New objective"
+        hint = (
+            "Update the brief and subtasks, then Save."
+            if self._editing
+            else "Optional — add a short brief and subtasks, or skip."
+        )
         with Vertical(id="setup-box"):
-            yield Label(f"New objective #{self.objective_id}", id="confirm-title")
+            yield Label(f"{head} #{self.objective_id}", id="confirm-title")
             yield Static(
-                f"[b]{escape(self._title)}[/b]\n"
-                "[dim]Optional — add a short brief and subtasks, or skip.[/dim]",
+                f"[b]{escape(self._title)}[/b]\n[dim]{hint}[/dim]",
                 markup=True,
             )
             yield Label("Description")
-            yield TextArea(id="setup-desc")
+            yield TextArea(self._description, id="setup-desc")
             with Horizontal(id="setup-subs-head"):
                 yield Label("Subtasks")
                 yield Button("+ add", id="setup-add-sub")
             yield Vertical(id="setup-subs")
             with Horizontal(id="setup-actions"):
                 yield Button("Save", variant="primary", id="setup-save")
-                yield Button("Skip", id="setup-skip")
+                yield Button("Cancel" if self._editing else "Skip", id="setup-skip")
 
     def on_mount(self) -> None:
+        for title in self._initial_subs:
+            self._add_sub(title)
+        if not self._initial_subs and self._editing:
+            self._add_sub("")
         self.query_one("#setup-desc", TextArea).focus()
 
-    def _add_sub(self) -> None:
+    def _add_sub(self, value: str = "") -> None:
         self._sub_count += 1
         box = self.query_one("#setup-subs", Vertical)
         row = Horizontal(classes="setup-sub-row")
-        inp = Input(placeholder="Subtask…", id=f"setup-sub-{self._sub_count}")
+        inp = Input(value=value, placeholder="Subtask…", id=f"setup-sub-{self._sub_count}")
         rm = Button("×", id=f"setup-rm-{self._sub_count}", classes="setup-rm")
         box.mount(row)
         row.mount(inp)
         row.mount(rm)
-        inp.focus()
+        if not value:
+            inp.focus()
 
     def _collect_subtasks(self) -> list[str]:
         out: list[str] = []
@@ -280,13 +336,16 @@ class ObjectiveSetupModal(ModalScreen[dict[str, Any] | None]):
         desc = self.query_one("#setup-desc", TextArea).text
         self.dismiss({"dismiss": False, "description": desc, "subtasks": self._collect_subtasks()})
 
-    def action_skip(self) -> None:
-        self.dismiss({"dismiss": True})
+    def action_cancel(self) -> None:
+        if self._editing:
+            self.dismiss(None)
+        else:
+            self.dismiss({"dismiss": True})
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id or ""
         if bid == "setup-add-sub":
-            self._add_sub()
+            self._add_sub("")
             return
         if bid.startswith("setup-rm-"):
             row = event.button.parent
@@ -297,7 +356,7 @@ class ObjectiveSetupModal(ModalScreen[dict[str, Any] | None]):
             self._save()
             return
         if bid == "setup-skip":
-            self.dismiss({"dismiss": True})
+            self.action_cancel()
 
 
 class InviteEmailModal(ModalScreen[dict[str, Any] | None]):
@@ -461,6 +520,7 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
 [b]Board[/b]
   j k          card up/down     h l    column left/right
   click a card to update detail · i hide/show detail
+  e            edit description & subtasks (your cards; owners: any)
   Owner only:  n new · s move · a agent · m merge
   Anyone:      g open repo · o open PR · y copy PR
   After n / !add a setup popup asks for description + subtasks.

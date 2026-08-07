@@ -116,10 +116,12 @@ BoardColumn:focus-within { border: round $accent; }
 }
 #detail-toolbar { height: 3; }
 #detail-title { width: 1fr; padding: 1 0 0 0; }
+#detail-edit { width: auto; min-width: 8; margin-right: 1; }
 #detail-hide { width: auto; min-width: 8; }
 .detail-label { color: $text-muted; text-style: bold; margin-top: 1; height: 1; }
 #detail-header { margin: 0 0 1 0; }
 #detail-meta { margin-bottom: 1; }
+#detail-desc, #detail-subs { margin-bottom: 1; }
 #detail-actions { margin-top: 1; color: $text-muted; }
 #detail-bar { width: 100%; height: 1; margin: 0 0 1 0; }
 #detail-links { height: auto; margin-bottom: 1; }
@@ -312,6 +314,7 @@ class AioApp(App[None]):
         ("g", "board_open_repo", ""),
         ("y", "board_copy_pr", ""),
         ("i", "board_toggle_detail", ""),
+        ("e", "board_edit", ""),
     ]
 
     def __init__(self, client: ApiClient, *, poll_seconds: float = 3.0) -> None:
@@ -562,6 +565,9 @@ class AioApp(App[None]):
     def action_board_toggle_detail(self) -> None:
         if self.active_tab == "board":
             self.board_view.toggle_detail()
+
+    def action_board_edit(self) -> None:
+        self._board_action("edit_card")
 
 
 # Kept so `from ... import AioTui` in older scripts still works.
