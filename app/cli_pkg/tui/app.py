@@ -99,34 +99,47 @@ Header { background: $panel; }
 #people-actions Button { margin-right: 1; }
 
 /* board ----------------------------------------------------------------- */
-#board { height: 1fr; }
-#columns { width: 1fr; height: 1fr; }
+BoardView { height: 1fr; layout: horizontal; }
+#columns { width: 1fr; height: 1fr; padding: 0 1 0 0; }
 BoardColumn {
-    width: 32; height: 1fr;
-    border: round $panel-lighten-2; padding: 0 1;
+    width: 34; height: 1fr;
+    border: round $panel-lighten-2;
+    padding: 0 1;
+    margin-right: 1;
 }
 BoardColumn:focus-within { border: round $accent; }
-#detail { width: 40; border: round $panel-lighten-2; padding: 0 1; }
+#detail {
+    width: 44; height: 1fr;
+    border: round $panel-lighten-2;
+    padding: 0 1 1 1;
+    margin-left: 1;
+}
+#detail-toolbar { height: 3; }
+#detail-title { width: 1fr; padding: 1 0 0 0; }
+#detail-hide { width: auto; min-width: 8; }
 .detail-label { color: $text-muted; text-style: bold; margin-top: 1; height: 1; }
-#detail-header { margin-bottom: 1; }
+#detail-header { margin: 0 0 1 0; }
+#detail-meta { margin-bottom: 1; }
 #detail-actions { margin-top: 1; color: $text-muted; }
 #detail-bar { width: 100%; height: 1; margin: 0 0 1 0; }
-ListView { background: transparent; }
-ListItem { padding: 0 1; background: transparent; }
+#detail-links { height: auto; margin-bottom: 1; }
+.detail-link { color: $accent; text-style: underline; height: 1; margin-bottom: 0; }
+ListView { background: transparent; height: 1fr; }
+ListItem { padding: 0; background: transparent; }
 ListItem.board-card {
     border: round $panel-lighten-2;
     margin: 0 0 1 0;
-    padding: 0 1;
+    padding: 1 1;
     height: auto;
     background: $surface;
 }
 ListItem.board-card.-highlight {
     border: round $accent;
-    background: $accent 20%;
+    background: $accent 18%;
 }
 ListView:focus > ListItem.board-card.-highlight {
     border: round $accent;
-    background: $accent 35%;
+    background: $accent 30%;
 }
 .card-body { height: auto; }
 
@@ -296,7 +309,9 @@ class AioApp(App[None]):
         ("a", "board_agent", ""),
         ("m", "board_merge", ""),
         ("o", "board_open_pr", ""),
+        ("g", "board_open_repo", ""),
         ("y", "board_copy_pr", ""),
+        ("i", "board_toggle_detail", ""),
     ]
 
     def __init__(self, client: ApiClient, *, poll_seconds: float = 3.0) -> None:
@@ -538,8 +553,15 @@ class AioApp(App[None]):
     def action_board_open_pr(self) -> None:
         self._board_action("open_pr")
 
+    def action_board_open_repo(self) -> None:
+        self._board_action("open_repo")
+
     def action_board_copy_pr(self) -> None:
         self._board_action("copy_pr")
+
+    def action_board_toggle_detail(self) -> None:
+        if self.active_tab == "board":
+            self.board_view.toggle_detail()
 
 
 # Kept so `from ... import AioTui` in older scripts still works.

@@ -9,7 +9,7 @@ from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, HorizontalScroll
-from textual.widgets import Input
+from textual.widgets import Input, ListView
 
 from app.cli_pkg.tui.client import ApiClient, ApiError, board_fingerprint
 from app.cli_pkg.tui.widgets import (
@@ -36,6 +36,8 @@ class BoardView(Horizontal):
         self._fingerprint = ""
         self._order = list(BOARD_COLUMNS)
         self._index = 0
+        self._detail_open = True
+        self._applying = False
 
     @property
     def is_owner(self) -> bool:
@@ -49,6 +51,39 @@ class BoardView(Horizontal):
                 yield col
         yield self.detail
 
+    def on_mount(self) -> None:
+        self.detail.display = self._detail_open
+
+    def toggle_detail(self) -> None:
+        self._detail_open = not self._detail_open
+        self.detail.display = self._detail_open
+        self.app.set_status("detail shown" if self._detail_open else "detail hidden · press i to show")
+
+    def _sync_column_from_list(self, list_view: ListView) -> bool:
+        """When the user clicks a card, track which column it belongs to."""
+        for i, status in enumerate(self._order):
+            if self.columns[status].list_view is list_view:
+                self._index = i
+                return True
+        return False
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        # Ignore rebuild noise: only react when the user is focused in that column.
+        if self._applying or not event.list_view.has_focus:
+            return
+        if not self._sync_column_from_list(event.list_view):
+            return
+        self.detail.show(self.current_card, is_owner=self.is_owner)
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if self._applying:
+            return
+        if not self._sync_column_from_list(event.list_view):
+            return
+        if not self._detail_open:
+            self.toggle_detail()
+        self.detail.show(self.current_card, is_owner=self.is_owner)
+
     def apply(self, board: dict[str, Any], jobs_today: int) -> None:
         self.board = board
         fp = board_fingerprint(board, jobs_today)
@@ -56,13 +91,21 @@ class BoardView(Horizontal):
             self.detail.show(self.current_card, is_owner=self.is_owner)
             return
         self._fingerprint = fp
-        for col in board.get("columns", []):
-            widget = self.columns.get(col["id"])
-            if widget is None:
-                continue
-            widget.set_cards(
-                [{**c, "status": c.get("status") or col["id"]} for c in col.get("cards", [])]
-            )
+        self._applying = True
+        try:
+            for col in board.get("columns", []):
+                widget = self.columns.get(col["id"])
+                if widget is None:
+                    continue
+                widget.set_cards(
+                    [{**c, "status": c.get("status") or col["id"]} for c in col.get("cards", [])]
+                )
+        finally:
+            # Highlighted events can land after set_cards returns — clear on next paint.
+            self.call_after_refresh(self._finish_apply)
+
+    def _finish_apply(self) -> None:
+        self._applying = False
         self.detail.show(self.current_card, is_owner=self.is_owner)
 
     def invalidate(self) -> None:
@@ -250,6 +293,15 @@ class BoardView(Horizontal):
             self.app.set_status("no PR on this card")
             return
         webbrowser.open(url)
+        self.app.set_status(f"opened {url}")
+
+    def open_repo(self) -> None:
+        card = self.current_card or {}
+        url = card.get("repo_url")
+        if not url:
+            self.app.set_status("no repo on this card")
+            return
+        webbrowser.open(str(url))
         self.app.set_status(f"opened {url}")
 
     def copy_pr(self) -> None:

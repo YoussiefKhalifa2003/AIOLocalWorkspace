@@ -29,6 +29,12 @@ from app.db.session import init_db
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    try:
+        from app.services.outlook_invite import fix_playwright_browsers_path
+
+        fix_playwright_browsers_path()
+    except Exception:  # noqa: BLE001
+        pass
     yield
 
 

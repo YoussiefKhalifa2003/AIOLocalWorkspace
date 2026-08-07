@@ -196,16 +196,28 @@ class PeopleView(VerticalScroll):
 
     @work(thread=True, group="people")
     def _invite_email_worker(self, email: str, seats: int) -> None:
+        """Mint the link via API, then send Outlook mail from this Terminal (visible browser)."""
         try:
-            data = self.client.invite_email(email, seats)
+            from app.services.invite_domain import assert_allowed_invite_email
+            from app.services.outlook_invite import send_invite_via_outlook
+
+            assert_allowed_invite_email(email)
+            data = self.client.invite_link(seats)
             url = str(data.get("invite_url") or "")
-            outlook = data.get("outlook") or {}
+            outlook = send_invite_via_outlook(
+                to_email=email,
+                invite_url=url,
+                max_uses=seats,
+                workspace="AIO",
+                headless=False,
+            )
             if outlook.get("ok"):
                 msg = f"emailed {email}: {url}"
-            elif data.get("email_error"):
-                msg = f"[yellow]link minted, email failed:[/yellow] {data['email_error']}\n{url}"
             else:
-                msg = f"invite ({seats}): {url}"
+                reason = outlook.get("reason") or "send failed"
+                msg = f"[yellow]link ready, email failed:[/yellow] {reason}\n{url}"
+        except ValueError as exc:
+            msg = f"[red]{escape(str(exc))}[/red]"
         except ApiError as exc:
             msg = f"[red]{escape(str(exc))}[/red]"
         self.app.call_from_thread(self._show_invite, msg)

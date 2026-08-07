@@ -242,9 +242,70 @@ def outlook_login() -> None:
     from app.services.outlook_invite import interactive_outlook_login, outlook_storage_path
 
     typer.echo("Opening Outlook in Chromium…")
-    path = interactive_outlook_login(headed=True)
+    typer.echo("(Ignore Homebrew playwright — AIO uses .venv/bin/python -m playwright)")
+    try:
+        path = interactive_outlook_login(headed=True)
+    except Exception as exc:  # noqa: BLE001
+        typer.secho(str(exc), fg=typer.colors.RED)
+        typer.echo("If Chromium is missing, run:")
+        typer.echo("  .venv/bin/python -m playwright install chromium")
+        raise typer.Exit(1) from exc
     typer.echo(f"Saved session to {path or outlook_storage_path()}")
-    typer.echo("Invites: !invite someone@tatweermea.com   or People → Invite")
+    typer.echo("Invites: ./aio invite-email someone@tatweermea.com")
+
+
+@app.command("invite-email")
+def invite_email_cmd(
+    email: str = typer.Argument(..., help="Must be @tatweermea.com"),
+    seats: int = typer.Option(1, "--seats", "-n", help="Invite link uses (1-50)"),
+) -> None:
+    """Mint an invite link and email it via Outlook (visible Chromium window)."""
+    from app.cli_pkg.session import load_credentials
+    from app.services.invite_domain import assert_allowed_invite_email
+    from app.services.outlook_invite import send_invite_via_outlook
+
+    try:
+        to = assert_allowed_invite_email(email)
+    except ValueError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(1) from exc
+
+    creds = load_credentials()
+    if not creds.api_key:
+        typer.secho("Not logged in. Run: aio login", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+    typer.echo(f"Minting invite link ({seats} seat(s))…")
+    with _client(timeout=30.0) as client:
+        r = client.post(
+            "/workspace/invite-link",
+            headers=_headers(creds.api_key, creds.email),
+            params={"max_uses": max(1, min(50, seats))},
+        )
+    if r.status_code >= 400:
+        typer.secho(f"API mint failed: {_detail(r)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+    url = str((r.json() or {}).get("invite_url") or "")
+    if not url:
+        typer.secho("No invite_url from API", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+    typer.echo(f"Link: {url}")
+    typer.echo(f"Opening Outlook to email {to} (watch the Chromium window)…")
+    result = send_invite_via_outlook(
+        to_email=to,
+        invite_url=url,
+        max_uses=seats,
+        workspace="AIO",
+        headless=False,
+    )
+    if result.get("ok"):
+        typer.secho(f"Sent to {to}", fg=typer.colors.GREEN)
+    else:
+        typer.secho(f"Email failed: {result.get('reason')}", fg=typer.colors.RED)
+        typer.echo("Link is still valid — share it manually if needed.")
+        raise typer.Exit(1)
 
 
 @app.command()
