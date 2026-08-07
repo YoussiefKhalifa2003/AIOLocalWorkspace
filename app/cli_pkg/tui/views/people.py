@@ -170,7 +170,7 @@ class PeopleView(VerticalScroll):
         if not self.is_owner:
             self.app.set_status("[yellow]owner only[/yellow]")
             return
-        domain = (get_settings().invite_allowed_domain or "tatweermea.com").lstrip("@")
+        domain = (get_settings().invite_allowed_domain or "").lstrip("@")
 
         def got(result: dict[str, Any] | None) -> None:
             if result is None:

@@ -7,6 +7,7 @@ def _boot(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("INVITE_APP_URL", "http://127.0.0.1:8000")
+    monkeypatch.setenv("INVITE_ALLOWED_DOMAIN", "")
     from app.config import get_settings
 
     get_settings.cache_clear()
@@ -84,9 +85,29 @@ def test_invite_link_register_and_login(tmp_path, monkeypatch):
     page = client.get(f"/join/{token}")
     assert page.status_code == 200
     assert "Join AIO" in page.text
+    assert "CLI" in page.text or "aio login" in page.text
 
+    html_reg = client.post(
+        f"/join/{token}/register",
+        data={
+            "email": "formuser@gmail.com",
+            "password": "secret1",
+            "password2": "secret1",
+            "name": "FormUser",
+        },
+    )
+    assert html_reg.status_code == 200, html_reg.text
+    assert "Done" in html_reg.text
+    assert "Account created" in html_reg.text
+    assert "aio login" in html_reg.text
+    assert "formuser@gmail.com" in html_reg.text
+    assert "localStorage" not in html_reg.text
+    assert "location.replace" not in html_reg.text
+
+    link_b = client.post("/workspace/invite-link?max_uses=1", headers=ha)
+    token_b = link_b.json()["token"]
     reg = client.post(
-        f"/join/{token}/register.json",
+        f"/join/{token_b}/register.json",
         json={"email": "newbie@example.com", "password": "secret1", "name": "Newbie"},
     )
     assert reg.status_code == 200, reg.text

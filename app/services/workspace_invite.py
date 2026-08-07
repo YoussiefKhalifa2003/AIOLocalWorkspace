@@ -60,9 +60,9 @@ def mint_invite_link(
 ) -> dict:
     """Create a new invite link with max_uses seats (invalidates any previous link).
 
-    When send_email=True, email must be @INVITE_ALLOWED_DOMAIN and Outlook Web
-    (Playwright) delivers the link. Failures are returned in the `outlook` field —
-    the link is still minted.
+    When send_email=True, Outlook Web (Playwright) delivers the link. If
+    INVITE_ALLOWED_DOMAIN is set, the address must match that domain. Failures
+    are returned in the `outlook` field — the link is still minted.
     """
     uses = clamp_invite_uses(max_uses)
     token = rotate_invite_token(db, tenant, max_uses=uses)

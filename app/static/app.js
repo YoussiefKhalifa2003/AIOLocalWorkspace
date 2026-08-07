@@ -25,6 +25,8 @@
     pendingAttachments: [],
     lastSyncAt: null,
     editingMsgId: null,
+    // chatId -> { skill } while that room's LLM request is in flight
+    llmJobs: {},
   };
 
   // Distinct side-rail colors per person (stable by email)
@@ -1552,12 +1554,13 @@
         setVoiceStatus("message cannot be empty");
         return;
       }
+      const chatId = state.chatId;
       const expectsLlm = looksLikeAgentWork(next);
-      if (expectsLlm) startLlmWait(next);
+      if (expectsLlm) beginLlmJob(chatId, next);
       save.disabled = true;
       cancel.disabled = true;
       try {
-        const data = await api(`/chats/${state.chatId}/messages/${m.id}`, {
+        const data = await api(`/chats/${chatId}/messages/${m.id}`, {
           method: "PATCH",
           body: JSON.stringify({ body: next }),
         });
@@ -1565,18 +1568,21 @@
         const removedIds = data.removed_ids || [];
         const replies = data.replies || [];
         finish();
-        removeMessagesFromDom(removedIds, updated.id);
-        fillMessageContent(div, updated);
-        if (replies.length) renderMessages(replies, true);
-        else recomputeLastMsgId();
-        focusMessageEl(div);
-        state.lastSyncAt = new Date().toISOString();
+        if (Number(state.chatId) === Number(chatId)) {
+          removeMessagesFromDom(removedIds, updated.id);
+          fillMessageContent(div, updated);
+          if (replies.length) renderMessages(replies, true);
+          else recomputeLastMsgId();
+          focusMessageEl(div);
+          state.lastSyncAt = new Date().toISOString();
+        }
       } catch (e) {
         setVoiceStatus(String(e.message || e));
         save.disabled = false;
         cancel.disabled = false;
       } finally {
-        stopLlmWait();
+        if (expectsLlm) endLlmJob(chatId);
+        syncComposerForActiveChat();
       }
     };
     input.onkeydown = (ev) => {
@@ -1782,6 +1788,8 @@
     const rows = await api(`/chats/${id}/messages?after_id=0`);
     state.lastSyncAt = new Date().toISOString();
     renderMessages(rows, false);
+    // Per-room LLM lock: other chats stay typable while a private skill runs
+    syncComposerForActiveChat();
   }
 
   async function refreshMentions() {
@@ -1934,13 +1942,17 @@
   }
 
   async function sendBody(body, attachmentIds) {
+    const chatId = state.chatId;
     const ids = attachmentIds || [];
-    if ((!body && !ids.length) || !state.chatId) return;
-    const expectsLlm = body && looksLikeAgentWork(body);
-    if (expectsLlm) startLlmWait(body);
-    else setComposerBusy(true);
+    if ((!body && !ids.length) || !chatId) return;
+    const expectsLlm = !!(body && looksLikeAgentWork(body));
+    if (expectsLlm) {
+      beginLlmJob(chatId, body);
+    } else if (Number(state.chatId) === Number(chatId)) {
+      setComposerBusy(true);
+    }
     try {
-      const data = await api(`/chats/${state.chatId}/messages`, {
+      const data = await api(`/chats/${chatId}/messages`, {
         method: "POST",
         body: JSON.stringify({
           body: body || "",
@@ -1948,10 +1960,15 @@
           attachment_ids: ids,
         }),
       });
-      await afterMessageMeta(data);
+      if (Number(state.chatId) === Number(chatId)) {
+        await afterMessageMeta(data);
+      } else if (data.created_chat_id || data.deleted_chat_id) {
+        await refreshSidebar();
+      }
     } finally {
-      stopLlmWait();
-      setComposerBusy(false);
+      if (expectsLlm) endLlmJob(chatId);
+      else setComposerBusy(false);
+      syncComposerForActiveChat();
     }
   }
 
@@ -1976,10 +1993,12 @@
     return false;
   }
 
-  let llmWaitTimer = null;
-  let llmWaitStarted = 0;
-  let llmWaitExpectedMs = 60000;
   let llmPendingEl = null;
+
+  function activeLlmJob() {
+    if (!state.chatId) return null;
+    return (state.llmJobs || {})[Number(state.chatId)] || null;
+  }
 
   function setComposerBusy(on) {
     $("composer").classList.toggle("busy", !!on);
@@ -1996,11 +2015,10 @@
     }
   }
 
-  function estimateWaitMs(body) {
-    const skill = skillNameFromBody(body);
-    if (skill === "deepresearch" || skill === "code") return 120000;
-    if (skill === "ask" || skill === "research" || skill === "web" || skill === "review") return 90000;
-    return 60000;
+  function syncComposerForActiveChat() {
+    const job = activeLlmJob();
+    setComposerBusy(!!job);
+    renderLlmWaitUi(job);
   }
 
   function showPendingBubble(skill) {
@@ -2013,7 +2031,8 @@
     const label = skill ? `/${skill}` : "agent";
     div.innerHTML =
       `<div class="meta"><span class="who">${label}</span> <span class="msg-id">working</span></div>` +
-      `<div class="body">Thinking… generating a reply</div>`;
+      `<div class="body"><span class="llm-dots">Thinking</span> — generating a reply` +
+      `<div class="llm-pending-track"><div class="llm-pending-bar"></div></div></div>`;
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
     llmPendingEl = div;
@@ -2028,58 +2047,45 @@
     if (stale) stale.remove();
   }
 
-  function startLlmWait(body) {
-    stopLlmWait(false);
-    setComposerBusy(true);
-    llmWaitStarted = Date.now();
-    llmWaitExpectedMs = estimateWaitMs(body);
-    const skill = skillNameFromBody(body);
+  function renderLlmWaitUi(job) {
     const box = $("llmWait");
     const bar = $("llmWaitBar");
     const label = $("llmWaitLabel");
     const hint = $("llmWaitHint");
     if (!box || !bar) return;
+    if (!job) {
+      removePendingBubble();
+      box.classList.add("hidden");
+      bar.classList.remove("indeterminate");
+      return;
+    }
+    const skill = job.skill || "";
     box.classList.remove("hidden");
-    label.textContent = skill
-      ? `Running /${skill} - model is working…`
-      : "Agent working - model is generating…";
+    bar.classList.add("indeterminate");
+    if (label) {
+      label.textContent = skill
+        ? `Running /${skill} — model is working…`
+        : "Agent working — model is generating…";
+    }
     if (hint) {
       hint.textContent = skill
-        ? `Please wait while /${skill} finishes`
-        : "Please wait - the model is generating a reply";
+        ? `/${skill} in progress in this room — switch chats to keep talking elsewhere`
+        : "Model working in this room — switch chats to keep talking elsewhere";
     }
-    bar.style.width = "4%";
     showPendingBubble(skill);
-    llmWaitTimer = setInterval(() => {
-      const elapsed = Date.now() - llmWaitStarted;
-      const t = Math.min(1, elapsed / llmWaitExpectedMs);
-      const pct = Math.min(92, 4 + t * 88);
-      bar.style.width = `${pct}%`;
-      if (elapsed >= llmWaitExpectedMs) {
-        label.textContent = skill
-          ? `/${skill} is taking longer than usual…`
-          : "Taking longer than usual…";
-      }
-    }, 250);
   }
 
-  function stopLlmWait(animateDone = true) {
-    if (llmWaitTimer) {
-      clearInterval(llmWaitTimer);
-      llmWaitTimer = null;
-    }
-    removePendingBubble();
-    const box = $("llmWait");
-    const bar = $("llmWaitBar");
-    if (bar && animateDone) bar.style.width = "100%";
-    if (box) {
-      const hide = () => {
-        box.classList.add("hidden");
-        if (bar) bar.style.width = "0%";
-      };
-      if (animateDone) setTimeout(hide, 220);
-      else hide();
-    }
+  function beginLlmJob(chatId, body) {
+    const id = Number(chatId);
+    if (!state.llmJobs) state.llmJobs = {};
+    state.llmJobs[id] = { skill: skillNameFromBody(body) || "" };
+    if (Number(state.chatId) === id) syncComposerForActiveChat();
+  }
+
+  function endLlmJob(chatId) {
+    const id = Number(chatId);
+    if (state.llmJobs) delete state.llmJobs[id];
+    if (Number(state.chatId) === id) syncComposerForActiveChat();
   }
 
   async function send(ev) {
@@ -2087,7 +2093,8 @@
     const body = $("input").value.trim();
     const ids = (state.pendingAttachments || []).map((a) => a.id);
     if ((!body && !ids.length) || !state.chatId) return;
-    if ($("composer").classList.contains("busy")) return;
+    // Only block sends in the room that already has an LLM job running
+    if (activeLlmJob()) return;
     $("input").value = "";
     state.pendingAttachments = [];
     renderPendingAttachments();
@@ -2131,9 +2138,8 @@
 
   async function inviteMember() {
     try {
-      const domain = "tatweermea.com";
       const email = window.prompt(
-        `Colleague email (only @${domain}). Cancel = abort. Empty = link only.`,
+        "Colleague email (empty = link only). Cancel = abort.",
         ""
       );
       if (email === null) return;
