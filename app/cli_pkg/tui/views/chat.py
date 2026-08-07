@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import re
+import tempfile
+import webbrowser
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from rich.markup import escape
 from textual import events, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Input, Label, ListItem, ListView, ProgressBar, Static
+from textual.widgets import Input, Label, ListItem, ListView, Markdown, ProgressBar, Static
 
 from app.cli_pkg.tui.client import ApiClient, ApiError
 
@@ -270,51 +273,223 @@ def short_time(iso: str) -> str:
         return ""
 
 
-class MessageView(Static):
-    """One chat message. Rebuilt in place when edited, so polls don't flicker."""
+def _strip_control_markers(raw: str) -> str:
+    raw = re.sub(r"\n?\[\[setup:\d+\]\]\s*", "\n", raw)
+    raw = re.sub(r"\n?\[\[confirm:[0-9,\s]+\]\]\s*", "\n", raw)
+    raw = re.sub(r"\n?\[\[charts:[\d,\s]+\]\]\s*", "\n", raw)
+    return raw.rstrip()
 
-    def __init__(self, message: dict[str, Any], my_email: str) -> None:
-        super().__init__(markup=True)
+
+def _cache_attachment_png(client: ApiClient, att: dict[str, Any]) -> Path | None:
+    """Download an image attachment into a temp file for textual-image."""
+    url = str(att.get("url") or "")
+    att_id = att.get("id")
+    if not url and att_id:
+        url = f"/attachments/{att_id}"
+    if not url:
+        return None
+    ctype = str(att.get("content_type") or "").lower()
+    name = str(att.get("filename") or "")
+    if not (
+        ctype.startswith("image/")
+        or name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))
+    ):
+        return None
+    try:
+        data = client.download_bytes(url, timeout=60.0)
+    except ApiError:
+        return None
+    if not data:
+        return None
+    suffix = Path(name).suffix.lower() if name else ".png"
+    if suffix not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+        suffix = ".png"
+    path = Path(tempfile.gettempdir()) / f"aio-att-{att_id or 'x'}{suffix}"
+    try:
+        path.write_bytes(data)
+    except OSError:
+        return None
+    return path
+
+
+class MessageView(Vertical):
+    """One chat message: text (+ markdown links) and optional inline chart images."""
+
+    DEFAULT_CSS = """
+    MessageView { height: auto; padding: 0 0 1 0; }
+    MessageView.agent-msg { border-left: outer $accent 30%; padding-left: 1; }
+    MessageView.whisper-msg { color: $text-muted; }
+    MessageView .msg-head { height: 1; }
+    MessageView .msg-body { height: auto; }
+    MessageView .msg-chart {
+        height: 18;
+        width: 100%;
+        margin: 1 0 0 0;
+    }
+    MessageView .msg-file { color: $text-muted; height: 1; }
+    """
+
+    def __init__(
+        self, message: dict[str, Any], my_email: str, client: ApiClient | None = None
+    ) -> None:
+        super().__init__()
         self.message_id = int(message["id"])
         self.my_email = my_email
-        self.update_message(message)
+        self.client = client
+        self.message = message
+        self._head = Static("", classes="msg-head", markup=True)
+        self._body_static = Static("", classes="msg-body", markup=True)
+        self._body_md = Markdown("", classes="msg-body")
+        self._chart_ids: tuple[int, ...] = ()
+
+    def compose(self) -> ComposeResult:
+        yield self._head
+        yield self._body_static
+        yield self._body_md
+
+    def on_mount(self) -> None:
+        self.update_message(self.message)
+
+    def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
+        href = (event.href or "").strip()
+        if href.startswith(("http://", "https://", "mailto:")):
+            webbrowser.open(href)
+            event.stop()
 
     def update_message(self, message: dict[str, Any]) -> None:
         self.message = message
-        self.update(self._format())
         self.set_class(bool(message.get("agent")), "agent-msg")
         self.set_class(bool(message.get("visibility") == "whisper"), "whisper-msg")
 
-    def _format(self) -> str:
-        m = self.message
-        agent = m.get("agent")
+        agent = message.get("agent")
         if agent:
             who = f"[b #7dd3fc]@{escape(str(agent))}[/]"
         else:
-            name = str(m.get("sender") or m.get("sender_email") or "user")
-            mine = str(m.get("sender_email") or "") == self.my_email
+            name = str(message.get("sender") or message.get("sender_email") or "user")
+            mine = str(message.get("sender_email") or "") == self.my_email
             colour = "#a7f3d0" if mine else "#fbbf24"
             who = f"[b {colour}]{escape(name)}[/]"
 
-        meta = [short_time(str(m.get("created_at") or ""))]
-        if m.get("edited_at"):
+        meta = [short_time(str(message.get("created_at") or ""))]
+        if message.get("edited_at"):
             meta.append("edited")
-        if m.get("visibility") == "whisper":
+        if message.get("visibility") == "whisper":
             meta.append("only you")
-        head = f"{who} [dim]{' · '.join(x for x in meta if x)}[/dim]"
+        self._head.update(f"{who} [dim]{' · '.join(x for x in meta if x)}[/dim]")
 
-        if m.get("deleted_at"):
-            return f"{head}\n[dim i]message deleted[/dim i]"
+        if message.get("deleted_at"):
+            self._body_md.display = False
+            self._body_static.display = True
+            self._body_static.update("[dim i]message deleted[/dim i]")
+            self._clear_extras()
+            return
 
-        raw = str(m.get("body") or "")
-        # Strip control markers before display; TUI opens the setup modal instead.
-        raw = re.sub(r"\n?\[\[setup:\d+\]\]\s*$", "", raw)
-        raw = re.sub(r"\n?\[\[confirm:[0-9,\s]+\]\]\s*$", "", raw)
-        body = render_markdown(raw) if agent else escape(raw)
-        lines = [f"{head}\n{body}"]
-        for att in m.get("attachments") or []:
-            lines.append(f"  [dim]📎 {escape(str(att.get('filename') or ''))}[/dim]")
-        return "\n".join(lines)
+        raw = _strip_control_markers(str(message.get("body") or ""))
+        use_md = bool(agent) and bool(raw.strip())
+        if use_md:
+            self._body_static.display = False
+            self._body_md.display = True
+            self._body_md.update(raw)
+        else:
+            self._body_md.display = False
+            self._body_static.display = True
+            # User messages: linkify bare URLs as markdown so they stay clickable
+            if re.search(r"https?://|mailto:", raw):
+                linked = re.sub(
+                    r"(https?://[^\s<]+)|(mailto:[^\s<]+)",
+                    lambda m: f"[{m.group(0)}]({m.group(0)})",
+                    raw,
+                )
+                self._body_static.display = False
+                self._body_md.display = True
+                self._body_md.update(linked)
+            else:
+                self._body_static.update(escape(raw) if raw else "")
+
+        self._sync_attachments(message.get("attachments") or [])
+
+    def _clear_extras(self) -> None:
+        for child in list(self.children):
+            if child in (self._head, self._body_static, self._body_md):
+                continue
+            child.remove()
+        self._chart_ids = ()
+
+    def _sync_attachments(self, attachments: list[dict[str, Any]]) -> None:
+        image_atts = []
+        file_atts = []
+        for a in attachments:
+            ctype = str(a.get("content_type") or "").lower()
+            name = str(a.get("filename") or "")
+            if ctype.startswith("image/") or name.lower().endswith(
+                (".png", ".jpg", ".jpeg", ".gif", ".webp")
+            ):
+                image_atts.append(a)
+            else:
+                file_atts.append(a)
+
+        new_ids = tuple(int(a["id"]) for a in image_atts if a.get("id") is not None)
+        if new_ids != self._chart_ids:
+            self._clear_extras()
+            self._chart_ids = new_ids
+            if image_atts and self.client is not None:
+                self._mount_charts(image_atts)
+            for a in file_atts:
+                self.mount(
+                    Static(
+                        f"[dim]📎 {escape(str(a.get('filename') or ''))}[/dim]",
+                        markup=True,
+                        classes="msg-file",
+                    )
+                )
+        elif file_atts and not any(
+            getattr(c, "classes", None) and "msg-file" in c.classes for c in self.children
+        ):
+            for a in file_atts:
+                self.mount(
+                    Static(
+                        f"[dim]📎 {escape(str(a.get('filename') or ''))}[/dim]",
+                        markup=True,
+                        classes="msg-file",
+                    )
+                )
+
+    @work(thread=True, exclusive=False, group="msg-charts")
+    def _mount_charts(self, image_atts: list[dict[str, Any]]) -> None:
+        if self.client is None:
+            return
+        paths: list[tuple[dict[str, Any], Path]] = []
+        for att in image_atts:
+            path = _cache_attachment_png(self.client, att)
+            if path is not None:
+                paths.append((att, path))
+        if paths:
+            self.app.call_from_thread(self._add_chart_widgets, paths)
+
+    def _add_chart_widgets(self, paths: list[tuple[dict[str, Any], Path]]) -> None:
+        try:
+            from textual_image.widget import Image as TerminalImage
+        except ImportError:
+            for att, path in paths:
+                self.mount(
+                    Static(
+                        f"[dim]🖼 {escape(str(att.get('filename') or path.name))}[/dim]",
+                        markup=True,
+                        classes="msg-file",
+                    )
+                )
+            return
+        for att, path in paths:
+            try:
+                self.mount(TerminalImage(path, classes="msg-chart"))
+            except Exception:
+                self.mount(
+                    Static(
+                        f"[dim]🖼 {escape(str(att.get('filename') or path.name))}[/dim]",
+                        markup=True,
+                        classes="msg-file",
+                    )
+                )
 
 
 class ChatView(Vertical):
@@ -511,7 +686,7 @@ class ChatView(Vertical):
                 continue
             if row.get("deleted_at"):
                 continue
-            view = MessageView(row, self.my_email)
+            view = MessageView(row, self.my_email, client=self.client)
             self._views[mid] = view
             self.transcript.mount(view)
             self._maybe_open_setup(row)
