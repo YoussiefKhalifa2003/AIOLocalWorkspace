@@ -15,7 +15,11 @@ from app.db.session import init_db
 from app.services.seed import seed_demo_data
 from app.worker import drain_queue, run_worker
 
-app = typer.Typer(add_completion=False, no_args_is_help=True, help="AIO metal CLI")
+app = typer.Typer(
+    add_completion=False,
+    invoke_without_command=True,
+    help="AIO - the workspace in your terminal. Run bare `aio` to open the app.",
+)
 jobs_app = typer.Typer(help="Jobs")
 rooms_app = typer.Typer(help="Rooms")
 review_app = typer.Typer(help="Reviews")
@@ -28,6 +32,13 @@ app.add_typer(review_app, name="review")
 app.add_typer(objectives_app, name="objectives")
 app.add_typer(checklist_app, name="checklist")
 app.add_typer(projects_app, name="projects")
+
+
+@app.callback()
+def root(ctx: typer.Context) -> None:
+    """Bare `aio` opens the full-screen app; subcommands stay scriptable."""
+    if ctx.invoked_subcommand is None:
+        _launch_app(DEFAULT_PROJECT, None, None, None)
 
 
 def _headers(api_key: str | None = None, email: str | None = None) -> dict[str, str]:
@@ -299,10 +310,27 @@ def tui(
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     email: Optional[str] = typer.Option(None, "--email"),
 ) -> None:
-    """Live owner dashboard: board, agents, merges."""
-    from app.cli_pkg.tui.app import run_tui
+    """The whole workspace in your terminal: chat, board, agents, dashboard."""
+    _launch_app(project_id, poll, api_key, email)
 
-    code = run_tui(
+
+@app.command("up")
+def up(
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
+    poll: Optional[float] = typer.Option(None, "--poll", help="Refresh interval in seconds"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+    email: Optional[str] = typer.Option(None, "--email"),
+) -> None:
+    """Alias for `aio tui` - open the terminal app."""
+    _launch_app(project_id, poll, api_key, email)
+
+
+def _launch_app(
+    project_id: int, poll: Optional[float], api_key: Optional[str], email: Optional[str]
+) -> None:
+    from app.cli_pkg.tui.app import run_app
+
+    code = run_app(
         project_id,
         poll_seconds=poll if poll is not None else get_settings().tui_poll_seconds,
         api_key=api_key or "",

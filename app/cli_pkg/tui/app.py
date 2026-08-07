@@ -1,304 +1,526 @@
-"""Owner-only live board dashboard."""
+"""AIO in the terminal: the whole workspace as a full-screen app.
+
+Chat, Board, Agents and Dashboard are the same four tabs as the web UI and
+talk to the same API. Every member can run it; owner-only surfaces (Dashboard,
+merge) are gated individually rather than by locking the whole app.
+"""
 
 from __future__ import annotations
 
-import webbrowser
 from typing import Any
 
+from rich.markup import escape
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal
-from textual.widgets import Footer, Header, Static
+from textual.containers import Vertical
+from textual.screen import Screen
+from textual.widgets import (
+    Button,
+    ContentSwitcher,
+    Footer,
+    Header,
+    Input,
+    Label,
+    Static,
+    Tab,
+    Tabs,
+)
 
-from app.cli_pkg.tui.data import BoardClient, OwnerRequired, Snapshot
-from app.cli_pkg.tui.widgets import BoardColumn, ChoiceModal, ConfirmModal, DetailPane
+from app.cli_pkg.session import Credentials, load_credentials, save_credentials
+from app.cli_pkg.tui.client import ApiClient, ApiError, Workspace, login
+from app.cli_pkg.tui.client import board_fingerprint  # noqa: F401  (re-export for callers)
+from app.cli_pkg.tui.views.agents import AgentsView
+from app.cli_pkg.tui.views.board import BoardView
+from app.cli_pkg.tui.views.chat import ChatView
+from app.cli_pkg.tui.views.dashboard import DashboardView
+from app.cli_pkg.tui.views.people import PeopleView
+from app.cli_pkg.tui.widgets import HelpModal, MentionsModal
 from app.config import get_settings
-from app.services.board import BOARD_COLUMNS
 
-MERGE_WARNING = "Merging into the default branch cannot be easily undone."
+TABS: list[tuple[str, str]] = [
+    ("chat", "Chat"),
+    ("board", "Board"),
+    ("agents", "Agents"),
+    ("people", "People"),
+    ("dashboard", "Dashboard"),
+]
+
+# Letter shortcuts work whenever you are not typing a message; the ctrl+ pair
+# works everywhere, including mid-sentence in the chat box.
+TAB_KEYS: list[tuple[str, str, str]] = [
+    ("c", "ctrl+t", "chat"),
+    ("b", "ctrl+b", "board"),
+    ("g", "ctrl+g", "agents"),
+    ("p", "ctrl+e", "people"),
+    ("d", "ctrl+d", "dashboard"),
+]
+
+STYLES = """
+Screen { background: $surface; }
+
+Header { background: $panel; }
+#tabs { background: $panel; }
+#status-line { height: 1; padding: 0 1; color: $text-muted; background: $panel; }
+#body { height: 1fr; }
+
+.view-head { text-style: bold; padding: 1 1 0 1; }
+.view-sub, #agent-info { color: $text-muted; padding: 0 1 1 1; }
+.table-head { text-style: bold; color: $text-muted; padding: 1 1 0 1; }
+
+/* chat ------------------------------------------------------------------ */
+#chat-body { height: 1fr; }
+#chat-sidebar { width: 26; border-right: solid $panel-lighten-2; }
+.side-head { color: $accent 70%; text-style: bold; padding: 1 1 0 1; }
+#chat-list { height: auto; max-height: 40%; background: transparent; }
+#member-list { height: auto; background: transparent; }
+#chat-main { width: 1fr; }
+#chat-title { height: 1; padding: 0 1; background: $panel; }
+#transcript { height: 1fr; padding: 0 2; }
+#transcript > Static { padding: 0 0 1 0; }
+.agent-msg { border-left: outer $accent 30%; padding-left: 1; }
+.whisper-msg { color: $text-muted; }
+.pending-msg { color: $accent; }
+#composer { border: round $panel-lighten-2; }
+#composer:focus { border: round $accent; }
+#picker {
+    height: auto; max-height: 10; margin: 0 1;
+    border: round $accent; background: $surface;
+}
+#picker ListItem { padding: 0 1; }
+
+/* people ---------------------------------------------------------------- */
+#people-list { height: 1fr; }
+#people-list ListItem { padding: 0 1; }
+#people-note { padding: 0 1; }
+#people-actions { height: 3; padding: 0 1; }
+#people-actions Button { margin-right: 1; }
+
+/* board ----------------------------------------------------------------- */
+#board { height: 1fr; }
+#columns { width: 1fr; height: 1fr; }
+BoardColumn {
+    width: 30; height: 1fr;
+    border: round $panel-lighten-2; padding: 0 1;
+}
+BoardColumn:focus-within { border: round $accent; }
+#detail { width: 38; border: round $panel-lighten-2; padding: 0 1; }
+ListView { background: transparent; }
+ListItem { padding: 0 1; background: transparent; }
+ListItem.-highlight { background: $accent 25%; }
+ListView:focus > ListItem.-highlight { background: $accent 45%; }
+
+/* agents ---------------------------------------------------------------- */
+.agent-row { height: 3; padding: 0 1; }
+.agent-name { width: 22; padding: 1 0 0 0; }
+#agent-rows { height: 1fr; }
+#agent-actions { height: 3; padding: 0 1; }
+#agent-actions Button { margin-right: 1; }
+
+/* dashboard ------------------------------------------------------------- */
+#stat-row { height: 5; padding: 0 1; }
+.stat {
+    width: 1fr; height: 4; content-align: center middle;
+    border: round $panel-lighten-2; margin-right: 1; text-align: center;
+}
+DataTable { height: auto; max-height: 14; margin: 0 1; }
+#dash-note { padding: 0 1; }
+
+/* modals ---------------------------------------------------------------- */
+#confirm-box, #help-box, #login-box {
+    width: 66; height: auto; padding: 1 2;
+    border: thick $accent; background: $surface;
+}
+#help-box { width: 78; height: 80%; }
+#confirm-title { text-style: bold; padding-bottom: 1; }
+#login-box Input { margin-bottom: 1; }
+#login-err { color: $error; }
+LoginScreen { align: center middle; }
+ModalScreen { align: center middle; }
+"""
 
 
-class AioTui(App[None]):
-    CSS = """
-    Screen { layout: vertical; }
-    #columns { height: 1fr; }
-    BoardColumn {
-        width: 1fr;
-        border: round $panel-lighten-2;
-        padding: 0 1;
-    }
-    BoardColumn:focus-within { border: round $accent; }
-    #detail { width: 42; border: round $panel-lighten-2; padding: 0 1; }
-    #status-line { height: 1; color: $text-muted; padding: 0 1; }
-    #confirm-box {
-        width: 62;
-        height: auto;
-        padding: 1 2;
-        border: thick $accent;
-        background: $surface;
-    }
-    #confirm-title { text-style: bold; padding-bottom: 1; }
-    ListItem { padding: 0 1; }
-    """
+class LoginScreen(Screen[Credentials]):
+    """Sign in without leaving the app."""
+
+    def __init__(self, base_url: str, email: str = "") -> None:
+        super().__init__()
+        self.base_url = base_url
+        self._email = email
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="login-box"):
+            yield Label("AIO", id="confirm-title")
+            yield Static(f"[dim]{escape(self.base_url)}[/dim]", markup=True)
+            yield Input(value=self._email, placeholder="email", id="login-email")
+            yield Input(placeholder="password", password=True, id="login-password")
+            yield Button("Sign in", variant="primary", id="login-go")
+            yield Static("", id="login-err", markup=True)
+
+    def on_mount(self) -> None:
+        self.query_one("#login-email", Input).focus()
+
+    def on_input_submitted(self) -> None:
+        self._attempt()
+
+    def on_button_pressed(self) -> None:
+        self._attempt()
+
+    def _attempt(self) -> None:
+        email = self.query_one("#login-email", Input).value.strip()
+        password = self.query_one("#login-password", Input).value
+        if not email or not password:
+            self.query_one("#login-err", Static).update("[red]email and password required[/red]")
+            return
+        self.query_one("#login-err", Static).update("[dim]signing in…[/dim]")
+        self._login_worker(email, password)
+
+    @work(thread=True)
+    def _login_worker(self, email: str, password: str) -> None:
+        try:
+            data = login(email, password, self.base_url)
+            creds = Credentials(
+                base_url=self.base_url,
+                email=str(data.get("email") or email),
+                api_key=str(data.get("api_key") or ""),
+                user_id=int(data.get("user_id") or 0),
+            )
+            self.app.call_from_thread(self.dismiss, creds)
+        except ApiError as exc:
+            self.app.call_from_thread(
+                self.query_one("#login-err", Static).update, f"[red]{escape(str(exc))}[/red]"
+            )
+
+
+class AioApp(App[None]):
+    """The workspace, full-screen, in the terminal."""
+
+    CSS = STYLES
+    TITLE = "AIO"
+
+    ENABLE_COMMAND_PALETTE = False
 
     BINDINGS = [
-        ("q", "quit", "quit"),
-        ("r", "refresh", "refresh"),
-        ("j", "next_card", "down"),
-        ("k", "prev_card", "up"),
-        ("h", "prev_column", "left"),
-        ("l", "next_column", "right"),
-        ("enter", "show_detail", "detail"),
-        ("s", "change_status", "status"),
-        ("a", "send_to_agent", "agent"),
-        ("m", "merge_card", "merge"),
-        ("o", "open_pr", "open PR"),
-        ("y", "copy_pr", "copy PR"),
+        ("ctrl+q", "quit", "quit"),
+        ("ctrl+r", "refresh_all", "refresh"),
+        ("ctrl+w", "help", "help"),
+        ("ctrl+n", "mentions", "mentions"),
+        # Letters: the fast way around when you are not typing a message.
+        ("c", "tab_chat", "c chat"),
+        ("b", "tab_board", "b board"),
+        ("g", "tab_agents", "g agents"),
+        ("p", "tab_people", "p people"),
+        ("d", "tab_dashboard", "d dash"),
+        ("question_mark", "help", "? help"),
+        ("at", "mentions", ""),
+        ("r", "refresh_all", ""),
+        ("q", "quit", ""),
+        # Same tabs while typing, so you never have to leave the message box.
+        ("ctrl+t", "tab_chat", ""),
+        ("ctrl+b", "tab_board", ""),
+        ("ctrl+g", "tab_agents", ""),
+        ("ctrl+e", "tab_people", ""),
+        ("ctrl+d", "tab_dashboard", ""),
+        ("1", "tab_chat", ""),
+        ("2", "tab_board", ""),
+        ("3", "tab_agents", ""),
+        ("4", "tab_people", ""),
+        ("5", "tab_dashboard", ""),
+        # board
+        ("j", "board_down", ""),
+        ("k", "board_up", ""),
+        ("h", "board_left", ""),
+        ("l", "board_right", ""),
+        ("n", "board_add", ""),
+        ("s", "board_status", ""),
+        ("a", "board_agent", ""),
+        ("m", "board_merge", ""),
+        ("o", "board_open_pr", ""),
+        ("y", "board_copy_pr", ""),
     ]
 
-    def __init__(self, client: BoardClient, *, poll_seconds: float = 2.0, me: dict | None = None):
+    def __init__(self, client: ApiClient, *, poll_seconds: float = 3.0) -> None:
         super().__init__()
         self.client = client
-        self.poll_seconds = max(0.5, float(poll_seconds))
-        self.me = me or {}
-        self.columns: dict[str, BoardColumn] = {}
-        self.detail = DetailPane()
-        self.status_line = Static("", id="status-line", markup=True)
-        self.snapshot = Snapshot()
-        self._fingerprint = ""
+        self.poll_seconds = max(1.0, float(poll_seconds))
+        self.ws = Workspace()
+        self.jobs_today = 0
         self._message = ""
-        self._col_order = list(BOARD_COLUMNS)
-        self._col_index = 0
+        self._board_error = ""
+        self.chat_view = ChatView(client)
+        self.board_view = BoardView(client)
+        self.agents_view = AgentsView(client)
+        self.people_view = PeopleView(client)
+        self.dashboard_view = DashboardView(client)
+        self.status_line = Static("", id="status-line", markup=True)
+        self.switcher = ContentSwitcher(initial="chat", id="body")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Horizontal(id="columns"):
-            for status in self._col_order:
-                col = BoardColumn(status)
-                self.columns[status] = col
-                yield col
-            yield self.detail
+        yield Tabs(*[Tab(label, id=key) for key, label in TABS], id="tabs")
+        with self.switcher:
+            yield self.chat_view
+            yield self.board_view
+            yield self.agents_view
+            yield self.people_view
+            yield self.dashboard_view
         yield self.status_line
         yield Footer()
 
     def on_mount(self) -> None:
-        self.title = "AIO"
-        self.sub_title = f"project {self.client.project_id} · {self.me.get('email', '')}"
+        self.sub_title = f"project {self.client.project_id}"
+        self.refresh_workspace()
         self.refresh_board()
+        self.set_interval(6.0, self.refresh_workspace)
         self.set_interval(self.poll_seconds, self.refresh_board)
-        self._focus_column(0)
+        self.set_interval(10.0, self._tick_dashboard)
+        self.chat_view.composer.focus()
 
-    # data ---------------------------------------------------------------
+    # tabs ----------------------------------------------------------------
 
-    @work(thread=True, exclusive=True, group="poll")
-    def refresh_board(self) -> None:
-        """Fetch off the UI thread so a slow API never freezes the dashboard."""
-        snap = self.client.snapshot()
-        self.call_from_thread(self._apply_snapshot, snap)
+    @property
+    def active_tab(self) -> str:
+        return self.switcher.current or "chat"
 
-    def _apply_snapshot(self, snap: Snapshot) -> None:
-        if snap.error:
-            self._set_status(f"[red]{snap.error}[/red]")
+    def show_tab(self, key: str) -> None:
+        if key == "dashboard" and not self.ws.is_owner:
+            self.set_status("[yellow]Dashboard is owner-only[/yellow]")
             return
-        self.snapshot = snap
-        if snap.fingerprint != self._fingerprint:
-            self._fingerprint = snap.fingerprint
-            self._render_board()
-        self._set_status()
+        self.switcher.current = key
+        tabs = self.query_one("#tabs", Tabs)
+        if tabs.active != key:
+            tabs.active = key
+        # The pane is still hidden this frame, so focus has to wait for layout.
+        if key == "chat":
+            self.call_after_refresh(self.chat_view.composer.focus)
+        elif key == "board":
+            self.call_after_refresh(self.board_view.focus_selected)
+        elif key == "people":
+            self.call_after_refresh(self.people_view.list_view.focus)
+        elif key == "dashboard":
+            self.dashboard_view.load()
+        self.set_status("")
 
-    def _render_board(self) -> None:
-        for col in self.snapshot.board.get("columns", []):
-            widget = self.columns.get(col["id"])
-            if widget is None:
-                continue
-            cards = [{**c, "status": c.get("status") or col["id"]} for c in col.get("cards", [])]
-            widget.set_cards(cards)
-        self.detail.show(self.current_card)
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        key = event.tab.id or "chat"
+        if key != self.switcher.current:
+            self.show_tab(key)
 
-    def _set_status(self, message: str | None = None) -> None:
-        if message is not None:
-            self._message = message
-        backlog = len(
-            next(
-                (
-                    c.get("cards", [])
-                    for c in self.snapshot.board.get("columns", [])
-                    if c["id"] == "agent_backlog"
-                ),
-                [],
-            )
-        )
+    def action_tab_chat(self) -> None:
+        self.show_tab("chat")
+
+    def action_tab_board(self) -> None:
+        self.show_tab("board")
+
+    def action_tab_agents(self) -> None:
+        self.show_tab("agents")
+
+    def action_tab_people(self) -> None:
+        self.show_tab("people")
+
+    def action_tab_dashboard(self) -> None:
+        self.show_tab("dashboard")
+
+    def action_help(self) -> None:
+        self.push_screen(HelpModal())
+
+    # polling --------------------------------------------------------------
+
+    @work(thread=True, exclusive=True, group="workspace")
+    def refresh_workspace(self) -> None:
+        ws = self.client.workspace()
+        self.call_from_thread(self._apply_workspace, ws)
+
+    def _apply_workspace(self, ws: Workspace) -> None:
+        if ws.error:
+            self.set_status(f"[red]{escape(ws.error)}[/red]")
+            return
+        self.ws = ws
+        self.sub_title = f"{ws.me.get('email', '')} · project {self.client.project_id}"
+        self.chat_view.set_workspace(ws.chats, ws.members, str(ws.me.get("email") or ""))
+        self.people_view.set_members(ws.members, ws.me)
+        self._paint_status()
+
+    @work(thread=True, exclusive=True, group="board-poll")
+    def refresh_board(self) -> None:
+        try:
+            board = self.client.board()
+            jobs = self.client.jobs_summary()
+            error = ""
+        except ApiError as exc:
+            board, jobs, error = {}, 0, str(exc)
+        self.call_from_thread(self._apply_board, board, jobs, error)
+
+    def _apply_board(self, board: dict[str, Any], jobs: int, error: str) -> None:
+        self._board_error = error
+        if error:
+            self._paint_status()
+            return
+        self.jobs_today = jobs
+        self.board_view.apply(board, jobs)
+        self._paint_status()
+
+    def _tick_dashboard(self) -> None:
+        if self.active_tab == "dashboard" and self.ws.is_owner:
+            self.dashboard_view.load()
+
+    def action_refresh_all(self) -> None:
+        self.board_view.invalidate()
+        self.set_status("refreshing…")
+        self.refresh_workspace()
+        self.refresh_board()
+        if self.active_tab == "dashboard":
+            self.dashboard_view.load()
+
+    def after_mutation(self, message: str) -> None:
+        self.board_view.invalidate()
+        self.set_status(message)
+        self.refresh_board()
+
+    # status ---------------------------------------------------------------
+
+    def set_status(self, message: str = "") -> None:
+        self._message = message
+        self._paint_status()
+
+    def _paint_status(self) -> None:
+        board = self.board_view.board
+        repo = board.get("github_repo") or "no repo"
         runner = get_settings().coding_backend or "llm"
-        repo = self.snapshot.board.get("github_repo") or "no repo"
+        working = self.board_view.agent_working
+        mentions = self.ws.unread
         parts = [
-            f"repo {repo}",
-            f"jobs {self.snapshot.jobs_today}",
-            f"agent working {backlog}",
-            f"runner {runner}",
-            f"mentions {self.snapshot.unread_mentions}",
+            f"[dim]repo[/dim] {escape(str(repo))}",
+            f"[dim]jobs[/dim] {self.jobs_today}",
+            f"[dim]agent working[/dim] {working}",
+            f"[dim]runner[/dim] {runner}",
+            f"[dim]@[/dim] {mentions}" if not mentions else f"[yellow]@{mentions}[/yellow]",
         ]
-        line = " · ".join(parts)
+        if self._board_error:
+            parts.append(f"[red]{escape(self._board_error)}[/red]")
+        line = "  ·  ".join(parts)
         if self._message:
             line = f"{line}   {self._message}"
         self.status_line.update(line)
 
-    # selection ----------------------------------------------------------
+    # mentions -------------------------------------------------------------
 
-    @property
-    def current_column(self) -> BoardColumn:
-        return self.columns[self._col_order[self._col_index]]
-
-    @property
-    def current_card(self) -> dict[str, Any] | None:
-        return self.current_column.selected
-
-    def _focus_column(self, index: int) -> None:
-        self._col_index = index % len(self._col_order)
-        self.current_column.list_view.focus()
-        self.detail.show(self.current_card)
-
-    def action_next_column(self) -> None:
-        self._focus_column(self._col_index + 1)
-
-    def action_prev_column(self) -> None:
-        self._focus_column(self._col_index - 1)
-
-    def action_next_card(self) -> None:
-        lv = self.current_column.list_view
-        lv.action_cursor_down()
-        self.detail.show(self.current_card)
-
-    def action_prev_card(self) -> None:
-        lv = self.current_column.list_view
-        lv.action_cursor_up()
-        self.detail.show(self.current_card)
-
-    def action_show_detail(self) -> None:
-        self.detail.show(self.current_card)
-
-    def action_refresh(self) -> None:
-        self._fingerprint = ""
-        self._set_status("refreshing…")
-        self.refresh_board()
-
-    # actions ------------------------------------------------------------
-
-    def action_change_status(self) -> None:
-        card = self.current_card
-        if not card:
-            return
-
-        def done(choice: str | None) -> None:
-            if not choice:
+    def action_mentions(self) -> None:
+        def done(chat_id: int | None) -> None:
+            if chat_id is None or chat_id == 0:
                 return
-            self._apply_status(card, choice)
-
-        self.push_screen(ChoiceModal(f"Move #{card['id']} to…", list(BOARD_COLUMNS)), done)
-
-    def action_send_to_agent(self) -> None:
-        card = self.current_card
-        if not card:
-            return
-        from app.cli_pkg.doctor import available_coding_runners
-
-        runners = available_coding_runners()
-        if len(runners) <= 1:
-            self._apply_status(card, "agent_backlog")
-            return
-
-        def done(choice: str | None) -> None:
-            if not choice:
+            if chat_id == -1:
+                self._mark_read_worker([])
                 return
-            self._apply_status(card, "agent_backlog", runner=choice)
+            self._mark_read_worker([])
+            self.show_tab("chat")
+            self.chat_view.select_chat(int(chat_id))
 
-        self.push_screen(ChoiceModal(f"Runner for #{card['id']}", runners), done)
+        self.push_screen(MentionsModal(self.ws.mentions), done)
 
-    def _apply_status(self, card: dict[str, Any], status: str, runner: str = "") -> None:
-        self._set_status(f"#{card['id']} -> {status}…")
-        self._status_worker(int(card["id"]), status, runner)
-
-    @work(thread=True, group="mutate")
-    def _status_worker(self, objective_id: int, status: str, runner: str) -> None:
-        err = self.client.set_status(objective_id, status, runner=runner)
-        note = f" via {runner}" if runner else ""
-        message = f"[red]{err}[/red]" if err else f"#{objective_id} -> {status}{note}"
-        self.call_from_thread(self._after_mutation, message)
-
-    def _after_mutation(self, message: str) -> None:
-        self._fingerprint = ""
-        self._set_status(message)
-        self.refresh_board()
-
-    def action_merge_card(self) -> None:
-        card = self.current_card
-        if not card:
-            return
-        if not card.get("can_merge"):
-            self._set_status(
-                f"[red]#{card['id']} is not mergeable "
-                f"(status={card.get('status')}, pr={card.get('pr_url') or 'none'})[/red]"
-            )
-            return
-
-        detail = (
-            f"#{card['id']} {card.get('title')}\n"
-            f"PR #{card.get('pr_number')} · {card.get('pr_url')}\n"
-            f"branch {card.get('github_branch') or '-'} · "
-            f"method {get_settings().merge_method}"
-        )
-
-        def done(confirmed: bool | None) -> None:
-            if not confirmed:
-                self._set_status("merge cancelled")
-                return
-            self._set_status(f"merging PR #{card.get('pr_number')}…")
-            self._merge_worker(int(card["id"]))
-
-        self.push_screen(
-            ConfirmModal("Merge & done", detail, MERGE_WARNING, "Merge & move to done"),
-            done,
-        )
-
-    @work(thread=True, group="mutate")
-    def _merge_worker(self, objective_id: int) -> None:
-        ok, msg = self.client.merge(objective_id)
-        message = (
-            f"#{objective_id} {msg} · card is done" if ok else f"[red]{msg}[/red]"
-        )
-        self.call_from_thread(self._after_mutation, message)
-
-    def action_open_pr(self) -> None:
-        card = self.current_card
-        url = (card or {}).get("pr_url")
-        if not url:
-            self._set_status("no PR on this card")
-            return
-        webbrowser.open(url)
-        self._set_status(f"opened {url}")
-
-    def action_copy_pr(self) -> None:
-        card = self.current_card
-        url = (card or {}).get("pr_url")
-        if not url:
-            self._set_status("no PR on this card")
-            return
+    @work(thread=True, group="mentions")
+    def _mark_read_worker(self, ids: list[int]) -> None:
         try:
-            self.copy_to_clipboard(url)
-            self._set_status(f"copied {url}")
-        except Exception:  # noqa: BLE001 - clipboard is best effort over SSH
-            self._set_status(url)
+            self.client.mark_mentions_read(ids)
+        except ApiError:
+            return
+        self.call_from_thread(self.refresh_workspace)
+
+    # board actions (only while the board tab is up) -----------------------
+
+    def _board_action(self, name: str) -> None:
+        if self.active_tab != "board":
+            return
+        getattr(self.board_view, name)()
+
+    def action_board_down(self) -> None:
+        if self.active_tab == "board":
+            self.board_view.move_card(1)
+
+    def action_board_up(self) -> None:
+        if self.active_tab == "board":
+            self.board_view.move_card(-1)
+
+    def action_board_left(self) -> None:
+        if self.active_tab == "board":
+            self.board_view.move_column(-1)
+
+    def action_board_right(self) -> None:
+        if self.active_tab == "board":
+            self.board_view.move_column(1)
+
+    def action_board_add(self) -> None:
+        self._board_action("add_card")
+
+    def action_board_status(self) -> None:
+        self._board_action("change_status")
+
+    def action_board_agent(self) -> None:
+        self._board_action("send_to_agent")
+
+    def action_board_merge(self) -> None:
+        self._board_action("merge_card")
+
+    def action_board_open_pr(self) -> None:
+        self._board_action("open_pr")
+
+    def action_board_copy_pr(self) -> None:
+        self._board_action("copy_pr")
 
 
-def run_tui(project_id: int, *, poll_seconds: float = 2.0, api_key: str = "", email: str = "") -> int:
-    """Owner gate, then launch. Returns a process exit code."""
-    client = BoardClient(project_id, api_key=api_key or None, email=email or None)
+# Kept so `from ... import AioTui` in older scripts still works.
+AioTui = AioApp
+
+
+def run_app(
+    project_id: int = 0,
+    *,
+    poll_seconds: float = 3.0,
+    api_key: str = "",
+    email: str = "",
+) -> int:
+    """Sign in if needed, then hand the terminal to the app."""
+    from app.cli_pkg.session import resolve_base_url, resolve_project_id
+
+    creds = load_credentials()
+    base_url = resolve_base_url()
+    key = api_key or creds.api_key
+    who = email or creds.email
+
+    if not key:
+        picked = _prompt_login(base_url, who)
+        if picked is None:
+            return 2
+        save_credentials(picked)
+        key, who = picked.api_key, picked.email
+
+    pid = int(project_id or resolve_project_id() or 1)
+    client = ApiClient(project_id=pid, api_key=key, email=who)
     try:
-        me = client.require_owner()
-    except OwnerRequired as exc:
-        print(str(exc))
+        client.me()
+    except ApiError as exc:
+        print(f"cannot start: {exc}")
+        print("try `aio login` (is the API running? `uvicorn app.main:app --port 8000`)")
         return 2
-    except Exception as exc:  # noqa: BLE001 - surface connection issues plainly
-        print(f"cannot reach the AIO API: {exc}")
-        return 2
-    AioTui(client, poll_seconds=poll_seconds, me=me).run()
+
+    AioApp(client, poll_seconds=poll_seconds).run()
     return 0
+
+
+def _prompt_login(base_url: str, email: str) -> Credentials | None:
+    """Tiny standalone login app, shown only when there are no credentials."""
+
+    class LoginApp(App[Credentials]):
+        CSS = STYLES
+
+        def on_mount(self) -> None:
+            def done(creds: Credentials | None) -> None:
+                self.exit(creds)
+
+            self.push_screen(LoginScreen(base_url, email), done)
+
+    return LoginApp().run()
+
+
+def run_tui(project_id: int = 0, *, poll_seconds: float = 3.0, api_key: str = "", email: str = "") -> int:
+    """Backwards-compatible entry point for `aio tui`."""
+    return run_app(project_id, poll_seconds=poll_seconds, api_key=api_key, email=email)

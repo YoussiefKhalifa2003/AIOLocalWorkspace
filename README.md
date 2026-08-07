@@ -1,16 +1,27 @@
 # AIO
 
-**CLI-first multi-agent workplace.** The owner runs the whole thing from a live
-terminal dashboard: objectives board, agent runs in real git workspaces, pull
-requests, and a confirmed merge that closes the card. Members still get chat and
-a private AI room in the (legacy) web UI.
+**A multi-agent workplace that runs as a terminal app.** Type `aio` and the whole
+workspace opens full-screen in your terminal: team chat, a private AI room, the
+objectives board, the agent roster, and the owner dashboard. Same four tabs as
+the web UI, same API behind them, no browser.
 
 ```
-aio tui   →  live owner dashboard: board, agents, PRs, Merge & done
-aio board →  same data, one-shot
-#general  →  people talk, @pings, !commands (whisper)
-MY ROOM   →  /skills for AI, plain notes stay quiet
+┌ AIO ──────────────────────── a@local.test · project 1 ── 22:41 ┐
+│  Chat   Board   Agents   Dashboard                             │
+├──────────────┬─────────────────────────────────────────────────┤
+│ CHATS        │ #general                                        │
+│  # general   │  Alice   09:14   standup in 5                   │
+│  ◆ my room   │  @ask    09:15   here's the summary you asked…  │
+│ MEMBERS      │                                                 │
+│  ● Alice ★   │  > message · /ask · !add · @name · ? for help   │
+└──────────────┴─────────────────────────────────────────────────┘
+ repo acme/widgets · jobs 44 · agent working 1 · runner llm · @2
 ```
+
+Every member can run it. It is a real app, not a set of commands: it redraws
+itself as things change, agents stream into the chat you are looking at, and the
+board updates while you watch. The individual `aio <command>` subcommands are
+still there for scripting and CI.
 
 ---
 
@@ -34,11 +45,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000   # the API the CLI talks to
 Then, in a second terminal:
 
 ```bash
-./aio login --email a@local.test --password demo
-./aio projects use 1
 ./aio doctor      # API, git, workspaces, GitHub, research, coding runners
-./aio tui         # live owner dashboard
+./aio             # opens the app (asks you to sign in the first time)
 ```
+
+That is the whole setup. `aio` with no arguments is the app; it stores your
+credentials in `~/.aio/credentials.json` (mode 600) so the next launch is
+instant. `aio tui` and `aio up` do the same thing.
 
 Reset demo data anytime:
 
@@ -46,7 +59,32 @@ Reset demo data anytime:
 rm -f aio.db && ./aio seed
 ```
 
-### The owner loop
+### Living in the app
+
+| Key | Does |
+|-----|------|
+| `1` `2` `3` `4` (or `F1`–`F4`, or click) | Chat · Board · Agents · Dashboard |
+| `F5` | keys and commands |
+| `F6` | unread mentions; pick one to jump to it |
+| `ctrl+r` · `ctrl+q` | refresh now · quit |
+
+**Chat** is the default tab: type and press enter. `/ask`, `/deepresearch`,
+`/code`, `/write`, `/review`, `/checklist`, `/status` run agents; `!add`, `!set`,
+`!claim`, `!issue`, `!invite` and friends run commands; `@name` pings someone,
+and `Tab` completes any of them. While an agent is thinking you get a live
+placeholder instead of a frozen screen, and replies render with real formatting.
+Function keys are used for help and mentions because inside the message box `?`
+and `@` are simply characters you are typing.
+
+**Board** keys: `j`/`k` card, `h`/`l` column, `n` new objective, `s` set status,
+`a` hand to a coding agent, `m` **Merge & done** (confirm first), `o` open the
+PR, `y` copy its URL. Columns scroll sideways; the strip follows your selection.
+
+**Agents** picks the model behind each `/skill`. **Dashboard** is owner-only —
+people, models, tokens, open work. Everything polls in the background and only
+redraws when something actually changed, so it never flickers.
+
+### The same loop, scripted
 
 ```bash
 ./aio board                 # columns with repo / PR / branch per card
@@ -55,13 +93,6 @@ rm -f aio.db && ./aio seed
 ./aio card 12               # progress, links, workspace path
 ./aio merge 12              # confirm, merge the PR, card moves to done
 ```
-
-In `aio tui`: `j`/`k` move within a column, `h`/`l` between columns, `a` sends to
-`agent_backlog`, `s` picks any status, `m` is **Merge & done** (with a confirm
-prompt), `o` opens the PR, `y` copies its URL, `r` refreshes, `q` quits. The
-board refreshes every `TUI_POLL_SECONDS` and only redraws when something changed.
-
-The TUI is owner-only. Members get `aio board`, `aio card`, `aio chat`, `aio say`.
 
 ### Optional: agentic coding CLIs
 
@@ -88,9 +119,9 @@ If a binary is missing, AIO falls back to the plain LLM coding path.
 
 | Command | What it does |
 |---------|--------------|
+| `aio` (no args) | **Open the app.** Same as `aio tui` / `aio up` |
 | `aio login` / `logout` / `whoami` | Credentials in `~/.aio/credentials.json` (mode 600) |
 | `aio doctor` | Preflight: API, git, workspace root, GitHub, Tavily, coding runners |
-| `aio tui` | Live owner dashboard |
 | `aio board` | Board with repo / PR / branch per card |
 | `aio card <id>` | Card detail, subtasks, claims, links, workspace path |
 | `aio set <id> <status> [--runner …]` | Move a card; `agent_backlog` starts the agent |
@@ -242,14 +273,15 @@ Copy `.env.example` → `.env`. Useful keys:
 
 ---
 
-## Two-minute demo (CLI)
+## Two-minute demo (terminal app)
 
 ```bash
-./aio login --email a@local.test --password demo
-./aio tui
-# press a on a todo card  -> agent_backlog, agent clones + edits + opens a PR
-# watch it land in in_review with repo / PR / branch badges
-# press m -> confirm -> merged into main, card moves to done
+./aio
+# 1  Chat tab: type  /ask what should we ship first?   → an agent answers inline
+# 2  press 2 for the Board, pick a todo card, press a
+#    → agent_backlog: it clones the repo, edits real files, opens a PR
+# 3  watch the card land in in_review with repo / PR / branch badges
+# 4  press m → confirm → merged into main, card moves to done
 ```
 
 ## Two-minute demo (web)
@@ -273,6 +305,13 @@ More copy-paste prompts: [`commands.txt`](commands.txt).
 source .venv/bin/activate
 pytest -q
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Terminal app checks (need the API running and `aio login` done once):
+
+```bash
+python scripts/tui_smoke.py --shot   # drive every tab headlessly, write /tmp/aio-*.svg
+python scripts/tui_pty_check.py      # launch in a real pty, press keys, quit cleanly
 ```
 
 CLI helpers (same venv):

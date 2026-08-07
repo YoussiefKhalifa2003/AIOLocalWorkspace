@@ -210,29 +210,8 @@ def test_board_command_prints_links(monkeypatch, capsys):
     assert "branch=aio/obj-5" in out
 
 
-def test_tui_owner_gate_rejects_non_owner(monkeypatch, capsys):
-    from app.cli_pkg.tui import data as tui_data
-    from app.cli_pkg.tui.app import run_tui
-
-    monkeypatch.setattr(
-        tui_data.BoardClient, "me", lambda self: {"email": "omar@local.test", "is_owner": False}
-    )
-    assert run_tui(1) == 2
-    assert "owner-only" in capsys.readouterr().out
-
-
-def test_tui_owner_gate_allows_owner(monkeypatch):
-    from app.cli_pkg.tui import data as tui_data
-
-    monkeypatch.setattr(
-        tui_data.BoardClient, "me", lambda self: {"email": "a@local.test", "is_owner": True}
-    )
-    client = tui_data.BoardClient(1)
-    assert client.require_owner()["is_owner"] is True
-
-
 def test_board_fingerprint_is_stable_and_change_sensitive():
-    from app.cli_pkg.tui.data import board_fingerprint
+    from app.cli_pkg.tui.client import board_fingerprint
 
     a = _board_payload()
     b = _board_payload()
@@ -243,15 +222,15 @@ def test_board_fingerprint_is_stable_and_change_sensitive():
     assert board_fingerprint(a, 3) != board_fingerprint(changed, 3)
 
 
-def test_snapshot_error_instead_of_raise(monkeypatch):
-    from app.cli_pkg.tui.data import BoardClient
+def test_app_start_fails_cleanly_when_api_is_down(monkeypatch, capsys):
+    """No stack trace, and never a half-drawn dashboard, if the API is off."""
+    from app.cli_pkg.tui import client as tui_client
+    from app.cli_pkg.tui.app import run_app
 
-    client = BoardClient(1, base_url="http://127.0.0.1:1")
-
-    def boom(*a, **kw):
-        raise httpx.ConnectError("refused")
-
-    monkeypatch.setattr(httpx.Client, "get", boom)
-    snap = client.snapshot()
-    assert snap.error
-    assert snap.board == {}
+    monkeypatch.setattr(
+        tui_client.ApiClient, "me", lambda self: (_ for _ in ()).throw(tui_client.ApiError("refused"))
+    )
+    assert run_app(1, api_key="k", email="a@local.test") == 2
+    out = capsys.readouterr().out
+    assert "cannot start" in out
+    assert "aio login" in out
