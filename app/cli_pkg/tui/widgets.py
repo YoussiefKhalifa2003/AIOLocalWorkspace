@@ -7,7 +7,7 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, ListItem, ListView, Static
+from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
 BADGE_ORDER = ("working", "pr", "repo", "branch", "blockers")
 
@@ -21,10 +21,10 @@ def card_badges(card: dict[str, Any]) -> str:
     elif card.get("status") == "in_review":
         bits.append("[dim]no PR yet[/dim]")
     if card.get("repo_url"):
-        bits.append("[blue]repo[/blue]")
+        bits.append("[#60a5fa]repo[/#60a5fa]")
     if card.get("github_branch"):
-        branch = str(card["github_branch"])
-        bits.append(f"[magenta]{branch[:18]}[/magenta]")
+        branch = str(card["github_branch"]).split("/")[-1]
+        bits.append(f"[#c084fc]{branch[:14]}[/#c084fc]")
     if card.get("open_issue_count"):
         bits.append(f"[red]{card['open_issue_count']} blocker[/red]")
     if card.get("can_merge"):
@@ -34,12 +34,14 @@ def card_badges(card: dict[str, Any]) -> str:
 
 class CardItem(ListItem):
     def __init__(self, card: dict[str, Any]) -> None:
+        from rich.markup import escape
+
         self.card = card
-        title = str(card.get("title") or "")
-        owner = str(card.get("owner_email") or "")
+        title = escape(str(card.get("title") or ""))
+        owner = escape(str(card.get("owner_email") or "").split("@")[0])
         pct = card.get("progress_percent") or 0
         badges = card_badges(card)
-        body = f"[b]#{card['id']}[/b] {title}\n[dim]{owner} · {pct}%[/dim]"
+        body = f"[b]#{card['id']}[/b]  {title}\n[dim]{owner} · {pct}%[/dim]"
         if badges:
             body += f"\n{badges}"
         super().__init__(Static(body, markup=True))
@@ -168,3 +170,117 @@ class ChoiceModal(ModalScreen[str]):
 
     def action_dismiss_empty(self) -> None:
         self.dismiss("")
+
+
+class PromptModal(ModalScreen[str]):
+    """Ask for one line of text."""
+
+    BINDINGS = [("escape", "dismiss_empty", "Cancel")]
+
+    def __init__(self, title: str, placeholder: str = "") -> None:
+        super().__init__()
+        self._title = title
+        self._placeholder = placeholder
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-box"):
+            yield Label(self._title, id="confirm-title")
+            yield Input(placeholder=self._placeholder, id="prompt-input")
+
+    def on_mount(self) -> None:
+        self.query_one("#prompt-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip())
+
+    def action_dismiss_empty(self) -> None:
+        self.dismiss("")
+
+
+HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
+  c  Chat        b  Board        g  Agents
+  p  People      d  Dashboard    (1-5 work too)
+
+  While you are typing a message, letters are just letters. Use
+  ctrl+t chat · ctrl+b board · ctrl+g agents · ctrl+e people · ctrl+d dash,
+  or press [b]esc[/b] to step out of the message box and use plain letters.
+
+[b]Anywhere[/b]
+  ?  help (ctrl+w)      @  mentions (ctrl+n)
+  r  refresh (ctrl+r)   q  quit (ctrl+q)
+
+[b]Chat[/b]
+  Type and press enter. Typing [b]/[/b] [b]![/b] or [b]@[/b] opens a menu:
+  up/down to choose, enter or tab to pick, esc to close.
+  /ask /deepresearch /code /write /review /checklist /status /clear
+  !add !list !set !done !claim !issue !invite !help
+  @name pings a person · @team pings everyone
+
+[b]Board[/b]
+  j k          card up/down     h l    column left/right
+  n            new objective    s      move to a status
+  a            hand to a coding agent
+  m            merge the PR and finish the card (owner)
+  o            open PR in a browser      y  copy PR link
+
+[b]People[/b]  owners: make owner / make member / remove, and mint invite links.
+[b]Agents[/b]  pick the model behind each /skill, then Save.
+[b]Dashboard[/b]  owner-only: people, models, tokens, open work.
+"""
+
+
+class HelpModal(ModalScreen[None]):
+    BINDINGS = [("escape", "dismiss_none", "Close"), ("question_mark", "dismiss_none", "Close")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-box"):
+            yield Label("AIO — keys and commands", id="confirm-title")
+            yield VerticalScroll(Static(HELP_TEXT, markup=True))
+            yield Button("Close", id="help-close")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+    def action_dismiss_none(self) -> None:
+        self.dismiss(None)
+
+
+class MentionsModal(ModalScreen[int]):
+    """Unread @mentions; picking one returns its chat id."""
+
+    BINDINGS = [("escape", "dismiss_zero", "Close")]
+
+    def __init__(self, mentions: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self._mentions = mentions
+
+    def compose(self) -> ComposeResult:
+        from rich.markup import escape
+
+        with Vertical(id="confirm-box"):
+            yield Label(f"Mentions ({len(self._mentions)})", id="confirm-title")
+            if not self._mentions:
+                yield Static("[dim]nothing unread[/dim]", markup=True)
+                yield Button("Close", id="mentions-close")
+                return
+            items = []
+            for m in self._mentions:
+                who = escape(str(m.get("from") or "?"))
+                where = escape(str(m.get("chat_name") or ""))
+                snippet = escape(str(m.get("snippet") or "").replace("\n", " ")[:70])
+                items.append(
+                    ListItem(Static(f"[b]{who}[/b] [dim]#{where}[/dim]\n{snippet}", markup=True))
+                )
+            yield ListView(*items, id="mention-list")
+            yield Button("Mark all read", id="mentions-read")
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        idx = event.list_view.index or 0
+        if idx < len(self._mentions):
+            self.dismiss(int(self._mentions[idx].get("chat_id") or 0))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(-1 if event.button.id == "mentions-read" else 0)
+
+    def action_dismiss_zero(self) -> None:
+        self.dismiss(0)

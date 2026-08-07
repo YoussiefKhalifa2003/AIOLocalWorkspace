@@ -3,6 +3,11 @@
 # Owner: a@local.test / demo
 # Member: omar@local.test / demo
 
+# --- THE APP: this is the main thing ---
+./aio                           # opens the whole workspace in your terminal
+                                # (first run asks you to sign in)
+# tabs: 1 Chat  2 Board  3 Agents  4 Dashboard   ·   ? help   ctrl+q quit
+
 # --- CLI: sign in and look around ---
 ./aio login --email a@local.test --password demo
 ./aio whoami
@@ -10,8 +15,8 @@
 ./aio projects
 ./aio projects use 1
 
-# --- CLI: the owner loop ---
-./aio tui                       # live dashboard (owner only)
+# --- CLI: the owner loop (scriptable equivalents of the app) ---
+./aio tui                       # same as bare `aio`
 ./aio board                     # columns + repo / PR / branch per card
 ./aio card 12                   # detail, subtasks, claims, workspace path
 ./aio set 12 doing
@@ -27,7 +32,12 @@
 ./aio chat 1 --follow
 ./aio say 1 "standup in 5"
 
-# TUI keys: j/k card  h/l column  a agent_backlog  s status  m merge  o open PR  y copy  r refresh  q quit
+# App keys
+#   tabs      1 Chat · 2 Board · 3 Agents · 4 Dashboard (or F1-F4, or click)
+#   anywhere  F5 help · F6 mentions · ctrl+r refresh · ctrl+q quit
+#   chat      just type; enter sends. Tab completes /skills !commands @names
+#   board     j/k card · h/l column · n new · s status · a agent · m merge
+#             o open PR · y copy PR
 
 # #general - chat + @people + !commands (whispers)
 hey team, standup in 5
