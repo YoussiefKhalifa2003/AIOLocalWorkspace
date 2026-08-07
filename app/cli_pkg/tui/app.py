@@ -135,9 +135,11 @@ ListItem.board-card {
     height: auto;
     background: $surface;
 }
+/* Only the focused column shows a selection — otherwise every column
+   lights up its ListView cursor and the board looks multi-selected. */
 ListItem.board-card.-highlight {
-    border: round $accent;
-    background: $accent 18%;
+    border: round $panel-lighten-2;
+    background: $surface;
 }
 ListView:focus > ListItem.board-card.-highlight {
     border: round $accent;
