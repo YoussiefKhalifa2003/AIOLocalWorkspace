@@ -79,7 +79,8 @@ class Settings(BaseSettings):
     invite_allowed_domain: str = "tatweermea.com"
     outlook_invite_enabled: bool = True
     outlook_storage_state: str = "data/outlook_auth.json"
-    outlook_headless: bool = True
+    # False = show the Chromium window while composing/sending (recommended)
+    outlook_headless: bool = False
     outlook_timeout_seconds: float = 60.0
 
     def resolve_gemini_key(self) -> str:

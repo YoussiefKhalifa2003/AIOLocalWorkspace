@@ -8,41 +8,36 @@ from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, ListItem, ListView, ProgressBar, Static, TextArea
+from textual.widgets import Button, Input, Label, Link, ListItem, ListView, ProgressBar, Static, TextArea
 
 
-def card_badges(card: dict[str, Any], *, compact: bool = True) -> str:
-    """Compact badges for the card face; keep the noisiest bits off the board."""
-    bits: list[str] = []
-    if card.get("status") == "agent_backlog":
-        bits.append("[green]working[/green]")
-    if card.get("pr_number"):
-        bits.append(f"[cyan]PR #{card['pr_number']}[/cyan]")
-    elif card.get("status") == "in_review":
-        bits.append("[dim]no PR[/dim]")
-    if card.get("open_issue_count"):
-        bits.append(f"[red]{card['open_issue_count']}⚠[/red]")
+def card_badges(card: dict[str, Any]) -> str:
+    """At most one status cue on the card face — rest lives in the detail pane."""
     if card.get("can_merge"):
-        bits.append("[yellow]merge[/yellow]")
-    if not compact and card.get("repo_url"):
-        bits.append("[#60a5fa]repo[/#60a5fa]")
-    return " · ".join(bits)
+        return "[yellow]mergeable[/yellow]"
+    if card.get("status") == "agent_backlog":
+        return "[green]working[/green]"
+    if card.get("pr_number"):
+        return f"[cyan]PR #{card['pr_number']}[/cyan]"
+    if card.get("open_issue_count"):
+        return f"[red]{card['open_issue_count']} blocker[/red]"
+    return ""
 
 
 class CardItem(ListItem):
-    """One board card: bordered tile with title + short meta."""
+    """One board card: airy tile — title + owner, optional single badge."""
 
     def __init__(self, card: dict[str, Any]) -> None:
         self.card = card
         title = escape(str(card.get("title") or ""))
-        if len(title) > 42:
-            title = title[:41] + "…"
+        if len(title) > 36:
+            title = title[:35] + "…"
         owner = escape(str(card.get("owner_email") or "").split("@")[0] or "-")
         pct = int(card.get("progress_percent") or 0)
-        badges = card_badges(card)
-        body = f"[b]#{card['id']}[/b]  {title}\n[dim]{owner}[/dim]  [dim]{pct}%[/dim]"
-        if badges:
-            body += f"\n{badges}"
+        badge = card_badges(card)
+        body = f"[b]#{card['id']}[/b]  {title}\n[dim]{owner} · {pct}%[/dim]"
+        if badge:
+            body += f"  {badge}"
         super().__init__(Static(body, markup=True, classes="card-body"))
         self.add_class("board-card")
 
@@ -81,50 +76,77 @@ class BoardColumn(VerticalScroll):
         return getattr(item, "card", None)
 
 
-def _progress_bar(pct: int, width: int = 16) -> str:
+def _progress_bar(pct: int, width: int = 14) -> str:
     pct = max(0, min(100, int(pct)))
     filled = int(round(width * pct / 100))
     return "█" * filled + "░" * (width - filled)
 
 
+def _short_url(url: str, limit: int = 42) -> str:
+    text = (url or "").removeprefix("https://").removeprefix("http://")
+    if len(text) > limit:
+        return text[: limit - 1] + "…"
+    return text
+
+
 class DetailPane(VerticalScroll):
-    """Sectioned card inspector — only shows what exists."""
+    """Card inspector with clickable GitHub links; can be hidden with i / Hide."""
 
     def __init__(self) -> None:
         super().__init__(id="detail")
-        self.border_title = "card"
+        self.border_title = "detail"
+        self._card: dict[str, Any] | None = None
         self.header = Static("Select a card.", id="detail-header", markup=True)
         self.meta = Static("", id="detail-meta", markup=True)
         self.progress = Static("", id="detail-progress", markup=True)
-        self.github = Static("", id="detail-github", markup=True)
+        self.links = Vertical(id="detail-links")
         self.extra = Static("", id="detail-extra", markup=True)
         self.actions = Static("", id="detail-actions", markup=True)
         self._bar = ProgressBar(total=100, show_eta=False, show_percentage=False, id="detail-bar")
+        self._prog_label = Label("progress", classes="detail-label", id="detail-prog-label")
+        self._links_label = Label("links", classes="detail-label", id="detail-links-label")
 
     def compose(self) -> ComposeResult:
+        with Horizontal(id="detail-toolbar"):
+            yield Static("[b]detail[/b]", id="detail-title", markup=True)
+            yield Button("Hide", id="detail-hide")
         yield self.header
         yield self.meta
-        yield Label("progress", classes="detail-label")
+        yield self._prog_label
         yield self._bar
         yield self.progress
-        yield Label("github", classes="detail-label")
-        yield self.github
+        yield self._links_label
+        yield self.links
         yield self.extra
         yield self.actions
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "detail-hide":
+            parent = self.parent
+            if parent is not None and hasattr(parent, "toggle_detail"):
+                parent.toggle_detail()  # type: ignore[union-attr]
+            event.stop()
+
     def show(self, card: dict[str, Any] | None, *, is_owner: bool = False) -> None:
+        self._card = card
+        # Clear previous link widgets so clicks stay in sync with the selected card.
+        try:
+            self.links.remove_children()
+        except Exception:  # noqa: BLE001 - may not be mounted yet
+            pass
+
         if not card:
-            self.border_title = "card"
-            self.header.update("[dim]Select a card to inspect it.[/dim]")
+            self.border_title = "detail"
+            self.header.update("[dim]Click a card, or use j/k · h/l.[/dim]")
             self.meta.update("")
             self.progress.update("")
-            self.github.update("[dim]—[/dim]")
             self.extra.update("")
             self.actions.update(
-                "[dim]j/k cards · h/l columns[/dim]"
-                + ("\n[dim]s move · a agent · n new[/dim]" if is_owner else "")
+                "[dim]i[/dim] hide/show detail"
+                + ("  [dim]n[/dim] new" if is_owner else "")
             )
             self._bar.update(progress=0)
+            self._links_label.display = False
             return
 
         oid = card["id"]
@@ -135,10 +157,10 @@ class DetailPane(VerticalScroll):
 
         owner = escape(str(card.get("owner_email") or "-"))
         blockers = int(card.get("open_issue_count") or 0)
-        meta_bits = [f"[dim]owner[/dim]  {owner}"]
+        meta = f"[dim]owner[/dim]  {owner}"
         if blockers:
-            meta_bits.append(f"[red]{blockers} blocker{'s' if blockers != 1 else ''}[/red]")
-        self.meta.update("\n".join(meta_bits))
+            meta += f"\n[red]{blockers} blocker{'s' if blockers != 1 else ''}[/red]"
+        self.meta.update(meta)
 
         pct = int(card.get("progress_percent") or 0)
         closed = int(card.get("checklist_closed") or 0)
@@ -146,55 +168,61 @@ class DetailPane(VerticalScroll):
         self._bar.update(total=100, progress=pct)
         self.progress.update(
             f"{_progress_bar(pct)}  [b]{pct}%[/b]"
-            + (f"  [dim]{closed}/{total} subtasks[/dim]" if total else "")
+            + (f"  [dim]{closed}/{total}[/dim]" if total else "")
         )
 
-        gh_lines: list[str] = []
-        if card.get("repo_url"):
-            gh_lines.append(f"[dim]repo[/dim]    {escape(str(card['repo_url']))}")
-        if card.get("pr_url"):
-            gh_lines.append(
-                f"[dim]pr[/dim]      [cyan]#{card.get('pr_number') or '?'}[/cyan]  "
-                f"{escape(str(card['pr_url']))}"
+        has_link = False
+        repo = str(card.get("repo_url") or "").strip()
+        pr = str(card.get("pr_url") or "").strip()
+        branch = str(card.get("github_branch") or "").strip()
+        branch_url = str(card.get("branch_url") or "").strip()
+        if not branch_url and repo and branch:
+            branch_url = f"{repo.rstrip('/')}/tree/{branch}"
+
+        try:
+            if repo:
+                self.links.mount(
+                    Link(f"repo  {_short_url(repo)}", url=repo, tooltip=repo, classes="detail-link")
+                )
+                has_link = True
+            if pr:
+                label = f"PR #{card.get('pr_number') or '?'}  {_short_url(pr)}"
+                self.links.mount(Link(label, url=pr, tooltip=pr, classes="detail-link"))
+                has_link = True
+            if branch_url:
+                blabel = branch or _short_url(branch_url)
+                self.links.mount(
+                    Link(f"branch  {blabel}", url=branch_url, tooltip=branch_url, classes="detail-link")
+                )
+                has_link = True
+            self.links.mount(
+                Static(f"[dim]path[/dim]  data/workspaces/obj-{oid}", markup=True)
             )
-        branch = card.get("github_branch") or card.get("branch_url")
-        if branch:
-            gh_lines.append(f"[dim]branch[/dim]  {escape(str(branch))}")
-        if card.get("github_merged_at"):
-            gh_lines.append(f"[dim]merged[/dim]  {escape(str(card['github_merged_at']))}")
-        gh_lines.append(f"[dim]path[/dim]    data/workspaces/obj-{oid}")
-        self.github.update("\n".join(gh_lines) if gh_lines else "[dim]no github links[/dim]")
+        except Exception:  # noqa: BLE001
+            pass
+        self._links_label.display = True
 
         extra: list[str] = []
         if card.get("description"):
-            extra += ["[dim]notes[/dim]", escape(str(card["description"])), ""]
+            extra += ["[dim]notes[/dim]", escape(str(card["description"]))]
         subs = card.get("subtasks") or []
         if subs:
+            if extra:
+                extra.append("")
             extra.append("[dim]subtasks[/dim]")
             extra += [
                 f"  [{'x' if t.get('done') else ' '}] {escape(str(t.get('title') or ''))}"
                 for t in subs
             ]
-        claims = card.get("claimed_paths") or []
-        if claims:
-            if extra:
-                extra.append("")
-            extra.append("[dim]claims[/dim]")
-            extra += [f"  {escape(str(p))}" for p in claims]
         self.extra.update("\n".join(extra).rstrip())
 
-        hints: list[str] = ["[dim]j/k[/dim] cards  [dim]h/l[/dim] columns"]
+        hints = ["[dim]i[/dim] hide detail  [dim]g[/dim] open repo  [dim]o[/dim] open PR"]
         if is_owner:
             hints.append("[dim]s[/dim] move  [dim]a[/dim] agent  [dim]n[/dim] new")
             if card.get("can_merge"):
                 hints.append("[yellow]m[/yellow] merge & done")
-            elif card.get("pr_url"):
-                hints.append("[dim]o[/dim] open PR  [dim]y[/dim] copy")
-        elif card.get("pr_url"):
-            hints.append("[dim]o[/dim] open PR  [dim]y[/dim] copy")
-        else:
-            hints.append("[dim]view only · owner moves cards[/dim]")
         self.actions.update("\n".join(hints))
+        _ = has_link
 
 
 class ObjectiveSetupModal(ModalScreen[dict[str, Any] | None]):
@@ -432,8 +460,9 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
 
 [b]Board[/b]
   j k          card up/down     h l    column left/right
+  click a card to update detail · i hide/show detail
   Owner only:  n new · s move · a agent · m merge
-  Anyone:      o open PR · y copy PR link
+  Anyone:      g open repo · o open PR · y copy PR
   After n / !add a setup popup asks for description + subtasks.
 
 [b]People[/b]  owners: email invite (@domain only via Outlook), roles, remove.
