@@ -52,7 +52,8 @@ Issues
   !resolve <id>            close blocker
 
 Room
-  !invite [N]              mint invite link (N uses, default 1)
+  !invite [N]                          mint invite link (N uses, default 1)
+  !invite <email@domain> [N]           mint + email via Outlook (domain-locked)
   !status / !team          use /status instead (AI catch-up)
   !clear                   clear this chat (channels: only for you)
   !help                    this list
@@ -70,6 +71,21 @@ def _parse_invite_uses(raw: str) -> int:
     if m.group(1):
         return clamp_invite_uses(int(m.group(1)))
     return 1
+
+
+def _parse_invite_email(raw: str) -> tuple[str, int] | None:
+    """Parse `invite user@domain.com` / `invite user@domain.com 3`."""
+    from app.services.workspace_invite import clamp_invite_uses
+
+    m = re.match(
+        r"invite\s+(\S+@\S+)(?:\s+(\d+))?\s*$",
+        raw.strip(),
+        re.I,
+    )
+    if not m:
+        return None
+    uses = clamp_invite_uses(int(m.group(2))) if m.group(2) else 1
+    return m.group(1).strip(), uses
 
 
 def _invite_reply(data: dict) -> str:
@@ -96,6 +112,17 @@ def _invite_reply(data: dict) -> str:
     elif teams:
         reason = teams.get("reason") or f"HTTP {teams.get('status_code')}"
         msg += f"\n\nTeams notify failed: {reason}"
+
+    outlook = data.get("outlook") or {}
+    if outlook.get("ok"):
+        msg += f"\n\nEmailed via Outlook to {outlook.get('to')}."
+    elif outlook.get("skipped") and outlook.get("reason") == "not requested":
+        pass
+    elif outlook.get("skipped"):
+        pass
+    elif outlook:
+        reason = outlook.get("reason") or "send failed"
+        msg += f"\n\nOutlook email failed: {reason}"
     return msg
 
 
@@ -421,6 +448,23 @@ def try_bang_command(db: Session, auth: AuthContext, chat: Chat, text: str, Inte
         issue.status = "resolved"
         issue.resolved_at = utcnow()
         return IntentResult(True, f"Resolved issue #{iid}.")
+
+    parsed_email = _parse_invite_email(raw)
+    if parsed_email is not None:
+        email, uses = parsed_email
+        try:
+            from app.services.invite_domain import assert_allowed_invite_email
+
+            assert_allowed_invite_email(email)
+            tenant = db.query(Tenant).filter(Tenant.id == auth.tenant_id).one()
+            data = mint_invite_link(
+                db, tenant, max_uses=uses, email=email, send_email=True
+            )
+            return IntentResult(True, _invite_reply(data))
+        except ValueError as exc:
+            return IntentResult(True, f"Invite failed: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            return IntentResult(True, f"Invite email failed: {exc}")
 
     if lower == "invite" or re.match(r"invite\s+\d+\s*$", lower):
         try:

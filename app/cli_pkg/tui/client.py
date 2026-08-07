@@ -97,6 +97,9 @@ class ApiClient:
     def post(self, path: str, **kw) -> Any:
         return self._request("POST", path, **kw)
 
+    def put(self, path: str, **kw) -> Any:
+        return self._request("PUT", path, **kw)
+
     def patch(self, path: str, **kw) -> Any:
         return self._request("PATCH", path, **kw)
 
@@ -174,6 +177,13 @@ class ApiClient:
     def invite_link(self, max_uses: int = 1) -> dict[str, Any]:
         return self.post("/workspace/invite-link", params={"max_uses": max_uses})
 
+    def invite_email(self, email: str, max_uses: int = 1) -> dict[str, Any]:
+        return self.post(
+            "/workspace/invite-email",
+            json={"email": email, "max_uses": max_uses},
+            timeout=120.0,
+        )
+
     # board ---------------------------------------------------------------
 
     def board(self) -> dict[str, Any]:
@@ -190,6 +200,24 @@ class ApiClient:
 
     def add_objective(self, title: str) -> dict[str, Any]:
         return self.post(f"/projects/{self.project_id}/objectives", json={"title": title})
+
+    def setup_objective(
+        self,
+        objective_id: int,
+        *,
+        description: str = "",
+        subtasks: list[str] | None = None,
+        dismiss: bool = False,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any]
+        if dismiss:
+            payload = {"dismiss": True}
+        else:
+            payload = {"description": description, "subtasks": list(subtasks or [])}
+        return self.put(
+            f"/projects/{self.project_id}/objectives/{objective_id}/setup",
+            json=payload,
+        )
 
     def set_status(self, objective_id: int, status: str, runner: str = "") -> dict[str, Any]:
         payload: dict[str, Any] = {"status": status}

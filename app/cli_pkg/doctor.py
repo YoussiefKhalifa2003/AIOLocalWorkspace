@@ -130,6 +130,33 @@ def check_coding_backend() -> Check:
     return Check("CODING_BACKEND", True, name)
 
 
+def check_outlook_invite() -> Check:
+    settings = get_settings()
+    domain = (settings.invite_allowed_domain or "").strip() or "(unrestricted)"
+    if not settings.outlook_invite_enabled:
+        return Check("Outlook invite", True, f"disabled · domain={domain}")
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        return Check(
+            "Outlook invite",
+            False,
+            f"playwright missing · domain={domain}",
+            "pip install playwright && playwright install chromium",
+        )
+    from app.services.outlook_invite import outlook_storage_path
+
+    storage = outlook_storage_path()
+    if not storage.is_file():
+        return Check(
+            "Outlook invite",
+            False,
+            f"no session · domain={domain}",
+            "run: aio outlook-login",
+        )
+    return Check("Outlook invite", True, f"ready · domain={domain} · {storage}")
+
+
 def run_checks() -> list[Check]:
     return [
         check_api(),
@@ -140,6 +167,7 @@ def run_checks() -> list[Check]:
         check_codex(),
         check_claude(),
         check_coding_backend(),
+        check_outlook_invite(),
     ]
 
 

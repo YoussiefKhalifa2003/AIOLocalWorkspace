@@ -190,6 +190,11 @@ def join_register_json(token: str, body: RegisterIn, db: Session = Depends(get_d
         raise HTTPException(status_code=400, detail=f"register failed: {exc}") from exc
 
 
+class InviteEmailIn(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    max_uses: int = Field(default=1, ge=1, le=50)
+
+
 @router.get("/workspace/invite-link")
 @router.post("/workspace/invite-link")
 def get_invite_link(
@@ -201,6 +206,39 @@ def get_invite_link(
     tenant = db.query(Tenant).filter(Tenant.id == auth.tenant_id).one()
     data = mint_invite_link(db, tenant, max_uses=max_uses)
     db.commit()
+    return data
+
+
+@router.post("/workspace/invite-email")
+def invite_email(
+    body: InviteEmailIn,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """Mint an invite link and email it via Outlook Web (Playwright). Domain-locked."""
+    from app.services.chat_access import is_workspace_owner
+    from app.services.invite_domain import assert_allowed_invite_email
+
+    if not is_workspace_owner(db, auth):
+        raise HTTPException(status_code=403, detail="only the workspace owner can invite")
+    try:
+        assert_allowed_invite_email(body.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    tenant = db.query(Tenant).filter(Tenant.id == auth.tenant_id).one()
+    data = mint_invite_link(
+        db,
+        tenant,
+        max_uses=body.max_uses,
+        email=body.email,
+        send_email=True,
+    )
+    db.commit()
+    outlook = data.get("outlook") or {}
+    if not outlook.get("ok") and not outlook.get("skipped"):
+        # Link still minted — surface the mail failure clearly.
+        data["email_error"] = outlook.get("reason") or "outlook send failed"
     return data
 
 

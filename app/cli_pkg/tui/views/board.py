@@ -1,4 +1,4 @@
-"""Board tab: columns, card detail, agent dispatch, confirm-merge."""
+"""Board tab: columns, card detail, agent dispatch, confirm-merge, objective setup."""
 
 from __future__ import annotations
 
@@ -12,7 +12,14 @@ from textual.containers import Horizontal, HorizontalScroll
 from textual.widgets import Input
 
 from app.cli_pkg.tui.client import ApiClient, ApiError, board_fingerprint
-from app.cli_pkg.tui.widgets import BoardColumn, ChoiceModal, ConfirmModal, DetailPane, PromptModal
+from app.cli_pkg.tui.widgets import (
+    BoardColumn,
+    ChoiceModal,
+    ConfirmModal,
+    DetailPane,
+    ObjectiveSetupModal,
+    PromptModal,
+)
 from app.config import get_settings
 from app.services.board import BOARD_COLUMNS
 
@@ -30,9 +37,11 @@ class BoardView(Horizontal):
         self._order = list(BOARD_COLUMNS)
         self._index = 0
 
+    @property
+    def is_owner(self) -> bool:
+        return bool(getattr(self.app, "ws", None) and self.app.ws.is_owner)
+
     def compose(self) -> ComposeResult:
-        # Seven columns never fit a terminal at a readable width, so the strip
-        # scrolls sideways and follows the focused column.
         with HorizontalScroll(id="columns"):
             for status in self._order:
                 col = BoardColumn(status)
@@ -40,12 +49,11 @@ class BoardView(Horizontal):
                 yield col
         yield self.detail
 
-    # data ----------------------------------------------------------------
-
     def apply(self, board: dict[str, Any], jobs_today: int) -> None:
         self.board = board
         fp = board_fingerprint(board, jobs_today)
         if fp == self._fingerprint:
+            self.detail.show(self.current_card, is_owner=self.is_owner)
             return
         self._fingerprint = fp
         for col in board.get("columns", []):
@@ -55,7 +63,7 @@ class BoardView(Horizontal):
             widget.set_cards(
                 [{**c, "status": c.get("status") or col["id"]} for c in col.get("cards", [])]
             )
-        self.detail.show(self.current_card)
+        self.detail.show(self.current_card, is_owner=self.is_owner)
 
     def invalidate(self) -> None:
         self._fingerprint = ""
@@ -66,8 +74,6 @@ class BoardView(Horizontal):
             if col.get("id") == "agent_backlog":
                 return len(col.get("cards", []))
         return 0
-
-    # selection -----------------------------------------------------------
 
     @property
     def current_column(self) -> BoardColumn:
@@ -82,7 +88,7 @@ class BoardView(Horizontal):
         column = self.current_column
         column.list_view.focus()
         column.scroll_visible(animate=False)
-        self.detail.show(self.current_card)
+        self.detail.show(self.current_card, is_owner=self.is_owner)
 
     def focus_selected(self) -> None:
         self.focus_column(self._index)
@@ -93,14 +99,21 @@ class BoardView(Horizontal):
     def move_card(self, delta: int) -> None:
         lv = self.current_column.list_view
         lv.action_cursor_down() if delta > 0 else lv.action_cursor_up()
-        self.detail.show(self.current_card)
+        self.detail.show(self.current_card, is_owner=self.is_owner)
 
     def refresh_detail(self) -> None:
-        self.detail.show(self.current_card)
+        self.detail.show(self.current_card, is_owner=self.is_owner)
 
-    # actions -------------------------------------------------------------
+    def _require_owner(self) -> bool:
+        if self.is_owner:
+            return True
+        self.app.set_status("[yellow]owner only — members can browse the board[/yellow]")
+        return False
 
     def add_card(self) -> None:
+        if not self._require_owner():
+            return
+
         def done(title: str | None) -> None:
             if title:
                 self._add_worker(title)
@@ -111,12 +124,44 @@ class BoardView(Horizontal):
     def _add_worker(self, title: str) -> None:
         try:
             obj = self.client.add_objective(title)
-            msg = f"added #{obj.get('id')} {title}"
+            self.app.call_from_thread(self._after_add, obj, "")
         except ApiError as exc:
-            msg = f"[red]{escape(str(exc))}[/red]"
-        self.app.call_from_thread(self.app.after_mutation, msg)
+            self.app.call_from_thread(self._after_add, None, str(exc))
+
+    def _after_add(self, obj: dict[str, Any] | None, error: str) -> None:
+        if error or not obj:
+            self.app.set_status(f"[red]{escape(error or 'add failed')}[/red]")
+            return
+        oid = int(obj["id"])
+        title = str(obj.get("title") or "")
+
+        def setup_done(result: dict[str, Any] | None) -> None:
+            if result is None:
+                result = {"dismiss": True}
+            self._setup_worker(oid, result)
+            self.app.after_mutation(f"added #{oid} {title}")
+
+        self.app.push_screen(ObjectiveSetupModal(oid, title), setup_done)
+
+    @work(thread=True, group="board")
+    def _setup_worker(self, objective_id: int, result: dict[str, Any]) -> None:
+        try:
+            if result.get("dismiss"):
+                self.client.setup_objective(objective_id, dismiss=True)
+            else:
+                self.client.setup_objective(
+                    objective_id,
+                    description=str(result.get("description") or ""),
+                    subtasks=list(result.get("subtasks") or []),
+                )
+        except ApiError as exc:
+            self.app.call_from_thread(
+                self.app.set_status, f"[red]setup failed: {escape(str(exc))}[/red]"
+            )
 
     def change_status(self) -> None:
+        if not self._require_owner():
+            return
         card = self.current_card
         if not card:
             return
@@ -128,6 +173,8 @@ class BoardView(Horizontal):
         self.app.push_screen(ChoiceModal(f"Move #{card['id']} to…", list(BOARD_COLUMNS)), done)
 
     def send_to_agent(self) -> None:
+        if not self._require_owner():
+            return
         card = self.current_card
         if not card:
             return
@@ -159,6 +206,8 @@ class BoardView(Horizontal):
         self.app.call_from_thread(self.app.after_mutation, msg)
 
     def merge_card(self) -> None:
+        if not self._require_owner():
+            return
         card = self.current_card
         if not card:
             return
@@ -211,7 +260,7 @@ class BoardView(Horizontal):
         try:
             self.app.copy_to_clipboard(url)
             self.app.set_status(f"copied {url}")
-        except Exception:  # noqa: BLE001 - clipboard is best effort over SSH
+        except Exception:  # noqa: BLE001
             self.app.set_status(url)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:

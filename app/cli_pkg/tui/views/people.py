@@ -11,7 +11,8 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Label, ListItem, ListView, Static
 
 from app.cli_pkg.tui.client import ApiClient, ApiError
-from app.cli_pkg.tui.widgets import ConfirmModal, PromptModal
+from app.cli_pkg.tui.widgets import ConfirmModal, InviteEmailModal
+from app.config import get_settings
 
 
 class MemberItem(ListItem):
@@ -43,7 +44,7 @@ class PeopleView(VerticalScroll):
         yield self.list_view
         yield self.note
         with Horizontal(id="people-actions"):
-            yield Button("Invite link", variant="primary", id="people-invite")
+            yield Button("Invite", variant="primary", id="people-invite")
             yield Button("Make owner", id="people-promote")
             yield Button("Make member", id="people-demote")
             yield Button("Remove", variant="error", id="people-remove")
@@ -169,15 +170,19 @@ class PeopleView(VerticalScroll):
         if not self.is_owner:
             self.app.set_status("[yellow]owner only[/yellow]")
             return
+        domain = (get_settings().invite_allowed_domain or "tatweermea.com").lstrip("@")
 
-        def got(seats: str | None) -> None:
-            try:
-                count = max(1, min(50, int(seats or "1")))
-            except ValueError:
-                count = 1
-            self._invite_worker(count)
+        def got(result: dict[str, Any] | None) -> None:
+            if result is None:
+                self.app.set_status("invite cancelled")
+                return
+            seats = int(result.get("seats") or 1)
+            if result.get("send_email") and result.get("email"):
+                self._invite_email_worker(str(result["email"]), seats)
+            else:
+                self._invite_worker(seats)
 
-        self.app.push_screen(PromptModal("Invite link — how many seats?", "1"), got)
+        self.app.push_screen(InviteEmailModal(domain=domain), got)
 
     @work(thread=True, group="people")
     def _invite_worker(self, seats: int) -> None:
@@ -185,6 +190,22 @@ class PeopleView(VerticalScroll):
             data = self.client.invite_link(seats)
             url = str(data.get("invite_url") or "")
             msg = f"invite ({seats} seat(s)): {url}"
+        except ApiError as exc:
+            msg = f"[red]{escape(str(exc))}[/red]"
+        self.app.call_from_thread(self._show_invite, msg)
+
+    @work(thread=True, group="people")
+    def _invite_email_worker(self, email: str, seats: int) -> None:
+        try:
+            data = self.client.invite_email(email, seats)
+            url = str(data.get("invite_url") or "")
+            outlook = data.get("outlook") or {}
+            if outlook.get("ok"):
+                msg = f"emailed {email}: {url}"
+            elif data.get("email_error"):
+                msg = f"[yellow]link minted, email failed:[/yellow] {data['email_error']}\n{url}"
+            else:
+                msg = f"invite ({seats}): {url}"
         except ApiError as exc:
             msg = f"[red]{escape(str(exc))}[/red]"
         self.app.call_from_thread(self._show_invite, msg)

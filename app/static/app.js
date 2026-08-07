@@ -2131,10 +2131,30 @@
 
   async function inviteMember() {
     try {
-      const raw = window.prompt("How many people can use this link? (1-50)", "1");
+      const domain = "tatweermea.com";
+      const email = window.prompt(
+        `Colleague email (only @${domain}). Cancel = abort. Empty = link only.`,
+        ""
+      );
+      if (email === null) return;
+      const raw = window.prompt("How many seats? (1-50)", "1");
       if (raw === null) return;
       const n = Math.max(1, Math.min(50, parseInt(raw, 10) || 1));
-      const data = await api(`/workspace/invite-link?max_uses=${n}`, { method: "POST" });
+      const trimmed = (email || "").trim();
+      let data;
+      if (trimmed && !trimmed.startsWith("@")) {
+        data = await api(`/workspace/invite-email`, {
+          method: "POST",
+          body: JSON.stringify({ email: trimmed, max_uses: n }),
+        });
+        if (data.outlook && data.outlook.ok) {
+          setVoiceStatus(`emailed ${trimmed}`);
+        } else if (data.email_error) {
+          setVoiceStatus(`link ready, email failed: ${data.email_error}`);
+        }
+      } else {
+        data = await api(`/workspace/invite-link?max_uses=${n}`, { method: "POST" });
+      }
       if (data.invite_url) showInviteLink(data);
       else setVoiceStatus("no invite link");
     } catch (e) {

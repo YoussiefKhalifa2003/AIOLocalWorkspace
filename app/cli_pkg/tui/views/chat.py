@@ -46,7 +46,7 @@ COMMANDS: tuple[Candidate, ...] = (
     Candidate("!issue ", "!issue", "log a blocker"),
     Candidate("!issues", "!issues", "show blockers"),
     Candidate("!resolve ", "!resolve", "close blocker"),
-    Candidate("!invite ", "!invite", "invite link (optional seats)"),
+    Candidate("!invite ", "!invite", "invite link or email@domain"),
     Candidate("!clear", "!clear", "clear chat (you only in #general)"),
     Candidate("!help", "!help", "list commands"),
 )
@@ -298,15 +298,10 @@ class MessageView(Static):
             return f"{head}\n[dim i]message deleted[/dim i]"
 
         raw = str(m.get("body") or "")
+        # Strip control markers before display; TUI opens the setup modal instead.
+        raw = re.sub(r"\n?\[\[setup:\d+\]\]\s*$", "", raw)
+        raw = re.sub(r"\n?\[\[confirm:[0-9,\s]+\]\]\s*$", "", raw)
         body = render_markdown(raw) if agent else escape(raw)
-        # The web UI turns these markers into buttons; in the terminal the
-        # instruction is clearer than a dead widget.
-        body = re.sub(r"\\\[\\\[setup:(\d+)\\\]\\\]", r"[dim](setup card #\1 — !set \1 doing)[/dim]", body)
-        body = re.sub(
-            r"\\\[\\\[confirm:([\d,]+)\\\]\\\]",
-            r"[dim](confirm — reply !done \1 or !keep \1)[/dim]",
-            body,
-        )
         lines = [f"{head}\n{body}"]
         for att in m.get("attachments") or []:
             lines.append(f"  [dim]📎 {escape(str(att.get('filename') or ''))}[/dim]")
@@ -330,6 +325,8 @@ class ChatView(Vertical):
         self._last_sync = ""
         self._sending = False
         self._pending: Static | None = None
+        self._setup_opened: set[int] = set()
+        self._setup_busy = False
 
         self.sidebar = VerticalScroll(id="chat-sidebar")
         self.chat_list = ListView(id="chat-list")
@@ -455,8 +452,52 @@ class ChatView(Vertical):
             view = MessageView(row, self.my_email)
             self._views[mid] = view
             self.transcript.mount(view)
+            self._maybe_open_setup(row)
         if rows and at_bottom:
             self.call_after_refresh(self.transcript.scroll_end, animate=False)
+
+    def _maybe_open_setup(self, row: dict[str, Any]) -> None:
+        if self._setup_busy:
+            return
+        body = str(row.get("body") or "")
+        match = re.search(r"\[\[setup:(\d+)\]\]", body)
+        if not match:
+            return
+        oid = int(match.group(1))
+        if oid in self._setup_opened:
+            return
+        self._setup_opened.add(oid)
+        title_m = re.search(r"Added objective #\d+:\s*(.+?)(?:\s*\(yours\))?$", body, re.M)
+        title = (title_m.group(1).strip() if title_m else f"Objective #{oid}")
+        self._setup_busy = True
+
+        def done(result: dict[str, Any] | None) -> None:
+            self._setup_busy = False
+            if result is None:
+                result = {"dismiss": True}
+            self._setup_worker(oid, result)
+
+        from app.cli_pkg.tui.widgets import ObjectiveSetupModal
+
+        self.app.push_screen(ObjectiveSetupModal(oid, title), done)
+
+    @work(thread=True, group="chat-setup")
+    def _setup_worker(self, objective_id: int, result: dict[str, Any]) -> None:
+        try:
+            if result.get("dismiss"):
+                self.client.setup_objective(objective_id, dismiss=True)
+                msg = f"#{objective_id} setup skipped"
+            else:
+                self.client.setup_objective(
+                    objective_id,
+                    description=str(result.get("description") or ""),
+                    subtasks=list(result.get("subtasks") or []),
+                )
+                msg = f"#{objective_id} setup saved"
+        except ApiError as exc:
+            msg = f"[red]setup failed: {escape(str(exc))}[/red]"
+        self.app.call_from_thread(self.app.set_status, msg)
+        self.app.call_from_thread(self.app.refresh_workspace)
 
     # sending -------------------------------------------------------------
 
