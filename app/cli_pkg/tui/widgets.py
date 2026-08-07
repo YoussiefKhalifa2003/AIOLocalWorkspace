@@ -522,8 +522,10 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
   Type [b]/[/b] [b]![/b] or [b]@[/b] — a dropdown opens (just like the website).
   up/down to choose, enter or tab to pick, esc to close.
   /ask /deepresearch /code /write /review /checklist /status /clear
-  !add !list !set !done !claim !issue !invite !help
+  !add !list !set !done !claim !issue !invite !attach !attach-clear !help
   @name pings a person · @team pings everyone
+  Click [b]Attach[/b] (or [b]ctrl+f[/b] / [b]!attach[/b]) to pick a file in a
+  native file dialog — code, pdf, docx, images… Then send your message / skill.
 
 [b]Board[/b]
   j k          card up/down     h l    column left/right

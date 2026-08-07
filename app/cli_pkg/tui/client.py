@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -19,6 +20,25 @@ from app.cli_pkg.session import auth_headers, resolve_base_url
 
 class ApiError(RuntimeError):
     """A request failed; the message is already human readable."""
+
+
+def resolve_attach_path(raw: str | Path) -> Path:
+    """Resolve a user-typed path for CLI attach (cwd-relative, ~, Windows paths)."""
+    text = str(raw or "").strip().strip('"').strip("'")
+    if not text:
+        raise ApiError("path required")
+    p = Path(text).expanduser()
+    if not p.is_absolute():
+        p = Path.cwd() / p
+    try:
+        p = p.resolve(strict=False)
+    except OSError as exc:
+        raise ApiError(f"invalid path: {exc}") from exc
+    if not p.exists():
+        raise ApiError(f"file not found: {p}")
+    if not p.is_file():
+        raise ApiError(f"not a file: {p}")
+    return p
 
 
 @dataclass
@@ -168,6 +188,27 @@ class ApiClient:
             json={"body": body, "speak": False, "attachment_ids": attachment_ids or []},
             timeout=300.0,  # a /deepresearch runs synchronously inside this call
         )
+
+    def upload_attachment(self, chat_id: int, path: str | Path) -> dict[str, Any]:
+        """Upload a local file to the chat (multipart). Returns attachment dict."""
+        p = resolve_attach_path(path)
+        data = p.read_bytes()
+        try:
+            with httpx.Client(
+                base_url=self.base_url, headers=self.headers, timeout=60.0
+            ) as client:
+                r = client.post(
+                    f"/chats/{chat_id}/attachments",
+                    files={"file": (p.name, data, None)},
+                )
+        except httpx.HTTPError as exc:
+            raise ApiError(f"{exc.__class__.__name__}: {exc}") from exc
+        if r.status_code >= 400:
+            raise ApiError(_detail(r) or "upload failed")
+        out = r.json()
+        if not isinstance(out, dict):
+            raise ApiError("upload failed: bad response")
+        return out
 
     def create_chat(self, name: str) -> dict[str, Any]:
         return self.post("/chats", json={"name": name, "kind": "channel"})

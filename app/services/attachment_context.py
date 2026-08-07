@@ -7,7 +7,12 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.db.models import ChatAttachment
-from app.services.attachments import absolute_path, is_image_content_type
+from app.services.attachments import (
+    DOCX_CONTENT_TYPE,
+    absolute_path,
+    is_image_content_type,
+    is_text_extractable,
+)
 
 MAX_CHARS_PER_FILE = 12_000
 MAX_CHARS_TOTAL = 36_000
@@ -49,8 +54,32 @@ def _read_pdf_text(path: Path) -> str:
     return "\n\n".join(parts).strip()
 
 
+def _read_docx_text(path: Path) -> str:
+    try:
+        from docx import Document
+    except ImportError as exc:
+        raise RuntimeError("python-docx not installed") from exc
+    doc = Document(str(path))
+    parts: list[str] = []
+    for para in doc.paragraphs:
+        t = (para.text or "").strip()
+        if t:
+            parts.append(t)
+        if sum(len(p) for p in parts) >= MAX_CHARS_PER_FILE:
+            break
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [((c.text or "").strip()) for c in row.cells]
+            line = " | ".join(c for c in cells if c)
+            if line:
+                parts.append(line)
+            if sum(len(p) for p in parts) >= MAX_CHARS_PER_FILE:
+                break
+    return "\n".join(parts).strip()
+
+
 def extract_attachment_text(row: ChatAttachment) -> tuple[str, str]:
-    """Return (kind, body). kind is text|pdf|image|binary|error."""
+    """Return (kind, body). kind is text|pdf|docx|image|binary|error."""
     try:
         path = absolute_path(row.storage_path)
     except Exception as exc:
@@ -65,10 +94,10 @@ def extract_attachment_text(row: ChatAttachment) -> tuple[str, str]:
         return (
             "image",
             (
-                f"(Image file - binary content is not pasted into the prompt. "
-                f"Filename/type/size are authoritative hints. "
-                f"If the user asks what “this” is, treat this image as the referent; "
-                f"do not invent an unrelated paper or document.)"
+                "(Image file - binary content is not pasted into the prompt. "
+                "Filename/type/size are authoritative hints. "
+                "If the user asks what “this” is, treat this image as the referent; "
+                "do not invent an unrelated paper or document.)"
             ),
         )
 
@@ -84,7 +113,16 @@ def extract_attachment_text(row: ChatAttachment) -> tuple[str, str]:
             )
         return "pdf", _clip(text)
 
-    if ctype.startswith("text/") or name.endswith((".txt", ".md")):
+    if ctype == DOCX_CONTENT_TYPE or name.endswith(".docx"):
+        try:
+            text = _read_docx_text(path)
+        except Exception as exc:
+            return "error", f"(Word docx extraction failed: {exc})"
+        if not text.strip():
+            return "docx", "(docx opened but no extractable text.)"
+        return "docx", _clip(text)
+
+    if is_text_extractable(row.filename or "", ctype):
         try:
             return "text", _clip(_read_text_file(path))
         except Exception as exc:
@@ -112,7 +150,7 @@ def build_attachments_prompt_block(
 
     lines = [
         "ATTACHED FILES (use these as the primary source when the user says "
-        "\"this\", \"the file\", \"the document\", or similar):",
+        '"this", "the file", "the document", or similar):',
     ]
     used = 0
     for row in rows:
