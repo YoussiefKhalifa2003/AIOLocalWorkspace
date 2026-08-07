@@ -61,8 +61,11 @@ class PeopleView(VerticalScroll):
 
     def set_members(self, members: list[dict[str, Any]], me: dict[str, Any]) -> None:
         self.me = me
-        if members == self.members:
+        signature = [(m.get("user_id"), m.get("role"), m.get("email"), m.get("name")) for m in members]
+        if signature == getattr(self, "_signature", None):
+            self._sync_buttons()
             return
+        self._signature = signature
         index = self.list_view.index or 0
         self.members = members
         self.list_view.clear()
@@ -73,10 +76,20 @@ class PeopleView(VerticalScroll):
             self.list_view.index = min(index, len(members) - 1)
         owners = sum(1 for m in members if m.get("role") == "owner")
         self.note.update(
-            f"[dim]{len(members)} member(s) · {owners} owner(s)[/dim]"
+            f"[dim]{len(members)} member(s) · {owners} owner(s) · pick someone, then use the buttons[/dim]"
             if self.is_owner
-            else "[dim]Only owners can change roles or remove people.[/dim]"
+            else "[dim]Only owners can invite, change roles, or remove people.[/dim]"
         )
+        self._sync_buttons()
+
+    def _sync_buttons(self) -> None:
+        """Owners see the admin buttons; members don't."""
+        for button_id in ("people-invite", "people-promote", "people-demote", "people-remove"):
+            try:
+                btn = self.query_one(f"#{button_id}", Button)
+            except Exception:
+                continue
+            btn.display = self.is_owner
 
     # actions --------------------------------------------------------------
 
@@ -121,6 +134,9 @@ class PeopleView(VerticalScroll):
     def remove_member(self) -> None:
         member = self._guard()
         if member is None:
+            return
+        if member.get("user_id") == self.me.get("user_id"):
+            self.app.set_status("[yellow]you can't remove yourself[/yellow]")
             return
         email = str(member.get("email") or "")
 

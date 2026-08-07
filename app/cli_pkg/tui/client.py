@@ -179,9 +179,14 @@ class ApiClient:
     def board(self) -> dict[str, Any]:
         return self.get(f"/projects/{self.project_id}/board")
 
-    def jobs_summary(self) -> int:
+    def jobs_summary(self) -> dict[str, Any]:
         data = self._safe(f"/projects/{self.project_id}/jobs/summary", {}) or {}
-        return int(data.get("total") or 0)
+        if not isinstance(data, dict):
+            return {"total": 0, "by_status": {}, "by_model": []}
+        return data
+
+    def jobs_total(self) -> int:
+        return int(self.jobs_summary().get("total") or 0)
 
     def add_objective(self, title: str) -> dict[str, Any]:
         return self.post(f"/projects/{self.project_id}/objectives", json={"title": title})
@@ -216,11 +221,73 @@ class ApiClient:
     def analytics(self) -> dict[str, Any]:
         return self.get(f"/projects/{self.project_id}/analytics")
 
+    def metrics_series(self, limit: int = 60) -> dict[str, Any]:
+        return self.get(
+            f"/projects/{self.project_id}/metrics/series", params={"limit": limit}
+        )
+
     def assign(self, objective_id: int, assignee_user_id: int) -> dict[str, Any]:
         return self.post(
             f"/projects/{self.project_id}/dashboard/assign",
             json={"objective_id": objective_id, "assignee_user_id": assignee_user_id},
         )
+
+
+class RingBuffer:
+    """Fixed-size series for client-side WIP animation between polls."""
+
+    def __init__(self, size: int = 60) -> None:
+        self.size = max(1, int(size))
+        self._data: list[float] = []
+
+    def extend(self, values: list[float] | list[int]) -> None:
+        self._data.extend(float(v) for v in values)
+        if len(self._data) > self.size:
+            self._data = self._data[-self.size :]
+
+    def append(self, value: float | int) -> None:
+        self.extend([value])
+
+    def values(self) -> list[float]:
+        return list(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+
+def column_counts(board: dict[str, Any]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for col in board.get("columns") or []:
+        out[str(col.get("id") or "")] = len(col.get("cards") or [])
+    return out
+
+
+def live_fingerprint(
+    analytics: dict[str, Any],
+    series: dict[str, Any],
+    columns: dict[str, int],
+    jobs_summary: dict[str, Any],
+) -> str:
+    return json.dumps(
+        {
+            "summary": (analytics or {}).get("summary") or {},
+            "people": [
+                [p.get("email"), p.get("tokens"), p.get("jobs")]
+                for p in (analytics or {}).get("people") or []
+            ],
+            "models": [
+                [m.get("model"), m.get("runs"), m.get("success"), m.get("fail")]
+                for m in (analytics or {}).get("models") or []
+            ],
+            "buckets": (series or {}).get("buckets") or {},
+            "cols": columns,
+            "jobs": {
+                "total": (jobs_summary or {}).get("total"),
+                "by_status": (jobs_summary or {}).get("by_status") or {},
+            },
+        },
+        sort_keys=True,
+    )
 
 
 def board_fingerprint(board: dict[str, Any], jobs_today: Any = "") -> str:

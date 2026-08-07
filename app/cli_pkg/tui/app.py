@@ -1,8 +1,8 @@
 """AIO in the terminal: the whole workspace as a full-screen app.
 
-Chat, Board, Agents and Dashboard are the same four tabs as the web UI and
-talk to the same API. Every member can run it; owner-only surfaces (Dashboard,
-merge) are gated individually rather than by locking the whole app.
+Chat, Board, Agents, People, Dashboard and Live are the same surfaces as the
+web UI (plus a chart board) and talk to the same API. Every member can run it;
+owner-only surfaces (Dashboard, Live, merge) are gated individually.
 """
 
 from __future__ import annotations
@@ -33,16 +33,18 @@ from app.cli_pkg.tui.views.agents import AgentsView
 from app.cli_pkg.tui.views.board import BoardView
 from app.cli_pkg.tui.views.chat import ChatView
 from app.cli_pkg.tui.views.dashboard import DashboardView
+from app.cli_pkg.tui.views.live import LiveView
 from app.cli_pkg.tui.views.people import PeopleView
 from app.cli_pkg.tui.widgets import HelpModal, MentionsModal
 from app.config import get_settings
 
 TABS: list[tuple[str, str]] = [
-    ("chat", "Chat"),
-    ("board", "Board"),
-    ("agents", "Agents"),
-    ("people", "People"),
-    ("dashboard", "Dashboard"),
+    ("chat", "Chat  c"),
+    ("board", "Board  b"),
+    ("agents", "Agents  g"),
+    ("people", "People  p"),
+    ("dashboard", "Dash  d"),
+    ("live", "Live  v"),
 ]
 
 # Letter shortcuts work whenever you are not typing a message; the ctrl+ pair
@@ -53,6 +55,7 @@ TAB_KEYS: list[tuple[str, str, str]] = [
     ("g", "ctrl+g", "agents"),
     ("p", "ctrl+e", "people"),
     ("d", "ctrl+d", "dashboard"),
+    ("v", "ctrl+v", "live"),
 ]
 
 STYLES = """
@@ -124,6 +127,28 @@ ListView:focus > ListItem.-highlight { background: $accent 45%; }
 }
 DataTable { height: auto; max-height: 14; margin: 0 1; }
 #dash-note { padding: 0 1; }
+
+/* live ------------------------------------------------------------------ */
+#live-note { padding: 0 1; }
+#gauge-row { height: 6; padding: 0 1; }
+.gauge-card {
+    width: 1fr; height: 5; margin-right: 1;
+    border: round $panel-lighten-2; padding: 0 1;
+}
+.gauge-value { text-align: center; height: 1; }
+#spark-row { height: 16; padding: 0 1; margin-top: 1; }
+.spark-panel {
+    width: 1fr; height: 1fr; margin-right: 1;
+    border: round $panel-lighten-2; padding: 0 1;
+}
+#wip-col { width: 1fr; height: 1fr; }
+.spark-label { color: $text-muted; height: 1; }
+Sparkline { height: 2; margin-bottom: 1; }
+#bar-row { height: 12; padding: 0 1; margin-top: 1; }
+.bar-panel {
+    width: 1fr; height: 1fr; margin-right: 1;
+    border: round $panel-lighten-2; padding: 0 1;
+}
 
 /* modals ---------------------------------------------------------------- */
 #confirm-box, #help-box, #login-box {
@@ -210,21 +235,24 @@ class AioApp(App[None]):
         ("g", "tab_agents", "g agents"),
         ("p", "tab_people", "p people"),
         ("d", "tab_dashboard", "d dash"),
+        ("v", "tab_live", "v live"),
         ("question_mark", "help", "? help"),
-        ("at", "mentions", ""),
         ("r", "refresh_all", ""),
         ("q", "quit", ""),
+        # Mentions: ctrl+n only — bare @ must stay free for the chat picker.
         # Same tabs while typing, so you never have to leave the message box.
         ("ctrl+t", "tab_chat", ""),
         ("ctrl+b", "tab_board", ""),
         ("ctrl+g", "tab_agents", ""),
         ("ctrl+e", "tab_people", ""),
         ("ctrl+d", "tab_dashboard", ""),
+        ("ctrl+v", "tab_live", ""),
         ("1", "tab_chat", ""),
         ("2", "tab_board", ""),
         ("3", "tab_agents", ""),
         ("4", "tab_people", ""),
         ("5", "tab_dashboard", ""),
+        ("6", "tab_live", ""),
         # board
         ("j", "board_down", ""),
         ("k", "board_up", ""),
@@ -251,6 +279,7 @@ class AioApp(App[None]):
         self.agents_view = AgentsView(client)
         self.people_view = PeopleView(client)
         self.dashboard_view = DashboardView(client)
+        self.live_view = LiveView(client)
         self.status_line = Static("", id="status-line", markup=True)
         self.switcher = ContentSwitcher(initial="chat", id="body")
 
@@ -263,6 +292,7 @@ class AioApp(App[None]):
             yield self.agents_view
             yield self.people_view
             yield self.dashboard_view
+            yield self.live_view
         yield self.status_line
         yield Footer()
 
@@ -282,9 +312,13 @@ class AioApp(App[None]):
         return self.switcher.current or "chat"
 
     def show_tab(self, key: str) -> None:
-        if key == "dashboard" and not self.ws.is_owner:
-            self.set_status("[yellow]Dashboard is owner-only[/yellow]")
+        if key in ("dashboard", "live") and not self.ws.is_owner:
+            label = "Dashboard" if key == "dashboard" else "Live"
+            self.set_status(f"[yellow]{label} is owner-only[/yellow]")
             return
+        prev = self.switcher.current
+        if prev == "live" and key != "live":
+            self.live_view.stop_polling()
         self.switcher.current = key
         tabs = self.query_one("#tabs", Tabs)
         if tabs.active != key:
@@ -298,6 +332,8 @@ class AioApp(App[None]):
             self.call_after_refresh(self.people_view.list_view.focus)
         elif key == "dashboard":
             self.dashboard_view.load()
+        elif key == "live":
+            self.live_view.start_polling()
         self.set_status("")
 
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
@@ -319,6 +355,9 @@ class AioApp(App[None]):
 
     def action_tab_dashboard(self) -> None:
         self.show_tab("dashboard")
+
+    def action_tab_live(self) -> None:
+        self.show_tab("live")
 
     def action_help(self) -> None:
         self.push_screen(HelpModal())
@@ -344,7 +383,7 @@ class AioApp(App[None]):
     def refresh_board(self) -> None:
         try:
             board = self.client.board()
-            jobs = self.client.jobs_summary()
+            jobs = self.client.jobs_total()
             error = ""
         except ApiError as exc:
             board, jobs, error = {}, 0, str(exc)
@@ -362,6 +401,7 @@ class AioApp(App[None]):
     def _tick_dashboard(self) -> None:
         if self.active_tab == "dashboard" and self.ws.is_owner:
             self.dashboard_view.load()
+        # Live has its own 2s timer via start_polling().
 
     def action_refresh_all(self) -> None:
         self.board_view.invalidate()
@@ -370,6 +410,8 @@ class AioApp(App[None]):
         self.refresh_board()
         if self.active_tab == "dashboard":
             self.dashboard_view.load()
+        elif self.active_tab == "live":
+            self.live_view.load()
 
     def after_mutation(self, message: str) -> None:
         self.board_view.invalidate()

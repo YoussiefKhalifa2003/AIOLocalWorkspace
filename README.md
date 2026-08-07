@@ -7,7 +7,7 @@ the web UI, same API behind them, no browser.
 
 ```
 ┌ AIO ──────────────────────── a@local.test · project 1 ── 22:41 ┐
-│  Chat   Board   Agents   Dashboard                             │
+│  Chat  Board  Agents  People  Dash  Live                       │
 ├──────────────┬─────────────────────────────────────────────────┤
 │ CHATS        │ #general                                        │
 │  # general   │  Alice   09:14   standup in 5                   │
@@ -63,26 +63,25 @@ rm -f aio.db && ./aio seed
 
 | Key | Does |
 |-----|------|
-| `1` `2` `3` `4` (or `F1`–`F4`, or click) | Chat · Board · Agents · Dashboard |
-| `F5` | keys and commands |
-| `F6` | unread mentions; pick one to jump to it |
-| `ctrl+r` · `ctrl+q` | refresh now · quit |
+| `c` `b` `g` `p` `d` `v` (or `1`–`6`, or click) | Chat · Board · Agents · People · Dash · Live |
+| `?` | keys and commands |
+| `ctrl+n` | unread mentions |
+| `ctrl+r` · `q` | refresh now · quit |
 
 **Chat** is the default tab: type and press enter. `/ask`, `/deepresearch`,
 `/code`, `/write`, `/review`, `/checklist`, `/status` run agents; `!add`, `!set`,
 `!claim`, `!issue`, `!invite` and friends run commands; `@name` pings someone,
-and `Tab` completes any of them. While an agent is thinking you get a live
-placeholder instead of a frozen screen, and replies render with real formatting.
-Function keys are used for help and mentions because inside the message box `?`
-and `@` are simply characters you are typing.
+and typing `/` `!` or `@` opens a dropdown. While an agent is thinking you get a
+live placeholder instead of a frozen screen.
 
 **Board** keys: `j`/`k` card, `h`/`l` column, `n` new objective, `s` set status,
 `a` hand to a coding agent, `m` **Merge & done** (confirm first), `o` open the
 PR, `y` copy its URL. Columns scroll sideways; the strip follows your selection.
 
-**Agents** picks the model behind each `/skill`. **Dashboard** is owner-only —
-people, models, tokens, open work. Everything polls in the background and only
-redraws when something actually changed, so it never flickers.
+**Agents** picks the model behind each `/skill`. **Dashboard** (`d`) is
+owner-only tables — people, models, tokens, open work. **Live** (`v`) is the
+owner-only chart board — gauges, sparklines, and WIP bars that poll every 2s.
+Everything only redraws when something actually changed, so it never flickers.
 
 ### The same loop, scripted
 

@@ -339,7 +339,7 @@ class ChatView(Vertical):
         self.picker = CommandPicker()
         self.composer = Composer(
             self.picker,
-            placeholder="message · type / ! or @ for a menu · esc for shortcuts",
+            placeholder="type /  !  or  @  for a menu · enter to send · esc for shortcuts",
             id="composer",
         )
 

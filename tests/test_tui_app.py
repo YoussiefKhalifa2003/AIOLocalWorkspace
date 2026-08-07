@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 
-from app.cli_pkg.tui.client import ApiClient, ApiError, Workspace, login
+from app.cli_pkg.tui.client import (
+    ApiClient,
+    ApiError,
+    RingBuffer,
+    Workspace,
+    live_fingerprint,
+    login,
+)
 from app.cli_pkg.tui.views.chat import (
     active_prefix,
     candidates_for,
@@ -156,6 +165,43 @@ def test_login_error_is_readable(mock_http):
     assert "bad credentials" in str(exc.value)
 
 
+def test_jobs_summary_returns_full_dict(mock_http):
+    mock_http(
+        lambda r: httpx.Response(
+            200,
+            json={
+                "project_id": 1,
+                "total": 4,
+                "by_status": {"done": 3},
+                "by_model": [{"model": "m", "total": 4, "done": 3, "failed": 1}],
+            },
+        )
+    )
+    client = ApiClient(project_id=1, api_key="k", base_url="http://api")
+    data = client.jobs_summary()
+    assert data["total"] == 4
+    assert data["by_status"]["done"] == 3
+    assert client.jobs_total() == 4
+
+
+def test_ring_buffer_caps_and_preserves_order():
+    buf = RingBuffer(3)
+    buf.extend([1, 2, 3, 4])
+    assert buf.values() == [2.0, 3.0, 4.0]
+    buf.append(5)
+    assert buf.values() == [3.0, 4.0, 5.0]
+
+
+def test_live_fingerprint_changes_when_tokens_move():
+    a = {"summary": {"tokens_total": 1}, "people": [], "models": []}
+    s = {"buckets": {"tokens": [1]}}
+    cols = {"todo": 1}
+    jobs = {"total": 1, "by_status": {}}
+    first = live_fingerprint(a, s, cols, jobs)
+    a2 = {"summary": {"tokens_total": 2}, "people": [], "models": []}
+    assert first != live_fingerprint(a2, s, cols, jobs)
+
+
 # rendering ----------------------------------------------------------------
 
 
@@ -280,12 +326,24 @@ class _StubClient(ApiClient):
             "github_repo": "acme/widgets",
             "columns": [
                 {"id": "todo", "cards": [{"id": 5, "title": "Ship", "owner_email": "a@local.test"}]},
+                {"id": "doing", "cards": []},
+                {"id": "blocked", "cards": []},
+                {"id": "agent_backlog", "cards": [{"id": 9, "title": "Agent"}]},
                 {"id": "in_review", "cards": []},
+                {"id": "done", "cards": []},
             ],
         }
 
     def jobs_summary(self):
-        return 7
+        return {
+            "project_id": 1,
+            "total": 7,
+            "by_status": {"done": 5, "failed": 1, "queued": 1},
+            "by_model": [],
+        }
+
+    def jobs_total(self):
+        return int(self.jobs_summary().get("total") or 0)
 
     def agent_models(self):
         return {
@@ -297,10 +355,42 @@ class _StubClient(ApiClient):
 
     def analytics(self):
         return {
-            "summary": {"members": 2, "tokens_total": 10},
-            "people": [{"name": "Alice", "role": "owner", "jobs": 1, "tokens": 10, "models": []}],
-            "models": [],
+            "summary": {
+                "members": 2,
+                "open_tasks": 3,
+                "jobs_total": 7,
+                "jobs_done": 5,
+                "jobs_failed": 1,
+                "tokens_total": 1200,
+                "model_count": 1,
+            },
+            "people": [{"name": "Alice", "role": "owner", "jobs": 1, "tokens": 1200, "models": []}],
+            "models": [
+                {
+                    "model": "gemini-env",
+                    "backend": "gemini",
+                    "runs": 7,
+                    "tokens": 1200,
+                    "success": 5,
+                    "fail": 1,
+                }
+            ],
             "open_tasks": [],
+        }
+
+    def metrics_series(self, limit: int = 60):
+        return {
+            "project_id": 1,
+            "points": [
+                {"t": "2026-08-07T08:00:00Z", "tokens": 10, "duration_ms": 100, "success": True},
+                {"t": "2026-08-07T08:01:00Z", "tokens": 40, "duration_ms": 200, "success": False},
+                {"t": "2026-08-07T08:02:00Z", "tokens": 90, "duration_ms": 300, "success": True},
+            ],
+            "buckets": {
+                "tokens": [10, 40, 90],
+                "duration_ms": [100, 200, 300],
+                "success_rate": [1.0, 0.0, 1.0],
+            },
         }
 
 
@@ -337,9 +427,17 @@ async def test_app_renders_every_tab_for_the_owner():
         assert app.switcher.current == "dashboard"
         assert app.dashboard_view.people.row_count == 1
 
+        app.show_tab("live")
+        await pilot.pause()
+        await asyncio.sleep(0.5)
+        await pilot.pause()
+        assert app.switcher.current == "live"
+        assert list(app.live_view.tokens_spark.data) == [10.0, 40.0, 90.0]
+        app.live_view.stop_polling()
+
 
 @pytest.mark.asyncio
-async def test_dashboard_is_owner_only_but_the_rest_of_the_app_is_not():
+async def test_dashboard_and_live_are_owner_only_but_the_rest_of_the_app_is_not():
     app = await _boot(owner=False)
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.pause()
@@ -349,10 +447,40 @@ async def test_dashboard_is_owner_only_but_the_rest_of_the_app_is_not():
         await pilot.pause()
         assert app.switcher.current != "dashboard"
 
-        for tab in ("board", "agents", "chat"):
+        app.show_tab("live")
+        await pilot.pause()
+        assert app.switcher.current != "live"
+
+        for tab in ("board", "agents", "chat", "people"):
             app.show_tab(tab)
             await pilot.pause()
             assert app.switcher.current == tab
+
+
+@pytest.mark.asyncio
+async def test_live_fingerprint_skips_noop_redraw():
+    app = await _boot(owner=True)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        app.show_tab("live")
+        await pilot.pause()
+        await asyncio.sleep(0.4)
+        await pilot.pause()
+        first = app.live_view.snapshot_fingerprint()
+        assert first
+        before_wip = len(app.live_view._wip_ring)
+        # Second apply with identical data should keep the fingerprint.
+        app.live_view._apply(
+            app.client.analytics(),
+            app.client.metrics_series(),
+            app.client.board(),
+            app.client.jobs_summary(),
+            "",
+        )
+        assert app.live_view.snapshot_fingerprint() == first
+        # WIP ring still advances even on a no-op fingerprint path.
+        assert len(app.live_view._wip_ring) == before_wip + 1
+        app.live_view.stop_polling()
 
 
 @pytest.mark.asyncio

@@ -199,18 +199,19 @@ class PromptModal(ModalScreen[str]):
 
 HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
   c  Chat        b  Board        g  Agents
-  p  People      d  Dashboard    (1-5 work too)
+  p  People      d  Dashboard    v  Live
+  (1-6 work too)
 
   While you are typing a message, letters are just letters. Use
-  ctrl+t chat · ctrl+b board · ctrl+g agents · ctrl+e people · ctrl+d dash,
-  or press [b]esc[/b] to step out of the message box and use plain letters.
+  ctrl+t chat · ctrl+b board · ctrl+g agents · ctrl+e people ·
+  ctrl+d dash · ctrl+v live, or press [b]esc[/b] then the letter.
 
 [b]Anywhere[/b]
-  ?  help (ctrl+w)      @  mentions (ctrl+n)
+  ?  help (or ctrl+w)   ctrl+n  unread mentions
   r  refresh (ctrl+r)   q  quit (ctrl+q)
 
 [b]Chat[/b]
-  Type and press enter. Typing [b]/[/b] [b]![/b] or [b]@[/b] opens a menu:
+  Type [b]/[/b] [b]![/b] or [b]@[/b] — a dropdown opens (just like the website).
   up/down to choose, enter or tab to pick, esc to close.
   /ask /deepresearch /code /write /review /checklist /status /clear
   !add !list !set !done !claim !issue !invite !help
@@ -225,7 +226,8 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
 
 [b]People[/b]  owners: make owner / make member / remove, and mint invite links.
 [b]Agents[/b]  pick the model behind each /skill, then Save.
-[b]Dashboard[/b]  owner-only: people, models, tokens, open work.
+[b]Dashboard[/b]  owner-only tables: people, models, tokens, open work.
+[b]Live[/b]  owner-only charts: gauges, sparklines, WIP bars (polls every 2s).
 """
 
 

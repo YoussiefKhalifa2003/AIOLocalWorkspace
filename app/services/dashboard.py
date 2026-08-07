@@ -164,3 +164,54 @@ def build_owner_dashboard(db: Session, auth: AuthContext, *, project_id: int) ->
         "open_tasks": open_tasks,
         "all_tasks": all_tasks,
     }
+
+
+def build_metrics_series(
+    db: Session, auth: AuthContext, *, project_id: int, limit: int = 60
+) -> dict:
+    """Last N AgentMetric rows as chart-ready buckets (owner only)."""
+    if not is_workspace_owner(db, auth):
+        raise PermissionError("owner only")
+
+    n = max(1, min(200, int(limit or 60)))
+    rows = (
+        db.query(AgentMetric)
+        .filter(AgentMetric.tenant_id == auth.tenant_id, AgentMetric.project_id == project_id)
+        .order_by(AgentMetric.created_at.desc(), AgentMetric.id.desc())
+        .limit(n)
+        .all()
+    )
+    rows = list(reversed(rows))
+
+    points: list[dict] = []
+    tokens: list[int] = []
+    durations: list[int] = []
+    success_rate: list[float] = []
+    for m in rows:
+        created = m.created_at.isoformat() if m.created_at else None
+        tok = int(m.tokens or 0)
+        dur = int(m.duration_ms or 0)
+        ok = 1.0 if m.success else 0.0
+        points.append(
+            {
+                "t": created,
+                "tokens": tok,
+                "duration_ms": dur,
+                "success": bool(m.success),
+                "model": m.model or "",
+                "backend": m.backend or "",
+            }
+        )
+        tokens.append(tok)
+        durations.append(dur)
+        success_rate.append(ok)
+
+    return {
+        "project_id": project_id,
+        "points": points,
+        "buckets": {
+            "tokens": tokens,
+            "duration_ms": durations,
+            "success_rate": success_rate,
+        },
+    }
