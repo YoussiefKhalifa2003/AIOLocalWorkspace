@@ -449,6 +449,16 @@ def setup_objective(
         desc = body.description.strip()
         obj.description = desc or None
 
+    existing = {
+        (t.title or "").strip(): t
+        for t in db.query(TaskItem)
+        .filter(
+            TaskItem.objective_id == obj.id,
+            TaskItem.tenant_id == auth.tenant_id,
+            TaskItem.project_id == project_id,
+        )
+        .all()
+    }
     db.query(TaskItem).filter(
         TaskItem.objective_id == obj.id,
         TaskItem.tenant_id == auth.tenant_id,
@@ -460,6 +470,7 @@ def setup_objective(
         title = (raw or "").strip()[:255]
         if not title:
             continue
+        prev = existing.get(title)
         db.add(
             TaskItem(
                 tenant_id=auth.tenant_id,
@@ -467,7 +478,7 @@ def setup_objective(
                 objective_id=obj.id,
                 owner_user_id=owner,
                 title=title,
-                done=False,
+                done=bool(prev.done) if prev is not None else False,
             )
         )
 
