@@ -990,6 +990,8 @@ def _post_lead_reply(
     speak: bool,
     whisper: bool = False,
 ) -> tuple[list[ChatMessage], int | None, int | None, bool]:
+    from app.db.models import ChatAttachment
+    from app.services.chart_render import pop_charts_marker
     from app.services.chat_visibility import mark_whisper
 
     if result.deleted_chat_id and result.deleted_chat_id == chat.id:
@@ -1012,9 +1014,10 @@ def _post_lead_reply(
         return [reply], result.created_chat_id, result.deleted_chat_id, True
 
     audio_url = None
-    if speak and result.reply:
+    body, chart_ids = pop_charts_marker(result.reply or "")
+    if speak and body:
         try:
-            path = synthesize_speech(result.reply[:800])
+            path = synthesize_speech(body[:800])
             audio_url = f"/media/tts/{path.name}"
         except TTSError:
             audio_url = None
@@ -1024,7 +1027,7 @@ def _post_lead_reply(
         chat_id=chat.id,
         sender_user_id=None,
         agent_slug=result.agent_slug or "lead",
-        body=result.reply,
+        body=body,
         audio_url=audio_url,
         visibility="public",
     )
@@ -1032,6 +1035,22 @@ def _post_lead_reply(
         mark_whisper(reply, auth.user_id)
     db.add(reply)
     db.flush()
+
+    if chart_ids:
+        rows = (
+            db.query(ChatAttachment)
+            .filter(
+                ChatAttachment.id.in_(chart_ids),
+                ChatAttachment.tenant_id == auth.tenant_id,
+                ChatAttachment.chat_id == chat.id,
+                ChatAttachment.message_id.is_(None),
+            )
+            .all()
+        )
+        for row in rows:
+            row.message_id = reply.id
+        db.flush()
+
     return [reply], result.created_chat_id, result.deleted_chat_id, False
 
 
@@ -1087,6 +1106,7 @@ def _run_agent_branch(
         user_id=auth.user_id,
         text=text,
         plan=RoutePlan(agents=agents, reason=plan_reason, used_llm=used_llm),
+        extra_payload={"chat_id": chat.id},
     )
     db.flush()
     db.commit()

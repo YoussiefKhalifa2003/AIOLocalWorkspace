@@ -106,6 +106,19 @@ class ApiClient:
     def delete(self, path: str, **kw) -> Any:
         return self._request("DELETE", path, **kw)
 
+    def download_bytes(self, path: str, *, timeout: float | None = None) -> bytes:
+        """GET a binary path (e.g. /attachments/12)."""
+        try:
+            with httpx.Client(
+                base_url=self.base_url, headers=self.headers, timeout=timeout or self.timeout
+            ) as client:
+                r = client.get(path)
+        except httpx.HTTPError as exc:
+            raise ApiError(f"{exc.__class__.__name__}: {exc}") from exc
+        if r.status_code >= 400:
+            raise ApiError(_detail(r) or f"download failed ({r.status_code})")
+        return r.content
+
     def _safe(self, path: str, default: Any) -> Any:
         try:
             return self.get(path)

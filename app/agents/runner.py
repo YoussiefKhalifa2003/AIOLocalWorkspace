@@ -245,7 +245,14 @@ _DEEPRESEARCH_SHAPE = (
     "2) Key findings (bullets with concrete claims)\n"
     "3) At least one markdown table comparing options, metrics, risks, or timelines\n"
     "4) Deeper analysis: drivers, tradeoffs, edge cases\n"
-    "5) Optional ASCII chart in a fenced code block when numbers help (no images)\n"
+    "5) Optional chart ONLY when numbers clearly benefit from a visual — never ASCII art. "
+    "If (and only if) a chart helps, append one or more fenced blocks exactly like:\n"
+    "```aio-chart\n"
+    '{"title":"…","type":"bar|line|pie","labels":["A","B"],'
+    '"series":[{"name":"…","values":[1,2]}]}\n'
+    "```\n"
+    "Skip charts for qualitative answers. Chart numbers must come from the evidence "
+    "(or be marked estimate). Max 3 charts.\n"
     "6) Recommendations / next steps\n"
     "7) Open questions / what would change the answer\n"
 )
@@ -329,6 +336,64 @@ def _research_queries(db: Session, job: Job, llm: LLMClient, text: str) -> list[
         return fallback
     cleaned = [str(q).strip() for q in queries if str(q).strip()][:3]
     return cleaned or fallback
+
+
+def _finalize_deepresearch_content(db: Session, job: Job, content: str) -> str:
+    """Render optional aio-chart blocks to PNG attachments; append [[charts:…]] marker."""
+    from app.db.models import ChatAttachment, WorkRequest
+    from app.services.attachments import save_bytes
+    from app.services.chart_render import charts_marker, process_aio_charts
+
+    cleaned, charts = process_aio_charts(content)
+    if not charts:
+        return cleaned
+
+    payload = parse_json(job.payload_json, {})
+    chat_id = payload.get("chat_id")
+    try:
+        chat_id = int(chat_id) if chat_id is not None else None
+    except (TypeError, ValueError):
+        chat_id = None
+    if not chat_id:
+        # No chat context (e.g. CLI pipeline without chat) — keep captions, drop images
+        return cleaned
+
+    req = db.query(WorkRequest).filter(WorkRequest.id == job.request_id).one_or_none()
+    user_id = int(req.user_id) if req else 0
+    if not user_id:
+        return cleaned
+
+    att_ids: list[int] = []
+    for chart in charts:
+        try:
+            safe, ctype, rel, size = save_bytes(
+                chart.png_bytes,
+                tenant_id=job.tenant_id,
+                chat_id=chat_id,
+                filename=chart.filename,
+                content_type="image/png",
+            )
+        except Exception:
+            logger.exception("failed to store chart png")
+            continue
+        row = ChatAttachment(
+            tenant_id=job.tenant_id,
+            chat_id=chat_id,
+            message_id=None,
+            uploader_user_id=user_id,
+            filename=safe,
+            content_type=ctype,
+            size_bytes=size,
+            storage_path=rel,
+        )
+        db.add(row)
+        db.flush()
+        att_ids.append(int(row.id))
+
+    marker = charts_marker(att_ids)
+    if marker:
+        cleaned = f"{cleaned.rstrip()}\n\n{marker}"
+    return cleaned
 
 
 def run_deepresearch(db: Session, job: Job, llm: LLMClient) -> None:
@@ -436,13 +501,17 @@ def run_deepresearch(db: Session, job: Job, llm: LLMClient) -> None:
             ),
         )
 
+    content = _finalize_deepresearch_content(db, job, content)
     art = _save_artifact(db, job, "Deep research", content)
+    from app.services.chart_render import pop_charts_marker
+
+    room_body, _ = pop_charts_marker(content)
     post_agent_output(
         db,
         tenant_id=job.tenant_id,
         project_id=job.project_id,
         agent_type="deepresearch",
-        body=content,
+        body=room_body,
         job_id=job.id,
     )
     write_audit(

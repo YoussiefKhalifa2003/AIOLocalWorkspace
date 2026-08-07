@@ -12,3 +12,6 @@ pypdf>=5.0.0
 rich>=13.0.0
 textual>=1.0.0
 playwright>=1.40.0
+matplotlib>=3.8.0
+pillow>=10.0.0
+textual-image>=0.8.0

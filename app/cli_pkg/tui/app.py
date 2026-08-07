@@ -83,6 +83,8 @@ Header { background: $panel; }
 .agent-msg { border-left: outer $accent 30%; padding-left: 1; }
 .whisper-msg { color: $text-muted; }
 .pending-msg { color: $accent; }
+MessageView { height: auto; }
+MessageView .msg-chart { height: 18; width: 100%; }
 #llm-wait { height: auto; padding: 0 1 1 1; display: none; }
 #llm-wait-label { height: 1; color: $accent; }
 #llm-wait-bar { width: 100%; height: 1; margin: 0 0 1 0; }
