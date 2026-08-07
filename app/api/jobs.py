@@ -87,6 +87,27 @@ def analytics(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
+@router.get("/projects/{project_id}/metrics/series")
+def metrics_series(
+    project_id: int,
+    limit: int = 60,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """Owner-only: last N AgentMetric rows as sparkline buckets."""
+    from app.services.dashboard import build_metrics_series
+    from app.services.isolation import get_project_for_tenant
+
+    try:
+        get_project_for_tenant(db, auth.tenant_id, project_id)
+    except IsolationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        return build_metrics_series(db, auth, project_id=project_id, limit=limit)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 class AssignTaskIn(BaseModel):
     objective_id: int
     assignee_user_id: int

@@ -32,12 +32,14 @@
 ./aio chat 1 --follow
 ./aio say 1 "standup in 5"
 
-# App keys
-#   tabs      1 Chat · 2 Board · 3 Agents · 4 Dashboard (or F1-F4, or click)
-#   anywhere  F5 help · F6 mentions · ctrl+r refresh · ctrl+q quit
-#   chat      just type; enter sends. Tab completes /skills !commands @names
+# App keys (no F-keys)
+#   tabs      c Chat · b Board · g Agents · p People · d Dashboard · v Live
+#             while typing: ctrl+t/b/g/e/d/v   or press esc then the letter
+#   anywhere  ? help · ctrl+n mentions · r refresh · q quit
+#   chat      type / or ! or @ → dropdown menu (up/down, enter/tab to pick)
 #   board     j/k card · h/l column · n new · s status · a agent · m merge
-#             o open PR · y copy PR
+#   people    (owner) Invite · Make owner · Make member · Remove
+#   live      (owner) gauges + sparklines + WIP bars, auto-refresh 2s
 
 # #general - chat + @people + !commands (whispers)
 hey team, standup in 5
