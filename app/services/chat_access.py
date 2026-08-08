@@ -122,15 +122,72 @@ def list_visible_chats(db: Session, auth: AuthContext) -> list[Chat]:
     return [c for c in rows if can_access_chat(db, auth, c)]
 
 
+def chat_mode_of(chat: dict | object | None) -> str:
+    """Resolve ops|llm for a chat dict or ORM row."""
+    if chat is None:
+        return "ops"
+    if isinstance(chat, dict):
+        kind = str(chat.get("kind") or "")
+        mode = str(chat.get("mode") or "").strip().lower()
+    else:
+        kind = str(getattr(chat, "kind", None) or "")
+        mode = str(getattr(chat, "mode", None) or "").strip().lower()
+    if mode in ("ops", "llm"):
+        return mode
+    return "llm" if kind == "private" else "ops"
+
+
+def is_default_private_room(chat: dict | object | None) -> bool:
+    """Seeded 'my room' — never user-deletable."""
+    if chat is None:
+        return False
+    if isinstance(chat, dict):
+        kind = str(chat.get("kind") or "")
+        name = str(chat.get("name") or "").lower()
+    else:
+        kind = str(getattr(chat, "kind", None) or "")
+        name = str(getattr(chat, "name", None) or "").lower()
+    return kind == "private" and name.startswith("private -")
+
+
+def can_delete_chat(
+    chat: dict | object | None,
+    user_id: int,
+    *,
+    is_workspace_owner: bool = False,
+) -> bool:
+    """Creator may delete their chat; general + default private room are protected.
+
+    Workspace owners may also remove legacy public channels with no recorded creator.
+    """
+    if chat is None or not user_id:
+        return False
+    if isinstance(chat, dict):
+        kind = str(chat.get("kind") or "")
+        name = str(chat.get("name") or "")
+        owner = int(chat.get("owner_user_id") or 0)
+    else:
+        kind = str(getattr(chat, "kind", None) or "")
+        name = str(getattr(chat, "name", None) or "")
+        owner = int(getattr(chat, "owner_user_id", None) or 0)
+    if kind == "channel" and name == "general":
+        return False
+    if is_default_private_room(chat):
+        return False
+    if owner == int(user_id):
+        return True
+    # Older public channels sometimes have owner_user_id NULL.
+    if is_workspace_owner and kind == "channel" and owner == 0:
+        return True
+    return False
+
+
 def chat_to_dict(c: Chat) -> dict:
-    mode = (getattr(c, "mode", None) or "").strip().lower()
-    if mode not in ("ops", "llm"):
-        mode = "llm" if (c.kind or "") == "private" else "ops"
     return {
         "id": c.id,
         "name": c.name,
         "kind": c.kind,
-        "mode": mode,
+        "mode": chat_mode_of(c),
         "project_id": c.project_id,
         "owner_user_id": c.owner_user_id,
     }

@@ -1175,9 +1175,9 @@ def handle_chat_message(
 
     raw_body = (user_message.body or "").strip()
     is_channel = (chat.kind or "channel") == "channel"
-    mode = (getattr(chat, "mode", None) or "").strip().lower()
-    if mode not in ("ops", "llm"):
-        mode = "ops" if is_channel else "llm"
+    from app.services.chat_access import chat_mode_of
+
+    mode = chat_mode_of(chat)
     allows_llm = mode == "llm"
     whisper = False
 

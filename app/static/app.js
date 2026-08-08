@@ -1090,17 +1090,27 @@
     label.onclick = () => selectChat(c.id);
     li.appendChild(label);
 
-    if (allowDelete && !(c.name === "general" && c.kind === "channel")) {
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "x";
-      del.title = "delete chat";
-      del.textContent = "x";
-      del.onclick = (ev) => {
-        ev.stopPropagation();
-        void deleteChat(c.id, c.name);
-      };
-      li.appendChild(del);
+    if allowDelete && !(c.name === "general" && c.kind === "channel") {
+      const isDefaultPrivate =
+        c.kind === "private" && String(c.name || "").toLowerCase().startsWith("private -");
+      const ownerId = Number(c.owner_user_id || 0);
+      const mine = ownerId && ownerId === Number(state.userId);
+      const orphanPublic =
+        state.isOwner && c.kind === "channel" && !ownerId;
+      if (isDefaultPrivate || (!mine && !orphanPublic)) {
+        /* protected or not yours */
+      } else {
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "x";
+        del.title = "delete chat";
+        del.textContent = "x";
+        del.onclick = (ev) => {
+          ev.stopPropagation();
+          void deleteChat(c.id, c.name);
+        };
+        li.appendChild(del);
+      }
     }
     return li;
   }
@@ -1125,7 +1135,7 @@
 
     const myRoomList = $("myRoomList");
     myRoomList.innerHTML = "";
-    mine.forEach((c) => myRoomList.appendChild(renderChatLi(c, { allowDelete: false })));
+    mine.forEach((c) => myRoomList.appendChild(renderChatLi(c, { allowDelete: true })));
 
     if (state.chatId && !chats.some((c) => Number(c.id) === Number(state.chatId))) {
       state.chatId = null;
