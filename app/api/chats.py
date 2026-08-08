@@ -322,14 +322,16 @@ def edit_message(
     auth: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
 ):
-    """Edit own message (ChatGPT-style): truncate everything after it, then re-process."""
+    """Edit own message: keep later user lines; only drop following agent replies, then re-process."""
     chat = require_chat_access(db, auth, chat_id)
     msg = _own_user_message(db, auth, chat_id, message_id)
     text = (body.body or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="body required")
 
-    removed_ids = _truncate_messages_after(
+    # Never wipe later user messages (stacked Discord-style sends). Only remove the
+    # agent replies that directly followed this line, then re-run handlers if needed.
+    removed_ids = _delete_following_agent_replies(
         db, chat_id=chat_id, tenant_id=auth.tenant_id, after_id=msg.id
     )
     msg.body = text

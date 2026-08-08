@@ -689,6 +689,28 @@ async def test_app_renders_every_tab_for_the_owner():
         await pilot.pause()
         assert {id(v) for v in app.chat_view._views.values()} == line_ids
 
+        # New message must append in place — existing MessageLine widgets stay alive
+        # (no blank flash from remove_children).
+        before = dict(app.chat_view._views)
+        max_id = max(before)
+        app.chat_view._apply_messages(
+            int(app.chat_view.chat_id),
+            [
+                {
+                    "id": max_id + 1,
+                    "body": "append me",
+                    "sender": "Demo",
+                    "sender_email": "a@local.test",
+                    "created_at": "2026-08-08T18:00:00Z",
+                }
+            ],
+            stamp,
+        )
+        await pilot.pause()
+        for mid, view in before.items():
+            assert app.chat_view._views.get(mid) is view
+        assert max_id + 1 in app.chat_view._views
+
         app.show_tab("board")
         await pilot.pause()
         assert app.switcher.current == "board"

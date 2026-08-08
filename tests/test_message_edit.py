@@ -157,7 +157,8 @@ def test_delete_removes_following_agent_replies(tmp_path, monkeypatch):
     assert later_id in ids
 
 
-def test_edit_truncates_later_messages(tmp_path, monkeypatch):
+def test_plain_edit_keeps_later_user_messages(tmp_path, monkeypatch):
+    """Typo-style edits must not wipe later user lines in the same streak."""
     client, info = _boot(tmp_path, monkeypatch)
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
     g = info["chat_general"]
@@ -181,25 +182,137 @@ def test_edit_truncates_later_messages(tmp_path, monkeypatch):
     edited = client.patch(
         f"/chats/{g}/messages/{m1}",
         headers=ha,
-        json={"body": "first (rewound)"},
+        json={"body": "first (fixed typo)"},
     )
     assert edited.status_code == 200
     data = edited.json()
-    assert data["message"]["body"] == "first (rewound)"
+    assert data["message"]["body"] == "first (fixed typo)"
     assert data["message"]["edited_at"]
-    assert set(data["removed_ids"]) == {m2, m3}
+    assert data["removed_ids"] == []
+
+    msgs = client.get(f"/chats/{g}/messages?after_id=0", headers=ha).json()
+    ids = [m["id"] for m in msgs]
+    assert m1 in ids and m2 in ids and m3 in ids
+    assert next(m for m in msgs if m["id"] == m1)["edited_at"]
+
+
+def test_skill_edit_keeps_later_user_messages(tmp_path, monkeypatch):
+    """Even /skill edits must not delete later user lines — only following agent replies."""
+    client, info = _boot(tmp_path, monkeypatch)
+    ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
+    g = info["chat_general"]
+    tenant_id = info["tenant_a"]
+    user_a = info["user_a"]
+
+    m1 = client.post(
+        f"/chats/{g}/messages",
+        headers=ha,
+        json={"body": "/ask first question", "speak": False},
+    ).json()["user_message_id"]
+
+    import app.db.session as sess
+    from app.db.models import ChatMessage
+
+    db = sess.SessionLocal()
+    try:
+        reply = ChatMessage(
+            tenant_id=tenant_id,
+            chat_id=g,
+            sender_user_id=None,
+            agent_slug="ask",
+            body="agent answer",
+            visibility="public",
+        )
+        later = ChatMessage(
+            tenant_id=tenant_id,
+            chat_id=g,
+            sender_user_id=user_a,
+            agent_slug=None,
+            body="third",
+            visibility="public",
+        )
+        db.add(reply)
+        db.add(later)
+        db.commit()
+        db.refresh(reply)
+        db.refresh(later)
+        reply_id, later_id = reply.id, later.id
+    finally:
+        db.close()
+
+    edited = client.patch(
+        f"/chats/{g}/messages/{m1}",
+        headers=ha,
+        json={"body": "/ask first question (rewound)"},
+    )
+    assert edited.status_code == 200
+    data = edited.json()
+    assert data["message"]["edited_at"]
+    assert reply_id in data["removed_ids"]
+    assert later_id not in data["removed_ids"]
 
     msgs = client.get(f"/chats/{g}/messages?after_id=0", headers=ha).json()
     ids = [m["id"] for m in msgs]
     assert m1 in ids
-    assert m2 not in ids
-    assert m3 not in ids
-    assert next(m for m in msgs if m["id"] == m1)["body"] == "first (rewound)"
+    assert reply_id not in ids
+    assert later_id in ids
 
-    # Other clients learn about truncations via since=
-    sync = client.get(
-        f"/chats/{g}/messages?after_id={m3}&since=2020-01-01T00:00:00Z",
+
+def test_plain_edit_still_drops_following_agent_reply(tmp_path, monkeypatch):
+    client, info = _boot(tmp_path, monkeypatch)
+    ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
+    g = info["chat_general"]
+    tenant_id = info["tenant_a"]
+    user_a = info["user_a"]
+
+    ask = client.post(
+        f"/chats/{g}/messages",
         headers=ha,
-    ).json()
-    deleted_ids = {m["id"] for m in sync if m.get("deleted_at")}
-    assert m2 in deleted_ids and m3 in deleted_ids
+        json={"body": "question for the bot", "speak": False},
+    ).json()["user_message_id"]
+
+    import app.db.session as sess
+    from app.db.models import ChatMessage
+
+    db = sess.SessionLocal()
+    try:
+        reply = ChatMessage(
+            tenant_id=tenant_id,
+            chat_id=g,
+            sender_user_id=None,
+            agent_slug="ask",
+            body="agent answer",
+            visibility="public",
+        )
+        later = ChatMessage(
+            tenant_id=tenant_id,
+            chat_id=g,
+            sender_user_id=user_a,
+            agent_slug=None,
+            body="user follow-up",
+            visibility="public",
+        )
+        db.add(reply)
+        db.add(later)
+        db.commit()
+        db.refresh(reply)
+        db.refresh(later)
+        reply_id, later_id = reply.id, later.id
+    finally:
+        db.close()
+
+    edited = client.patch(
+        f"/chats/{g}/messages/{ask}",
+        headers=ha,
+        json={"body": "question for the bot (clarified)"},
+    )
+    assert edited.status_code == 200
+    data = edited.json()
+    assert reply_id in data["removed_ids"]
+    assert later_id not in data["removed_ids"]
+
+    msgs = client.get(f"/chats/{g}/messages?after_id=0", headers=ha).json()
+    ids = {m["id"] for m in msgs}
+    assert ask in ids
+    assert reply_id not in ids
+    assert later_id in ids

@@ -680,6 +680,17 @@ class MessageLine(Vertical):
         height: auto;
     }
     MessageLine .msg-body { height: auto; }
+    MessageLine .msg-edited-flag {
+        width: auto;
+        height: 1;
+        margin-left: 1;
+        color: $text-muted;
+        display: none;
+        content-align: left middle;
+    }
+    MessageLine.is-edited .msg-edited-flag {
+        display: block;
+    }
     MessageLine .msg-tools {
         display: none;
         width: auto;
@@ -687,7 +698,8 @@ class MessageLine(Vertical):
         align: right top;
         padding-left: 1;
     }
-    MessageLine.tools-visible .msg-tools {
+    /* Instant Discord-style: CSS :hover covers the line + edit/delete children (no trail timers). */
+    MessageLine.mine-msg:hover .msg-tools {
         display: block;
     }
     MessageLine .msg-tool {
@@ -697,11 +709,11 @@ class MessageLine(Vertical):
         margin-left: 1;
         content-align: right middle;
     }
-    MessageLine.tools-visible .msg-tool-edit {
+    MessageLine.mine-msg:hover .msg-tool-edit {
         color: #7dd3fc;
         text-style: underline;
     }
-    MessageLine.tools-visible .msg-tool-delete {
+    MessageLine.mine-msg:hover .msg-tool-delete {
         color: #f87171;
         text-style: underline;
     }
@@ -733,9 +745,9 @@ class MessageLine(Vertical):
         self._del_btn = MsgTool("delete", "delete")
         self._body_static = Static("", classes="msg-body", markup=True)
         self._body_md = Markdown("", classes="msg-body")
+        self._edited_flag = Static("[dim]· edited[/dim]", classes="msg-edited-flag", markup=True)
         self._chart_ids: tuple[int, ...] = ()
         self._tools_ready = False
-        self._hide_timer = None
 
     @property
     def is_mine(self) -> bool:
@@ -756,6 +768,7 @@ class MessageLine(Vertical):
             with Vertical(classes="msg-body-col"):
                 yield self._body_static
                 yield self._body_md
+            yield self._edited_flag
             with self._tools:
                 yield self._edit_btn
                 yield self._del_btn
@@ -763,36 +776,6 @@ class MessageLine(Vertical):
     def on_mount(self) -> None:
         self._tools_ready = True
         self.update_message(self.message)
-
-    def _cancel_hide_timer(self) -> None:
-        if self._hide_timer is not None:
-            try:
-                self._hide_timer.stop()
-            except Exception:
-                pass
-            self._hide_timer = None
-
-    def _show_tools(self) -> None:
-        if not self.is_mine:
-            return
-        self._cancel_hide_timer()
-        self.add_class("tools-visible")
-
-    def _schedule_hide_tools(self) -> None:
-        self._cancel_hide_timer()
-        self._hide_timer = self.set_timer(0.14, self._hide_tools)
-
-    def _hide_tools(self) -> None:
-        self._hide_timer = None
-        self.remove_class("tools-visible")
-
-    def on_enter(self, event: events.Enter) -> None:
-        if self.is_mine:
-            self._show_tools()
-
-    def on_leave(self, event: events.Leave) -> None:
-        if self.is_mine:
-            self._schedule_hide_tools()
 
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
         href = (event.href or "").strip()
@@ -820,16 +803,17 @@ class MessageLine(Vertical):
         self.set_class(bool(message.get("visibility") == "whisper"), "whisper-msg")
         mine = self.is_mine
         self.set_class(mine, "mine-msg")
-        if not mine:
-            self.remove_class("tools-visible")
+        edited = bool(message.get("edited_at")) and not message.get("deleted_at")
+        self.set_class(edited, "is-edited")
 
         if message.get("deleted_at"):
             self.set_class(False, "mine-msg")
-            self.remove_class("tools-visible")
+            self.set_class(False, "is-edited")
             self._body_md.display = False
             self._body_static.display = True
             self._body_static.update("[dim i]message deleted[/dim i]")
             self._clear_extras()
+            self._sync_parent_block()
             return
 
         agent = message.get("agent")
@@ -862,6 +846,20 @@ class MessageLine(Vertical):
                 self._body_static.update(escape(raw) if raw else "")
 
         self._sync_attachments(message.get("attachments") or [])
+        self._sync_parent_block()
+
+    def _sync_parent_block(self) -> None:
+        """Keep SpeakerBlock header/messages list in sync when this line changes."""
+        parent = self.parent
+        if not isinstance(parent, SpeakerBlock):
+            return
+        for i, line in enumerate(parent.lines):
+            if line is self:
+                if i < len(parent.messages):
+                    parent.messages[i] = self.message
+                if i == 0:
+                    parent._render_head()
+                break
 
     def _clear_extras(self) -> None:
         for child in list(self.children):
@@ -1017,6 +1015,21 @@ class SpeakerBlock(Vertical):
         if self.messages and self.messages[0].get("agent"):
             self.add_class("agent-block")
         self._render_head()
+
+    def append_line(self, message: dict[str, Any]) -> MessageLine:
+        """Add a continuation line without remounting the block (keeps scroll stable)."""
+        line = MessageLine(
+            message,
+            self.my_email,
+            client=self.client,
+            member_emails=self.member_emails,
+        )
+        self.messages.append(message)
+        self.lines.append(line)
+        self.mount(line)
+        if line.is_mine:
+            self.add_class("has-mine")
+        return line
 
     def _render_head(self) -> None:
         message = self.messages[0]
@@ -1518,28 +1531,46 @@ class ChatView(Vertical):
     def _member_emails_list(self) -> list[str]:
         return [str(m.get("email") or "") for m in self.members]
 
-    def _refresh_transcript_blocks(
-        self,
-        *,
-        scroll_bottom: bool = False,
-        force: bool = False,
-        touch_ids: list[int] | None = None,
-    ) -> None:
-        """Rebuild SpeakerBlocks from _rows, or patch only changed lines when structure is stable."""
-        rows = self._ordered_rows()
-        groups = group_messages(rows)
-        fp = blocks_fingerprint(groups)
-        if not force and fp == self._blocks_fp:
-            for mid in touch_ids or ():
-                view = self._views.get(mid)
-                row = self._rows.get(mid)
-                if view is not None and row is not None:
-                    view.update_message(row)
-            if scroll_bottom and touch_ids:
-                self.call_after_refresh(self.transcript.scroll_end, animate=False)
-            return
+    def _flat_ids_from_fp(self) -> list[int]:
+        if not self._blocks_fp:
+            return []
+        out: list[int] = []
+        for part in self._blocks_fp:
+            try:
+                ids = part[0]
+            except (TypeError, IndexError):
+                continue
+            out.extend(int(x) for x in ids)
+        return out
 
-        self._blocks_fp = fp
+    def _mount_in_transcript(self, widget: SpeakerBlock | Static) -> None:
+        """Mount ahead of the LLM pending bubble so new lines stay above 'thinking…'."""
+        pending = self._pending
+        if pending is not None and pending in self.transcript.children:
+            self.transcript.mount(widget, before=pending)
+        else:
+            self.transcript.mount(widget)
+
+    def _append_message_rows(self, rows: list[dict[str, Any]]) -> None:
+        """Grow the transcript in place — no remove_children (avoids blank flash / scroll jump)."""
+        emails = self._member_emails_list()
+        for row in rows:
+            blocks = [c for c in self.transcript.children if isinstance(c, SpeakerBlock)]
+            last = blocks[-1] if blocks else None
+            if last is not None and should_group_with_previous(last.messages[-1], row):
+                line = last.append_line(row)
+            else:
+                block = SpeakerBlock(
+                    [row],
+                    self.my_email,
+                    client=self.client,
+                    member_emails=emails,
+                )
+                self._mount_in_transcript(block)
+                line = block.lines[0]
+            self._views[line.message_id] = line
+
+    def _rebuild_transcript_blocks(self, groups: list[list[dict[str, Any]]]) -> None:
         self.transcript.remove_children()
         self._views.clear()
         self._pending = None
@@ -1556,6 +1587,81 @@ class ChatView(Vertical):
                 self._views[line.message_id] = line
         if self._active_llm_skill():
             self._sync_llm_ui()
+
+    def _refresh_transcript_blocks(
+        self,
+        *,
+        scroll_bottom: bool = False,
+        force: bool = False,
+        touch_ids: list[int] | None = None,
+    ) -> None:
+        """Patch or append when possible; full remount only for deletes / regroup / force."""
+        rows = self._ordered_rows()
+        groups = group_messages(rows)
+        fp = blocks_fingerprint(groups)
+        touch = list(touch_ids or ())
+
+        if not force and fp == self._blocks_fp:
+            for mid in touch:
+                view = self._views.get(mid)
+                row = self._rows.get(mid)
+                if view is not None and row is not None:
+                    view.update_message(row)
+            if scroll_bottom and touch:
+                self.call_after_refresh(self.transcript.scroll_end, animate=False)
+            return
+
+        old_flat = self._flat_ids_from_fp()
+        new_flat = [int(m["id"]) for g in groups for m in g]
+        can_append = (
+            not force
+            and bool(old_flat)
+            and len(new_flat) > len(old_flat)
+            and new_flat[: len(old_flat)] == old_flat
+        )
+        if can_append:
+            suffix = [self._rows[mid] for mid in new_flat[len(old_flat) :] if mid in self._rows]
+            if suffix:
+                self._append_message_rows(suffix)
+                self._blocks_fp = fp
+                suffix_set = {int(r["id"]) for r in suffix}
+                for mid in touch:
+                    if mid in suffix_set:
+                        continue
+                    view = self._views.get(mid)
+                    row = self._rows.get(mid)
+                    if view is not None and row is not None:
+                        view.update_message(row)
+                if self._active_llm_skill() and (
+                    self._pending is None or self._pending not in self.transcript.children
+                ):
+                    self._sync_llm_ui()
+                if scroll_bottom:
+                    self.call_after_refresh(self.transcript.scroll_end, animate=False)
+                return
+
+        # Trailing deletes (e.g. edit removed later agent replies) — trim without blank remount.
+        can_trim = (
+            not force
+            and bool(old_flat)
+            and len(old_flat) > len(new_flat)
+            and old_flat[: len(new_flat)] == new_flat
+        )
+        if can_trim:
+            for mid in old_flat[len(new_flat) :]:
+                self._unmount_message(mid)
+            self._blocks_fp = fp
+            for mid in touch:
+                view = self._views.get(mid)
+                row = self._rows.get(mid)
+                if view is not None and row is not None:
+                    view.update_message(row)
+            if scroll_bottom and touch:
+                self.call_after_refresh(self.transcript.scroll_end, animate=False)
+            return
+
+        self._blocks_fp = fp
+        self._rebuild_transcript_blocks(groups)
         if scroll_bottom:
             self.call_after_refresh(self.transcript.scroll_end, animate=False)
 
@@ -1881,7 +1987,38 @@ class ChatView(Vertical):
             except (TypeError, ValueError):
                 continue
             self._rows.pop(mid, None)
-            self._views.pop(mid, None)
+            self._unmount_message(mid)
+
+    def _unmount_message(self, mid: int) -> None:
+        """Remove one line (and its SpeakerBlock if it becomes empty) without wiping the room."""
+        view = self._views.pop(mid, None)
+        if view is None:
+            return
+        block = view.parent
+        try:
+            view.remove()
+        except Exception:
+            pass
+        if not isinstance(block, SpeakerBlock):
+            return
+        block.lines = [line for line in block.lines if line.message_id != mid]
+        block.messages = [
+            m for m in block.messages if int(m.get("id") or 0) != mid
+        ]
+        if not block.lines:
+            try:
+                block.remove()
+            except Exception:
+                pass
+            return
+        if any(line.is_mine for line in block.lines):
+            block.add_class("has-mine")
+        else:
+            block.remove_class("has-mine")
+        block._render_head()
+
+    def _resync_blocks_fingerprint(self) -> None:
+        self._blocks_fp = blocks_fingerprint(group_messages(self._ordered_rows()))
 
     def _mount_replies(self, replies: list[dict]) -> None:
         for row in replies:
@@ -1913,19 +2050,33 @@ class ChatView(Vertical):
         if not viewing:
             self.app.set_status("edit saved (other chat)")
             return
-        self._drop_ids(list(data.get("removed_ids") or []))
+
+        at_bottom = self.transcript.scroll_offset.y >= self.transcript.max_scroll_y - 2
+        removed = list(data.get("removed_ids") or [])
+        self._drop_ids(removed)
+
         msg = data.get("message") or {}
         mid = int(msg.get("id") or 0)
+        touch: list[int] = []
         if mid and msg:
             self._rows[mid] = msg
+            touch.append(mid)
+            view = self._views.get(mid)
+            if view is not None:
+                view.update_message(msg)
+
         for row in list(data.get("replies") or []):
             if not row or row.get("id") is None or row.get("deleted_at"):
                 continue
             rid = int(row["id"])
             self._rows[rid] = row
             self._last_id = max(self._last_id, rid)
-        self._refresh_transcript_blocks(scroll_bottom=True, force=True)
+
+        # Fingerprint matches the post-drop tree so new replies append (no blank remount).
+        self._resync_blocks_fingerprint()
+        self._refresh_transcript_blocks(scroll_bottom=at_bottom, touch_ids=touch)
         self.app.set_status("[green]message updated[/green]")
+        # Don't force a second full history rebuild — next poll will pick up stragglers.
         self.poll_messages()
 
     def _apply_delete_result(
@@ -1939,7 +2090,7 @@ class ChatView(Vertical):
         removed = list(data.get("removed_ids") or [])
         removed.append(message_id)
         self._drop_ids(removed)
-        self._refresh_transcript_blocks(force=True)
+        self._resync_blocks_fingerprint()
         self.app.set_status("message deleted")
 
     def open_attachment(self, att: dict[str, Any]) -> None:
