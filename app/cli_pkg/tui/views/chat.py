@@ -153,6 +153,7 @@ class CommandPicker(VerticalScroll):
         self.start = start
         self.display = True
         self.styles.height = min(len(items), 8) + 2
+        self._paint_cursor()
 
     def close(self) -> None:
         self.items = []
@@ -164,6 +165,14 @@ class CommandPicker(VerticalScroll):
             return
         index = ((self.list_view.index or 0) + delta) % len(self.items)
         self.list_view.index = index
+        self._paint_cursor()
+
+    def _paint_cursor(self) -> None:
+        """Force a visible highlight row even while the composer has focus."""
+        idx = self.list_view.index or 0
+        for i, child in enumerate(self.list_view.children):
+            if isinstance(child, ListItem):
+                child.set_class(i == idx, "-highlight")
 
     @property
     def selected(self) -> Candidate | None:
@@ -330,6 +339,11 @@ class MessageView(Vertical):
     MessageView { height: auto; padding: 0 0 1 0; }
     MessageView.agent-msg { border-left: outer $accent 30%; padding-left: 1; }
     MessageView.whisper-msg { color: $text-muted; }
+    MessageView.highlight-ping {
+        background: $warning 20%;
+        border-left: tall $warning;
+        padding-left: 1;
+    }
     MessageView .msg-head { height: 1; }
     MessageView .msg-body { height: auto; }
     MessageView .msg-chart {
@@ -591,9 +605,9 @@ class ChatView(Vertical):
             self.select_chat(int(default["id"]))
 
     def _render_chat_list(self) -> None:
-        index = self.chat_list.index or 0
+        active_idx = 0
         self.chat_list.clear()
-        for chat in self.chats:
+        for i, chat in enumerate(self.chats):
             cid = int(chat["id"])
             working = " [dim]…[/dim]" if cid in self._llm_jobs else ""
             label = (
@@ -604,8 +618,24 @@ class ChatView(Vertical):
             item = ListItem(Static(label, markup=True))
             item.chat = chat
             self.chat_list.append(item)
+            if self.chat_id is not None and cid == int(self.chat_id):
+                active_idx = i
         if self.chats:
-            self.chat_list.index = min(index, len(self.chats) - 1)
+            self.chat_list.index = active_idx
+        self._sync_chat_list_selection()
+
+    def _sync_chat_list_selection(self) -> None:
+        """Mark the open room so it stays visible when focus is in the composer."""
+        for item in self.chat_list.children:
+            if not isinstance(item, ListItem):
+                continue
+            chat = getattr(item, "chat", None)
+            active = (
+                chat is not None
+                and self.chat_id is not None
+                and int(chat.get("id") or 0) == int(self.chat_id)
+            )
+            item.set_class(active, "active-chat")
 
     def _render_members(self) -> None:
         self.member_list.clear()
@@ -637,6 +667,44 @@ class ChatView(Vertical):
             self.title_bar.update(f"[b]#{name}[/b]  [dim]@people · !commands · Attach[/dim]")
         self._sync_llm_ui()
         self.poll_messages()
+        self._sync_chat_list_selection()
+        # Keep list cursor on the open room
+        for i, chat in enumerate(self.chats):
+            if int(chat["id"]) == int(chat_id):
+                self.chat_list.index = i
+                break
+
+    def open_mention(self, chat_id: int, message_id: int) -> None:
+        """Open a channel and scroll/highlight the pinged message."""
+        if chat_id != self.chat_id:
+            self.select_chat(chat_id)
+        self.focus_message(int(message_id), attempt=0)
+
+    def focus_message(self, message_id: int, attempt: int = 0) -> None:
+        view = self._views.get(int(message_id))
+        if view is not None:
+            # clear any prior highlight
+            for other in self._views.values():
+                other.set_class(False, "highlight-ping")
+            view.set_class(True, "highlight-ping")
+            try:
+                view.scroll_visible(animate=True)
+            except Exception:
+                pass
+            self.set_timer(3.5, lambda: view.set_class(False, "highlight-ping"))
+            return
+        if attempt == 0 and self.chat_id is not None:
+            # Force a full history pull so older pings are present
+            self._last_id = 0
+            self._last_sync = ""
+            self.poll_messages()
+        if attempt >= 8:
+            self.app.set_status(f"[yellow]message #{message_id} not loaded yet[/yellow]")
+            return
+        self.set_timer(
+            0.25,
+            lambda mid=message_id, n=attempt: self.focus_message(mid, n + 1),
+        )
 
     # attachments ---------------------------------------------------------
 
@@ -907,6 +975,11 @@ class ChatView(Vertical):
             trigger, typed, members=names, chat_kind=str(self.current_chat.get("kind") or "")
         )
         self.picker.show(items, start)
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        # Keep picker cursor paint in sync if Textual moves highlight itself
+        if event.list_view is self.picker.list_view and self.picker.open:
+            self.picker._paint_cursor()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.list_view is self.picker.list_view:

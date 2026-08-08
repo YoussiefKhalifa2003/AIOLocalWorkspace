@@ -516,6 +516,7 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
 
 [b]Anywhere[/b]
   ?  help (or ctrl+w)   ctrl+n  unread mentions
+  F1 or [b]Tour[/b] button  spotlight walkthrough
   r  refresh (ctrl+r)   q  quit (ctrl+q)
 
 [b]Chat[/b]
@@ -527,6 +528,9 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
   Click [b]Attach[/b] (or [b]ctrl+f[/b] / [b]!attach[/b]) — same button on
   Mac, Windows, and Linux — opens a native file dialog (code, pdf, docx,
   images…). Then send your message / skill.
+  When someone [@]pings you: a sound plays and [@]N appears in the status
+  line. Press [b]ctrl+n[/b] to open the list (who · time · chat · snippet),
+  pick one to jump to that message (highlighted).
 
 [b]Board[/b]
   j k          card up/down     h l    column left/right
@@ -559,10 +563,31 @@ class HelpModal(ModalScreen[None]):
         self.dismiss(None)
 
 
-class MentionsModal(ModalScreen[int]):
-    """Unread @mentions; picking one returns its chat id."""
+def _mention_time_label(created_at: str | None) -> str:
+    """Format mention created_at ISO as HH:MM (or Y-m-d HH:MM if not today)."""
+    if not created_at:
+        return ""
+    try:
+        from datetime import datetime
 
-    BINDINGS = [("escape", "dismiss_zero", "Close")]
+        raw = str(created_at).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is not None:
+            local = dt.astimezone()
+        else:
+            local = dt
+        now = datetime.now(local.tzinfo) if local.tzinfo else datetime.now()
+        if local.date() == now.date():
+            return local.strftime("%H:%M")
+        return local.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(created_at)[:16]
+
+
+class MentionsModal(ModalScreen[dict[str, Any] | None]):
+    """Unread @mentions; picking one opens that chat message."""
+
+    BINDINGS = [("escape", "dismiss_none", "Close")]
 
     def __init__(self, mentions: list[dict[str, Any]]) -> None:
         super().__init__()
@@ -579,9 +604,11 @@ class MentionsModal(ModalScreen[int]):
             for m in self._mentions:
                 who = escape(str(m.get("from") or "?"))
                 where = escape(str(m.get("chat_name") or ""))
+                when = escape(_mention_time_label(m.get("created_at")))
+                meta = f"{when} · #{where}" if when else f"#{where}"
                 snippet = escape(str(m.get("snippet") or "").replace("\n", " ")[:70])
                 items.append(
-                    ListItem(Static(f"[b]{who}[/b] [dim]#{where}[/dim]\n{snippet}", markup=True))
+                    ListItem(Static(f"[b]{who}[/b]  [dim]{meta}[/dim]\n{snippet}", markup=True))
                 )
             yield ListView(*items, id="mention-list")
             yield Button("Mark all read", id="mentions-read")
@@ -589,10 +616,21 @@ class MentionsModal(ModalScreen[int]):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index or 0
         if idx < len(self._mentions):
-            self.dismiss(int(self._mentions[idx].get("chat_id") or 0))
+            m = self._mentions[idx]
+            self.dismiss(
+                {
+                    "action": "open",
+                    "chat_id": int(m.get("chat_id") or 0),
+                    "message_id": int(m.get("message_id") or 0),
+                    "mention_id": int(m.get("id") or 0),
+                }
+            )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(-1 if event.button.id == "mentions-read" else 0)
+        if event.button.id == "mentions-read":
+            self.dismiss({"action": "mark_all"})
+        else:
+            self.dismiss(None)
 
-    def action_dismiss_zero(self) -> None:
-        self.dismiss(0)
+    def action_dismiss_none(self) -> None:
+        self.dismiss(None)

@@ -22,6 +22,11 @@ from app.cli_pkg.tui.views.chat import (
     render_markdown,
 )
 
+@pytest.fixture(autouse=True)
+def _isolate_aio_prefs(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIO_PREFS", str(tmp_path / "prefs.json"))
+
+
 @pytest.fixture
 def mock_http(monkeypatch):
     """Route every httpx.Client through a handler the test provides."""
@@ -122,6 +127,25 @@ def test_messages_uses_after_id_and_since_cursors(mock_http):
     client.messages(3, after_id=12, since="2026-01-01T00:00:00Z")
     assert seen["after_id"] == "12"
     assert seen["since"] == "2026-01-01T00:00:00Z"
+
+
+def test_mention_open_marks_single_id(mock_http):
+    """Opening one mention should POST only that mention id (not mark-all)."""
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/mentions/read"):
+            import json as _json
+
+            seen["body"] = _json.loads(request.content or b"{}")
+            return httpx.Response(200, json={"status": "ok", "marked": 1})
+        return httpx.Response(404, json={"detail": "no"})
+
+    mock_http(handler)
+    client = ApiClient(project_id=1, api_key="k", base_url="http://api")
+    out = client.mark_mentions_read([42])
+    assert out.get("status") == "ok"
+    assert seen["body"] == {"ids": [42]}
 
 
 def test_resolve_attach_path_and_upload(tmp_path, monkeypatch, mock_http):
@@ -441,8 +465,11 @@ class _StubClient(ApiClient):
 
 
 async def _boot(owner: bool):
+    from app.cli_pkg.prefs import mark_tutorial_done
     from app.cli_pkg.tui.app import AioApp
 
+    # Avoid first-run Tour modal stealing focus in interactive pilots.
+    mark_tutorial_done("a@local.test")
     app = AioApp(_StubClient(owner=owner), poll_seconds=60.0)
     return app
 
