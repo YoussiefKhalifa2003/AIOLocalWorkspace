@@ -129,6 +129,53 @@ def test_messages_uses_after_id_and_since_cursors(mock_http):
     assert seen["since"] == "2026-01-01T00:00:00Z"
 
 
+def test_edit_and_delete_message_shapes(mock_http):
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        body = _json.loads(request.content) if request.content else {}
+        seen.append({"method": request.method, "path": request.url.path, "body": body})
+        if request.method == "PATCH":
+            return httpx.Response(
+                200,
+                json={
+                    "message": {"id": 5, "body": "edited"},
+                    "removed_ids": [6, 7],
+                    "replies": [{"id": 8, "body": "ok", "agent": "ask"}],
+                },
+            )
+        return httpx.Response(
+            200, json={"message": {"id": 5, "deleted_at": "x"}, "removed_ids": [6]}
+        )
+
+    mock_http(handler)
+    client = ApiClient(project_id=1, api_key="k", base_url="http://api")
+    edited = client.edit_message(3, 5, "edited")
+    assert edited["removed_ids"] == [6, 7]
+    deleted = client.delete_message(3, 5)
+    assert deleted["removed_ids"] == [6]
+    assert seen[0]["method"] == "PATCH"
+    assert seen[0]["path"] == "/chats/3/messages/5"
+    assert seen[0]["body"] == {"body": "edited"}
+    assert seen[1]["method"] == "DELETE"
+
+
+def test_transcribe_posts_multipart(tmp_path, mock_http):
+    wav = tmp_path / "voice.wav"
+    wav.write_bytes(b"RIFF....WAVE")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/stt"
+        assert b"voice.wav" in request.content
+        return httpx.Response(200, json={"text": "hello team"})
+
+    mock_http(handler)
+    text = ApiClient(project_id=1, api_key="k", base_url="http://api").transcribe(wav)
+    assert text == "hello team"
+
+
 def test_mention_open_marks_single_id(mock_http):
     """Opening one mention should POST only that mention id (not mark-all)."""
     seen: dict = {}
@@ -292,6 +339,137 @@ def test_code_fences_are_marked_not_stripped():
     out = render_markdown("text\n```python\nx = 1\n```\nafter")
     assert "python" in out
     assert "x = 1" in out
+
+
+def test_markdown_ordered_list_and_hr():
+    out = render_markdown("1. first\n2. second\n---\nmore")
+    assert "1." in out
+    assert "2." in out
+    assert "────" in out
+
+
+def test_markdown_simple_table():
+    out = render_markdown("| a | b |\n| --- | --- |\n| 1 | 2 |")
+    assert "│" in out
+    assert "a" in out
+    assert "1" in out
+
+
+def test_message_grouping_same_speaker_stacks():
+    from app.cli_pkg.tui.views.chat import should_group_with_previous
+
+    a = {
+        "id": 1,
+        "sender_email": "a@x.test",
+        "created_at": "2026-08-08T16:00:00Z",
+        "body": "hi",
+    }
+    b = {
+        "id": 2,
+        "sender_email": "a@x.test",
+        "created_at": "2026-08-08T16:00:30Z",
+        "body": "again",
+    }
+    c = {
+        "id": 3,
+        "sender_email": "b@x.test",
+        "created_at": "2026-08-08T16:01:00Z",
+        "body": "other",
+    }
+    agent = {
+        "id": 4,
+        "agent": "ask",
+        "created_at": "2026-08-08T16:01:10Z",
+        "body": "ok",
+    }
+    assert should_group_with_previous(None, a) is False
+    assert should_group_with_previous(a, b) is True
+    assert should_group_with_previous(b, c) is False
+    assert should_group_with_previous(c, agent) is False
+    # Still same speaker, but under 4 minutes → still grouped
+    almost = {
+        "id": 5,
+        "sender_email": "a@x.test",
+        "created_at": "2026-08-08T16:03:59Z",
+        "body": "almost 4m",
+    }
+    assert should_group_with_previous(a, almost) is True
+    # Same speaker after 4+ minutes alone → new block
+    later = {
+        "id": 6,
+        "sender_email": "a@x.test",
+        "created_at": "2026-08-08T16:04:01Z",
+        "body": "new block",
+    }
+    assert should_group_with_previous(a, later) is False
+
+
+def test_group_messages_block_boundaries():
+    from app.cli_pkg.tui.views.chat import blocks_fingerprint, group_messages
+
+    a = {
+        "id": 1,
+        "sender_email": "a@x.test",
+        "created_at": "2026-08-08T16:00:00Z",
+        "body": "hi",
+    }
+    b = {
+        "id": 2,
+        "sender_email": "a@x.test",
+        "created_at": "2026-08-08T16:00:30Z",
+        "body": "again",
+    }
+    c = {
+        "id": 3,
+        "sender_email": "b@x.test",
+        "created_at": "2026-08-08T16:01:00Z",
+        "body": "other",
+    }
+    agent = {
+        "id": 4,
+        "agent": "ask",
+        "created_at": "2026-08-08T16:01:10Z",
+        "body": "ok",
+    }
+    later = {
+        "id": 5,
+        "sender_email": "a@x.test",
+        "created_at": "2026-08-08T16:10:00Z",
+        "body": "new block",
+    }
+    groups = group_messages([a, b, c, agent, later])
+    assert [[m["id"] for m in g] for g in groups] == [[1, 2], [3], [4], [5]]
+    fp1 = blocks_fingerprint(groups)
+    # Body-only edits must not change the structure fingerprint (poll early-return).
+    b2 = {**b, "body": "edited"}
+    fp2 = blocks_fingerprint(group_messages([a, b2, c, agent, later]))
+    assert fp1 == fp2
+    # New message id changes fingerprint
+    extra = {
+        "id": 6,
+        "sender_email": "a@x.test",
+        "created_at": "2026-08-08T16:10:05Z",
+        "body": "cont",
+    }
+    fp3 = blocks_fingerprint(group_messages([a, b, c, agent, later, extra]))
+    assert fp3 != fp1
+
+
+def test_color_for_member_stable_and_distinct():
+    from app.cli_pkg.tui.views.chat import color_for_member, color_for_message
+
+    a = color_for_member("sara@x.test")
+    b = color_for_member("sara@x.test")
+    assert a == b
+    assert a.startswith("#") and len(a) == 7
+    emails = ["sara@x.test", "mo@x.test", "ooo@x.test"]
+    assert color_for_member("sara@x.test", member_emails=emails) != color_for_member(
+        "mo@x.test", member_emails=emails
+    )
+    assert color_for_message({"agent": "coding"}) == "#44aaff"
+    assert color_for_message({"sender_email": "sara@x.test"}, member_emails=emails) == (
+        color_for_member("sara@x.test", member_emails=emails)
+    )
 
 
 @pytest.mark.parametrize(
@@ -483,6 +661,33 @@ async def test_app_renders_every_tab_for_the_owner():
 
         assert app.chat_view.chats, "chat list should populate"
         assert app.chat_view._views, "messages should render"
+        attach = app.query_one("#chat-attach")
+        assert str(attach.label) == "+"
+        assert app.query_one("#chat-mic") is not None
+        # + and mic live inside the unified composer shell
+        row = app.query_one("#composer-row")
+        kids = [c.id for c in row.children]
+        assert kids[0] == "chat-attach"
+        assert "composer" in kids
+        assert kids[-1] == "chat-mic"
+        assert app.query_one("#logout-btn") is not None
+        assert app.query_one("#tour-btn") is not None
+        # Speaker blocks (not per-row MessageView rails)
+        from app.cli_pkg.tui.views.chat import MessageLine, SpeakerBlock
+
+        assert app.chat_view.transcript.query(SpeakerBlock)
+        assert isinstance(next(iter(app.chat_view._views.values())), MessageLine)
+
+        # Same snapshot again must not remount MessageLines (fingerprint early-return).
+        line_ids = {id(v) for v in app.chat_view._views.values()}
+        stamp = app.chat_view._last_sync or "z"
+        app.chat_view._apply_messages(
+            int(app.chat_view.chat_id),
+            list(app.chat_view._ordered_rows()),
+            stamp,
+        )
+        await pilot.pause()
+        assert {id(v) for v in app.chat_view._views.values()} == line_ids
 
         app.show_tab("board")
         await pilot.pause()

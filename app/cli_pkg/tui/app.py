@@ -27,7 +27,13 @@ from textual.widgets import (
 )
 
 from app.cli_pkg.prefs import is_tutorial_done, mark_tutorial_done
-from app.cli_pkg.session import Credentials, load_credentials, save_credentials
+from app.cli_pkg.session import (
+    Credentials,
+    auth_headers,
+    clear_credentials,
+    load_credentials,
+    save_credentials,
+)
 from app.cli_pkg.tui.client import ApiClient, ApiError, Workspace, login
 from app.cli_pkg.tui.client import board_fingerprint  # noqa: F401  (re-export for callers)
 from app.cli_pkg.tui.ping_sound import play_ping_sound, unread_rise_flash
@@ -67,7 +73,6 @@ Screen { background: $surface; }
 Header { background: $panel; }
 #tabs { background: $panel; }
 #status-line { height: 1; padding: 0 1; color: $text-muted; background: $panel; }
-#body { height: 1fr; }
 
 /* Tour: fade siblings — never opacity on #body (that dims the spotlight too) */
 .tour-faded {
@@ -122,7 +127,7 @@ Header { background: $panel; }
     background: #ffffff 55%;
     color: #111111;
 }
-/* Beat #composer-row #composer border rules so the glow is visible */
+/* Beat shell rules so Tour glow is visible */
 #composer-row.tour-spotlight,
 #composer-row.tour-spotlight.tour-glow {
     border: double #ffffff;
@@ -137,33 +142,66 @@ Header { background: $panel; }
 #composer-row.tour-spotlight #composer,
 #composer.tour-spotlight,
 #composer.tour-spotlight.tour-glow {
-    border: double #ffffff;
-    background: #ffffff 25%;
+    border: none;
+    background: #ffffff 12%;
     opacity: 1;
 }
 #composer.tour-spotlight.tour-glow-dim {
-    border: wide #d0d0d0;
-    background: #ffffff 10%;
+    border: none;
+    background: #ffffff 8%;
 }
 #tabs-row {
     height: auto;
     min-height: 3;
     background: $panel;
-    padding: 0;
+    padding: 0 1;
+    align: left middle;
+    border-bottom: solid $panel-lighten-2;
 }
 #tabs-row.tour-spotlight,
 #tabs-row.tour-spotlight.tour-glow {
     border: double #ffffff;
+    border-bottom: double #ffffff;
     background: #2a2a2a;
     padding: 0 1;
     opacity: 1;
 }
 #tabs-row.tour-spotlight.tour-glow-dim {
     border: wide #c8c8c8;
+    border-bottom: wide #c8c8c8;
     background: #222222;
 }
 #tabs-row #tabs { width: 1fr; background: transparent; }
-#tour-btn { width: 10; margin: 0 1; }
+#tour-btn {
+    width: auto;
+    min-width: 6;
+    max-height: 1;
+    height: 1;
+    padding: 0 1;
+    margin: 0 1 0 0;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+}
+#logout-btn {
+    width: auto;
+    min-width: 8;
+    max-height: 1;
+    height: 1;
+    padding: 0 1;
+    margin: 0 0 0 0;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+}
+#tour-btn:hover,
+#logout-btn:hover {
+    color: $text;
+    text-style: underline;
+}
+#body {
+    height: 1fr;
+}
 
 .view-head { text-style: bold; padding: 1 1 0 1; }
 .view-sub, #agent-info { color: $text-muted; padding: 0 1 1 1; }
@@ -187,20 +225,51 @@ Header { background: $panel; }
 #chat-list ListItem.active-chat.-highlight {
     background: #22d3ee 50%;
 }
-#member-list { height: auto; background: transparent; }
-#member-list ListItem { padding: 0 1; }
-#member-list ListItem.-highlight {
-    background: #a78bfa 30%;
+#member-list { height: auto; background: transparent; padding: 0 0 1 0; }
+#member-list .member-row {
+    height: 1;
+    width: 100%;
+    padding: 0 1;
+    margin-bottom: 0;
+    align: left middle;
+}
+#member-list .member-row:hover {
+    background: $boost;
+}
+#member-list .member-name { width: 1fr; height: 1; }
+/* Discord-style: kick stays invisible until you hover the row */
+#member-list .member-kick {
+    width: 6;
+    min-width: 6;
+    height: 1;
+    margin-left: 1;
+    color: transparent;
+    content-align: right middle;
+}
+#member-list .member-row:hover .member-kick,
+#member-list .member-row:focus-within .member-kick {
+    color: $text-muted;
+}
+#member-list .member-kick:hover,
+#member-list .member-kick:focus {
+    color: #f87171;
+    text-style: underline;
+}
+#chat-new {
+    width: auto;
+    margin: 0 1 1 1;
+    min-width: 14;
 }
 #chat-main { width: 1fr; }
 #chat-title { height: 1; padding: 0 1; background: $panel; }
-#transcript { height: 1fr; padding: 0 2; }
+#transcript { height: 1fr; padding: 0 2 0 1; }
 #transcript > Static { padding: 0 0 1 0; }
-.agent-msg { border-left: outer $accent 30%; padding-left: 1; }
 .whisper-msg { color: $text-muted; }
-.pending-msg { color: $accent; }
-MessageView { height: auto; }
-MessageView .msg-chart { height: 18; width: 100%; }
+.pending-msg { color: $accent; padding: 1 1; margin: 1 0 0 0; }
+SpeakerBlock { height: auto; }
+SpeakerBlock.agent-block { background: $panel; }
+MessageLine { height: auto; }
+MessageLine .msg-chart { height: 18; width: 100%; }
 #llm-wait { height: auto; padding: 0 1 1 1; display: none; }
 #llm-wait-label { height: 1; color: $accent; }
 #llm-wait-bar { width: 100%; height: 1; margin: 0 0 1 0; }
@@ -210,14 +279,68 @@ MessageView .msg-chart { height: 18; width: 100%; }
     color: $accent;
     display: none;
 }
+#composer-ghost {
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+    display: none;
+}
+/* One ChatGPT-style shell: + | input | mic */
 #composer-row {
     height: auto;
-    padding: 0 1 1 1;
+    min-height: 3;
+    margin: 0 1 1 1;
+    padding: 0 1;
     align: left middle;
+    border: round $panel-lighten-2;
+    background: $surface;
 }
-#composer-row #composer { width: 1fr; border: round $panel-lighten-2; }
-#composer-row #composer:focus { border: round $accent; }
-#chat-attach { width: 12; margin-left: 1; height: 3; }
+#composer-row:focus-within {
+    border: round $accent;
+}
+#composer-row.recording {
+    border: round $error;
+}
+#composer-row #composer {
+    width: 1fr;
+    border: none;
+    background: transparent;
+    padding: 0 1;
+}
+#composer-row #composer:focus {
+    border: none;
+}
+#chat-attach {
+    width: 3;
+    min-width: 3;
+    height: 3;
+    margin: 0;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+    content-align: center middle;
+}
+#chat-mic {
+    width: 5;
+    min-width: 5;
+    height: 3;
+    margin: 0;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+    content-align: center middle;
+}
+#chat-attach:hover,
+#chat-mic:hover {
+    color: $text;
+    background: $boost;
+}
+#chat-mic.recording {
+    width: 5;
+    min-width: 5;
+    color: $error;
+    text-style: bold;
+}
 #picker {
     height: auto; max-height: 10; margin: 0 1;
     border: round #22d3ee; background: $surface;
@@ -247,6 +370,7 @@ BoardColumn {
     margin-right: 1;
 }
 BoardColumn:focus-within { border: round $accent; }
+BoardColumn.col-flash { border: round $success; background: $success 10%; }
 #detail {
     width: 44; height: 1fr;
     border: round $panel-lighten-2;
@@ -316,6 +440,14 @@ ListView:focus > ListItem.board-card.-highlight {
 }
 DataTable { height: auto; max-height: 14; margin: 0 1; }
 #dash-note { padding: 0 1; }
+#dash-assign {
+    height: 3;
+    padding: 0 1;
+    align: left middle;
+}
+#dash-assign-label { width: 8; padding: 1 0 0 0; }
+#dash-obj, #dash-member { width: 1fr; margin-right: 1; }
+#dash-assign-btn { width: 12; }
 
 /* live ------------------------------------------------------------------ */
 #live-note { padding: 0 1; }
@@ -346,6 +478,8 @@ Sparkline { height: 2; margin-bottom: 1; }
 }
 #help-box { width: 78; height: 80%; }
 #confirm-title { text-style: bold; padding-bottom: 1; }
+#confirm-box #edit-body { height: 10; margin: 1 0; }
+#confirm-box Button { margin-top: 1; margin-right: 1; }
 #login-box Input { margin-bottom: 1; }
 #login-err { color: $error; }
 LoginScreen { align: center middle; }
@@ -355,6 +489,8 @@ ModalScreen { align: center middle; }
 
 class LoginScreen(Screen[Credentials]):
     """Sign in without leaving the app."""
+
+    BINDINGS = [("escape", "cancel", "cancel")]
 
     def __init__(self, base_url: str, email: str = "") -> None:
         super().__init__()
@@ -379,6 +515,9 @@ class LoginScreen(Screen[Credentials]):
     def on_button_pressed(self) -> None:
         self._attempt()
 
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
     def _attempt(self) -> None:
         email = self.query_one("#login-email", Input).value.strip()
         password = self.query_one("#login-password", Input).value
@@ -397,6 +536,7 @@ class LoginScreen(Screen[Credentials]):
                 email=str(data.get("email") or email),
                 api_key=str(data.get("api_key") or ""),
                 user_id=int(data.get("user_id") or 0),
+                project_id=int(data.get("project_id") or 0),
             )
             self.app.call_from_thread(self.dismiss, creds)
         except ApiError as exc:
@@ -420,6 +560,7 @@ class AioApp(App[None]):
         ("ctrl+n", "mentions", "mentions"),
         ("ctrl+f", "attach_file", "attach"),
         ("f1", "start_tour", "tour"),
+        ("ctrl+shift+l", "logout", "log out"),
         # Letters: the fast way around when you are not typing a message.
         ("c", "tab_chat", "c chat"),
         ("b", "tab_board", "b board"),
@@ -458,6 +599,10 @@ class AioApp(App[None]):
         ("y", "board_copy_pr", ""),
         ("i", "board_toggle_detail", ""),
         ("e", "board_edit", ""),
+        ("left_square_bracket", "board_shift_left", ""),
+        ("right_square_bracket", "board_shift_right", ""),
+        ("ctrl+m", "voice_toggle", ""),
+        ("ctrl+shift+n", "new_channel", ""),
     ]
 
     def __init__(self, client: ApiClient, *, poll_seconds: float = 3.0) -> None:
@@ -477,7 +622,8 @@ class AioApp(App[None]):
         self.dashboard_view = DashboardView(client)
         self.live_view = LiveView(client)
         self.tour_coach = TutorialCoach()
-        self.tour_btn = Button("Tour", id="tour-btn")
+        self.tour_btn = Button("Tour", id="tour-btn", compact=True)
+        self.logout_btn = Button("Log out", id="logout-btn", compact=True)
         self.status_line = Static("", id="status-line", markup=True)
         self.switcher = ContentSwitcher(initial="chat", id="body")
 
@@ -486,6 +632,7 @@ class AioApp(App[None]):
         with Horizontal(id="tabs-row"):
             yield Tabs(*[Tab(label, id=key) for key, label in TABS], id="tabs")
             yield self.tour_btn
+            yield self.logout_btn
         with self.switcher:
             yield self.chat_view
             yield self.board_view
@@ -610,7 +757,7 @@ class AioApp(App[None]):
         self.push_screen(
             ConfirmModal(
                 "Take a 2-minute tour?",
-                "Spotlight walkthrough of Chat, Board, Attach, and pings.",
+                "Spotlight walkthrough of Chat, Board, plus (+), and pings.",
                 "You can replay anytime with the Tour button (or F1).",
                 "Start tour",
             ),
@@ -634,10 +781,64 @@ class AioApp(App[None]):
         self.tour_btn.disabled = True
         self.tour_coach.start(steps, on_finished=finished)
 
+    def action_logout(self) -> None:
+        def confirmed(yes: bool | None) -> None:
+            if not yes:
+                self.set_status("logout cancelled")
+                return
+            self._begin_logout()
+
+        self.push_screen(
+            ConfirmModal(
+                "Log out",
+                "Sign out on this machine?",
+                "Clears saved credentials. You can sign back in without restarting.",
+                "Log out",
+            ),
+            confirmed,
+        )
+
+    def _begin_logout(self) -> None:
+        if self.tour_coach.active:
+            try:
+                self.tour_coach.stop(completed=False)
+            except Exception:
+                pass
+        self.chat_view.reset_session_state()
+        last_email = str(self.ws.me.get("email") or "")
+        base_url = self.client.base_url
+        clear_credentials()
+        self.set_status("[dim]signed out — sign in to continue[/dim]")
+
+        def on_done(creds: Credentials | None) -> None:
+            if creds is None or creds.is_empty():
+                self.exit()
+                return
+            save_credentials(creds)
+            self.client.headers = auth_headers(creds.api_key, creds.email)
+            if creds.project_id:
+                self.client.project_id = int(creds.project_id)
+            self.sub_title = f"project {self.client.project_id}"
+            self.ws = Workspace()
+            self.chat_view.chat_id = None
+            self.chat_view.chats = []
+            self.chat_view.members = []
+            self.chat_view.my_email = ""
+            self.refresh_workspace()
+            self.refresh_board()
+            self.show_tab("chat")
+            self.call_after_refresh(self.chat_view.composer.focus)
+            self.set_status(f"[green]signed in as {escape(creds.email)}[/green]")
+
+        self.push_screen(LoginScreen(base_url, last_email), on_done)
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "tour-btn":
             event.stop()
             self.action_start_tour()
+        elif event.button.id == "logout-btn":
+            event.stop()
+            self.action_logout()
 
     @work(thread=True, exclusive=True, group="board-poll")
     def refresh_board(self) -> None:
@@ -785,6 +986,22 @@ class AioApp(App[None]):
 
     def action_board_edit(self) -> None:
         self._board_action("edit_card")
+
+    def action_board_shift_left(self) -> None:
+        if self.active_tab == "board":
+            self.board_view.shift_column(-1)
+
+    def action_board_shift_right(self) -> None:
+        if self.active_tab == "board":
+            self.board_view.shift_column(1)
+
+    def action_voice_toggle(self) -> None:
+        self.show_tab("chat")
+        self.chat_view.action_voice_toggle()
+
+    def action_new_channel(self) -> None:
+        self.show_tab("chat")
+        self.chat_view.action_new_channel()
 
     def action_attach_file(self) -> None:
         self.show_tab("chat")

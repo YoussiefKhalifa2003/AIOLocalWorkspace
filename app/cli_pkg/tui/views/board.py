@@ -264,6 +264,31 @@ class BoardView(Horizontal):
             msg = f"[red]setup failed: {escape(str(exc))}[/red]"
         self.app.call_from_thread(self.app.after_mutation, msg)
 
+    def shift_column(self, delta: int) -> None:
+        """Move current card to previous/next column (CLI stand-in for drag-and-drop)."""
+        if not self._require_owner():
+            return
+        card = self.current_card
+        if not card:
+            self.app.set_status("pick a card first")
+            return
+        status = str(card.get("status") or "")
+        try:
+            idx = self._order.index(status)
+        except ValueError:
+            self.app.set_status(f"[yellow]unknown status {escape(status)}[/yellow]")
+            return
+        new_idx = idx + delta
+        if new_idx < 0 or new_idx >= len(self._order):
+            self.app.set_status("[dim]end of board[/dim]")
+            return
+        new_status = self._order[new_idx]
+        dest = self.columns.get(new_status)
+        if dest is not None:
+            dest.add_class("col-flash")
+            self.set_timer(0.45, lambda c=dest: c.remove_class("col-flash"))
+        self.apply_status(card, new_status)
+
     def change_status(self) -> None:
         if not self._require_owner():
             return

@@ -485,15 +485,20 @@ class PromptModal(ModalScreen[str]):
 
     BINDINGS = [("escape", "dismiss_empty", "Cancel")]
 
-    def __init__(self, title: str, placeholder: str = "") -> None:
+    def __init__(self, title: str, placeholder: str = "", *, value: str = "") -> None:
         super().__init__()
         self._title = title
         self._placeholder = placeholder
+        self._value = value
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
             yield Label(self._title, id="confirm-title")
-            yield Input(placeholder=self._placeholder, id="prompt-input")
+            yield Input(
+                value=self._value,
+                placeholder=self._placeholder,
+                id="prompt-input",
+            )
 
     def on_mount(self) -> None:
         self.query_one("#prompt-input", Input).focus()
@@ -503,6 +508,37 @@ class PromptModal(ModalScreen[str]):
 
     def action_dismiss_empty(self) -> None:
         self.dismiss("")
+
+
+class MessageEditModal(ModalScreen[str | None]):
+    """Multi-line edit for an own chat message."""
+
+    BINDINGS = [("escape", "dismiss_none", "Cancel")]
+
+    def __init__(self, body: str) -> None:
+        super().__init__()
+        self._body = body or ""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-box"):
+            yield Label("Edit message", id="confirm-title")
+            area = TextArea(self._body, id="edit-body")
+            yield area
+            with Horizontal():
+                yield Button("Save", variant="primary", id="edit-save")
+                yield Button("Cancel", id="edit-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#edit-body", TextArea).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "edit-save":
+            self.dismiss(self.query_one("#edit-body", TextArea).text)
+        else:
+            self.dismiss(None)
+
+    def action_dismiss_none(self) -> None:
+        self.dismiss(None)
 
 
 HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
@@ -516,34 +552,50 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
 
 [b]Anywhere[/b]
   ?  help (or ctrl+w)   ctrl+n  unread mentions
-  F1 or [b]Tour[/b] button  spotlight walkthrough
+  F1 or slim [b]Tour[/b]  spotlight walkthrough
+  [b]Log out[/b] (tabs row) or [b]ctrl+shift+l[/b]
   r  refresh (ctrl+r)   q  quit (ctrl+q)
 
 [b]Chat[/b]
   Type [b]/[/b] [b]![/b] or [b]@[/b] — a dropdown opens (just like the website).
   up/down to choose, enter or tab to pick, esc to close.
+  Ghost line above the box shows the selected completion or next arg.
   /ask /deepresearch /code /write /review /checklist /status /clear
   !add !list !set !done !claim !issue !invite !attach !attach-clear !help
   @name pings a person · @team pings everyone
-  Click [b]Attach[/b] (or [b]ctrl+f[/b] / [b]!attach[/b]) — same button on
-  Mac, Windows, and Linux — opens a native file dialog (code, pdf, docx,
-  images…). Then send your message / skill.
+  Click [b]+[/b] on the left of the composer (or [b]ctrl+f[/b] / [b]!attach[/b]) —
+  same shell on Mac, Windows, and Linux — opens a native file dialog
+  (code, pdf, docx, images…). Then send your message / skill.
+  [b]mic[/b] on the right of the composer (or [b]ctrl+m[/b]) records / picks audio.
+  Non-image attachments: focus the 📎 row, [b]enter[/b] or [b]o[/b] to open
+  in your default app.
+  Messages group by speaker (~4 min): one name + colored rail per turn.
+  Own messages: hover a line — [b]edit[/b] / [b]delete[/b] appear on the
+  right. Keys e / delete still work when the line is focused.
+  [b]+ channel[/b] or [b]ctrl+shift+n[/b] creates a room (!newchat still works).
+  [b]ctrl+m[/b] voice → mic (or audio file) → fills the composer via STT.
+  Owner: [b]kick[/b] next to a name under MEMBERS removes them from the workspace.
   When someone [@]pings you: a sound plays and [@]N appears in the status
   line. Press [b]ctrl+n[/b] to open the list (who · time · chat · snippet),
   pick one to jump to that message (highlighted).
 
 [b]Board[/b]
   j k          card up/down     h l    column left/right
+  [ ]          shift card to previous / next column (DnD stand-in)
   click a card to update detail · i hide/show detail
   e            edit description & subtasks (your cards; owners: any)
-  Owner only:  n new · s move · a agent · m merge
+  Owner only:  n new · s move · a agent · m merge · [ ] column-shift
   Anyone:      g open repo · o open PR · y copy PR
   After n / !add a setup popup asks for description + subtasks.
 
 [b]People[/b]  owners: email invite (@domain only via Outlook), roles, remove.
 [b]Agents[/b]  pick the model behind each /skill, then Save.
 [b]Dashboard[/b]  owner-only tables: people, models, tokens, open work.
+  Assign strip: pick open task + teammate → Assign.
 [b]Live[/b]  owner-only charts: gauges, sparklines, WIP bars (polls every 2s).
+
+[b]Mac smoke[/b]  Terminal/iTerm may ask for mic (ctrl+m); file STT always works.
+  Open PDF/code attachments with enter/o. Board [ ] needs owner. Tour: F1.
 """
 
 
