@@ -2512,12 +2512,8 @@ class ChatView(Vertical):
             return
         ok = self._can_delete_current()
         btn.disabled = not ok
-        btn.display = True
-        btn.tooltip = (
-            "delete this chat"
-            if ok
-            else "can't delete general, your default private room, or chats you didn't create"
-        )
+        btn.display = ok
+        btn.tooltip = "delete this chat" if ok else ""
 
     def action_delete_chat(self) -> None:
         chat = self.current_chat
