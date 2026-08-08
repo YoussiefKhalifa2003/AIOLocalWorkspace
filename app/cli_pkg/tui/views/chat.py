@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+import time
 import webbrowser
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -698,8 +699,7 @@ class MessageLine(Vertical):
         align: right top;
         padding-left: 1;
     }
-    /* Instant Discord-style: CSS :hover covers the line + edit/delete children (no trail timers). */
-    MessageLine.mine-msg:hover .msg-tools {
+    MessageLine.tools-visible .msg-tools {
         display: block;
     }
     MessageLine .msg-tool {
@@ -709,11 +709,11 @@ class MessageLine(Vertical):
         margin-left: 1;
         content-align: right middle;
     }
-    MessageLine.mine-msg:hover .msg-tool-edit {
+    MessageLine.tools-visible .msg-tool-edit {
         color: #7dd3fc;
         text-style: underline;
     }
-    MessageLine.mine-msg:hover .msg-tool-delete {
+    MessageLine.tools-visible .msg-tool-delete {
         color: #f87171;
         text-style: underline;
     }
@@ -777,6 +777,43 @@ class MessageLine(Vertical):
         self._tools_ready = True
         self.update_message(self.message)
 
+    def _hide_tools(self) -> None:
+        self.remove_class("tools-visible")
+        chat = getattr(self.app, "chat_view", None)
+        if chat is not None and getattr(chat, "_tools_line", None) is self:
+            chat._tools_line = None
+
+    def _pointer_inside(self) -> bool:
+        """True if the mouse is still within this line's region (incl. edit/delete)."""
+        try:
+            return self.region.contains(*self.app.mouse_position)
+        except Exception:
+            return False
+
+    def _show_tools(self) -> None:
+        if not self.is_mine:
+            return
+        chat = getattr(self.app, "chat_view", None)
+        # While scrolling, lines race under a fixed pointer — skip tool chrome.
+        if chat is not None and getattr(chat, "tools_suppressed", False):
+            return
+        if chat is not None:
+            prev = getattr(chat, "_tools_line", None)
+            if prev is not None and prev is not self:
+                prev.remove_class("tools-visible")
+            chat._tools_line = self
+        self.add_class("tools-visible")
+
+    def on_enter(self, event: events.Enter) -> None:
+        if self.is_mine:
+            self._show_tools()
+
+    def on_leave(self, event: events.Leave) -> None:
+        # Moving onto edit/delete stays inside this line's region.
+        if self._pointer_inside():
+            return
+        self._hide_tools()
+
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
         href = (event.href or "").strip()
         if href.startswith(("http://", "https://", "mailto:")):
@@ -805,10 +842,13 @@ class MessageLine(Vertical):
         self.set_class(mine, "mine-msg")
         edited = bool(message.get("edited_at")) and not message.get("deleted_at")
         self.set_class(edited, "is-edited")
+        if not mine:
+            self._hide_tools()
 
         if message.get("deleted_at"):
             self.set_class(False, "mine-msg")
             self.set_class(False, "is-edited")
+            self._hide_tools()
             self._body_md.display = False
             self._body_static.display = True
             self._body_static.update("[dim i]message deleted[/dim i]")
@@ -1068,6 +1108,8 @@ class ChatView(Vertical):
         self._rows: dict[int, dict[str, Any]] = {}
         self._views: dict[int, MessageLine] = {}
         self._blocks_fp: tuple[Any, ...] | None = None
+        self._tools_line: MessageLine | None = None
+        self._scroll_quiet_until = 0.0
         self._last_id = 0
         self._last_sync = ""
         # Per-chat in-flight sends / LLM jobs (other rooms stay typable)
@@ -1124,10 +1166,31 @@ class ChatView(Vertical):
                     yield self.attach_btn
                     yield self.composer
                     yield self.mic_btn
+
     def on_mount(self) -> None:
         self.set_interval(self.POLL_SECONDS, self.poll_messages)
         self._sync_llm_ui()
         self._render_pending_attachments()
+
+    @property
+    def tools_suppressed(self) -> bool:
+        return time.monotonic() < self._scroll_quiet_until
+
+    def _arm_scroll_quiet(self) -> None:
+        """Ignore hover tools briefly while the transcript is scrolling."""
+        self._scroll_quiet_until = time.monotonic() + 0.18
+        if self._tools_line is not None:
+            try:
+                self._tools_line.remove_class("tools-visible")
+            except Exception:
+                pass
+            self._tools_line = None
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        self._arm_scroll_quiet()
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        self._arm_scroll_quiet()
 
     def reset_session_state(self) -> None:
         """Clear transcript / pending attach / voice when signing out."""
@@ -1138,6 +1201,8 @@ class ChatView(Vertical):
         self._rows.clear()
         self._views.clear()
         self._blocks_fp = None
+        self._tools_line = None
+        self._scroll_quiet_until = 0.0
         self._last_id = 0
         self._last_sync = ""
         self._sending_chats.clear()
@@ -1258,6 +1323,7 @@ class ChatView(Vertical):
         self._rows.clear()
         self._views.clear()
         self._blocks_fp = None
+        self._tools_line = None
         self._last_id = 0
         self._last_sync = ""
         self.transcript.remove_children()
