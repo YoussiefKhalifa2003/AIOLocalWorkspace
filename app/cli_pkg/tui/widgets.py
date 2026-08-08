@@ -522,6 +522,11 @@ class MessageEditModal(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
             yield Label("Edit message", id="confirm-title")
+            yield Static(
+                "[dim]Later messages stay. Following AI replies to this line are "
+                "removed and re-run if needed.[/dim]",
+                markup=True,
+            )
             area = TextArea(self._body, id="edit-body")
             yield area
             with Horizontal():
@@ -571,7 +576,9 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
   in your default app.
   Messages group by speaker (~4 min): one name + colored rail per turn.
   Own messages: hover a line — [b]edit[/b] / [b]delete[/b] appear on the
-  right. Keys e / delete still work when the line is focused.
+  right. Edited lines show a dim [b]· edited[/b] tag. Keys e / delete still
+  work when the line is focused. Editing never deletes later user messages;
+  only following AI replies to that line are cleared/re-run.
   [b]+ channel[/b] or [b]ctrl+shift+n[/b] creates a room (!newchat still works).
   [b]ctrl+m[/b] voice → mic (or audio file) → fills the composer via STT.
   Owner: [b]kick[/b] next to a name under MEMBERS removes them from the workspace.
