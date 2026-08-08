@@ -114,27 +114,67 @@ Header { background: $panel; }
     background: #ffffff 18%;
     border-left: tall #d0d0d0;
 }
-#chat-attach.tour-spotlight,
-#chat-attach.tour-spotlight.tour-glow,
-#chat-mic.tour-spotlight,
-#chat-mic.tour-spotlight.tour-glow,
+/* Compact chrome (height:1): soft wash like Invite — no double box (collapses label) */
 #logout-btn.tour-spotlight,
+#tour-btn.tour-spotlight,
+#chat-new.tour-spotlight {
+    border: none;
+    border-left: tall #ffffff;
+    padding: 0 1;
+    background: #ffffff 30%;
+    color: #ffffff;
+    text-style: bold;
+    opacity: 1;
+    height: 1;
+    max-height: 1;
+}
 #logout-btn.tour-spotlight.tour-glow,
-#chat-new.tour-spotlight,
+#tour-btn.tour-spotlight.tour-glow,
 #chat-new.tour-spotlight.tour-glow {
-    border: double #ffffff;
-    background: #ffffff;
-    color: #111111;
+    border: none;
+    border-left: tall #ffffff;
+    background: #ffffff 55%;
+    color: #ffffff;
+}
+#logout-btn.tour-spotlight.tour-glow-dim,
+#tour-btn.tour-spotlight.tour-glow-dim,
+#chat-new.tour-spotlight.tour-glow-dim {
+    border: none;
+    border-left: tall #d8d8d8;
+    background: #ffffff 18%;
+    color: #f0f0f0;
+}
+/* Tiny + / mic: soft wash only — border/padding collapses content (Textual crash) */
+#chat-attach.tour-spotlight,
+#chat-mic.tour-spotlight {
+    border: none;
+    padding: 0;
+    background: #ffffff 40%;
+    color: #ffffff;
     text-style: bold;
     opacity: 1;
 }
-#chat-attach.tour-spotlight.tour-glow-dim,
-#chat-mic.tour-spotlight.tour-glow-dim,
-#logout-btn.tour-spotlight.tour-glow-dim,
-#chat-new.tour-spotlight.tour-glow-dim {
-    border: wide #e0e0e0;
+#chat-attach.tour-spotlight {
+    width: 5;
+    min-width: 5;
+}
+#chat-mic.tour-spotlight {
+    width: 7;
+    min-width: 7;
+}
+#chat-attach.tour-spotlight.tour-glow,
+#chat-mic.tour-spotlight.tour-glow {
+    border: none;
+    padding: 0;
     background: #ffffff 55%;
-    color: #111111;
+    color: #ffffff;
+}
+#chat-attach.tour-spotlight.tour-glow-dim,
+#chat-mic.tour-spotlight.tour-glow-dim {
+    border: none;
+    padding: 0;
+    background: #ffffff 22%;
+    color: #f0f0f0;
 }
 /* Beat shell rules so Tour glow is visible */
 #composer-row.tour-spotlight,

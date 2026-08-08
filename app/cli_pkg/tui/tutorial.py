@@ -167,9 +167,34 @@ class TutorialCoach(Vertical):
         display: none;
     }
     #tour-hint.-show { display: block; }
-    #tour-actions { height: 3; align: left middle; }
-    #tour-actions Button { margin-right: 1; }
+    #tour-actions {
+        height: auto;
+        min-height: 3;
+        width: 100%;
+        align: left middle;
+    }
+    #tour-actions Button {
+        margin-right: 1;
+        min-width: 8;
+        display: block;
+    }
     """
+
+    # Chrome targets already on-screen — scrolling them can shove the coach off-view.
+    _NO_SCROLL_SELECTORS = frozenset(
+        {
+            "#tabs-row",
+            "#tour-btn",
+            "#logout-btn",
+            "#status-line",
+            "#composer-row",
+            "#composer",
+            "#chat-attach",
+            "#chat-mic",
+            "#chat-new",
+            "#chat-title",
+        }
+    )
 
     def __init__(self) -> None:
         super().__init__(id="tour-coach")
@@ -321,6 +346,19 @@ class TutorialCoach(Vertical):
             f"Tour  {self._index + 1}/{n}  ·  {escape(step.title)}"
         )
         self._body.update(escape(step.body))
+        last = self._index >= len(self._steps) - 1
+        try:
+            nxt = self.query_one("#tour-next", Button)
+            skip = self.query_one("#tour-skip", Button)
+            back = self.query_one("#tour-back", Button)
+            nxt.display = True
+            back.display = True
+            # Skip is pointless on the final step (Next is already Done).
+            skip.display = not last
+            nxt.label = "Done" if last else "Next"
+            skip.disabled = False
+        except Exception:
+            pass
         # Extra key hint for steps that need a shortcut callout
         if step.id == "pings":
             self._hint.update(
@@ -377,10 +415,11 @@ class TutorialCoach(Vertical):
             node.add_class("tour-glow")
             self._spotlight_node = node
             self._glow_on = True
-            try:
-                node.scroll_visible(animate=False)
-            except Exception:
-                pass
+            if selector not in self._NO_SCROLL_SELECTORS:
+                try:
+                    node.scroll_visible(animate=False)
+                except Exception:
+                    pass
             self._glow_timer = self.set_interval(0.55, self._tick_glow)
         except Exception:
             self._spotlight_node = None
