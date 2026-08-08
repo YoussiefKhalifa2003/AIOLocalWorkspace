@@ -524,8 +524,9 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
   /ask /deepresearch /code /write /review /checklist /status /clear
   !add !list !set !done !claim !issue !invite !attach !attach-clear !help
   @name pings a person · @team pings everyone
-  Click [b]Attach[/b] (or [b]ctrl+f[/b] / [b]!attach[/b]) to pick a file in a
-  native file dialog — code, pdf, docx, images… Then send your message / skill.
+  Click [b]Attach[/b] (or [b]ctrl+f[/b] / [b]!attach[/b]) — same button on
+  Mac, Windows, and Linux — opens a native file dialog (code, pdf, docx,
+  images…). Then send your message / skill.
 
 [b]Board[/b]
   j k          card up/down     h l    column left/right

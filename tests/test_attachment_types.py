@@ -96,3 +96,37 @@ def test_attachment_filetypes_include_code():
     assert "*.py" in blob
     assert "*.docx" in blob
     assert "*.png" in blob
+
+
+def test_macos_picker_parses_osascript(tmp_path, monkeypatch):
+    from app.cli_pkg.tui import file_picker as fp
+
+    py = tmp_path / "hello.py"
+    py.write_text("print(1)\n", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[0] == "osascript"
+        class R:
+            returncode = 0
+            stdout = str(py) + "\n"
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(fp.subprocess, "run", fake_run)
+    paths = fp._pick_macos(title="Attach", max_files=3)
+    assert paths == [py.resolve()]
+
+
+def test_pick_attachment_files_uses_macos_backend(tmp_path, monkeypatch):
+    from app.cli_pkg.tui import file_picker as fp
+
+    py = tmp_path / "a.py"
+    py.write_text("x=1\n", encoding="utf-8")
+    monkeypatch.setattr(fp.sys, "platform", "darwin")
+    monkeypatch.setattr(fp, "_pick_macos", lambda **kw: [py])
+    monkeypatch.setattr(
+        fp,
+        "_pick_tk",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("tk should not run on mac")),
+    )
+    assert fp.pick_attachment_files(max_files=2) == [py]
