@@ -1,40 +1,47 @@
-# AIO
+<p align="center">
+  <img src="docs/aio-logo.svg" alt="AIO" width="72" />
+</p>
 
-### The multi-agent workplace that lives in your terminal
-
-**AIO** is a full workspace for small engineering teams — team chat, private AI rooms, an objectives board, agent skills, live presence, and owner analytics — running as a **native terminal app** against a shared FastAPI backend. No browser required. Same API for the Textual TUI, scripted CLI, and optional web UI.
-
-```
-┌ AIO ──────────────────────── a@local.test · project 1 ── 20:04 ┐
-│  Chat  Board  Agents  People  Dash  Live            Tour  Log out │
-├──────────────┬────────────────────────────────────────────────────┤
-│ CHATS        │ #general                                           │
-│  # general ! │  Sara · 19:58                                      │
-│  ◆ my room / │  standup in 5?                                     │
-│  ◆ notes !   │                                                    │
-│ MEMBERS      │  Sara is typing…                                   │
-│  ● Demo User A ★                                                  │
-│  ● Sara                                                           │
-│  ○ Omar                                                           │
-│              │  > /  !  @ · + attach · mic                        │
-└──────────────┴────────────────────────────────────────────────────┘
- repo · jobs · agent · runner · @mentions · online 2/4
-```
-
-> **One product. Three surfaces.** Terminal (`aio`) · HTTP API · legacy web UI at `/app`.
-
----
+<h1 align="center">AIO</h1>
 
 <p align="center">
-  <a href="#quick-start"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+" /></a>
-  <a href="#stack"><img src="https://img.shields.io/badge/FastAPI-0.115%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" /></a>
-  <a href="#stack"><img src="https://img.shields.io/badge/Textual-TUI-4B8BBE?style=for-the-badge" alt="Textual TUI" /></a>
-  <a href="#license"><img src="https://img.shields.io/badge/License-Private-111111?style=for-the-badge" alt="Private" /></a>
+  <strong>The multi-agent workplace that lives in your terminal</strong>
 </p>
 
 <p align="center">
-  <b>Chat · Board · Agents · Presence · Create (public/private · ! / AI) · Owner Dash</b>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+" /></a>
+  <a href="#stack"><img src="https://img.shields.io/badge/FastAPI-0.115%2B-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI" /></a>
+  <a href="#stack"><img src="https://img.shields.io/badge/Textual-TUI-4B8BBE?style=flat-square" alt="Textual TUI" /></a>
+  <a href="#license"><img src="https://img.shields.io/badge/License-Private-111111?style=flat-square" alt="Private" /></a>
 </p>
+
+<p align="center">
+  Team chat · private AI rooms · objectives board · live presence · owner analytics<br/>
+  <em>Native terminal app · shared FastAPI backend · no browser required</em>
+</p>
+
+<p align="center">
+  <img src="docs/aio-hero.png" alt="AIO terminal workspace — chat, presence, and composer" width="920" />
+</p>
+
+<p align="center">
+  <code>aio</code> terminal &nbsp;·&nbsp; HTTP API &nbsp;·&nbsp; legacy web at <code>/app</code>
+</p>
+
+<p align="center">
+  <a href="#quick-start"><strong>Quick start</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#living-in-the-app">Living in the app</a>
+  &nbsp;·&nbsp;
+  <a href="#creating-chats">Creating chats</a>
+  &nbsp;·&nbsp;
+  <a href="#features">Features</a>
+</p>
+
+<pre>
+uvicorn app.main:app --port 8000   # terminal 1
+aio                                # terminal 2
+</pre>
 
 ---
 
