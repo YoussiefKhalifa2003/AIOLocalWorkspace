@@ -56,6 +56,9 @@ TABS: list[tuple[str, str]] = [
     ("live", "Live  v"),
 ]
 
+# Owner-only chrome — members never see these tabs.
+OWNER_ONLY_TABS = frozenset({"people", "dashboard", "live"})
+
 # Letter shortcuts work whenever you are not typing a message; the ctrl+ pair
 # works everywhere, including mid-sentence in the chat box.
 TAB_KEYS: list[tuple[str, str, str]] = [
@@ -715,9 +718,9 @@ class AioApp(App[None]):
         return self.switcher.current or "chat"
 
     def show_tab(self, key: str) -> None:
-        if key in ("dashboard", "live") and not self.ws.is_owner:
-            label = "Dashboard" if key == "dashboard" else "Live"
-            self.set_status(f"[yellow]{label} is owner-only[/yellow]")
+        if key in OWNER_ONLY_TABS and not self.ws.is_owner:
+            labels = {"people": "People", "dashboard": "Dashboard", "live": "Live"}
+            self.set_status(f"[yellow]{labels.get(key, key)} is owner-only[/yellow]")
             return
         prev = self.switcher.current
         if prev == "live" and key != "live":
@@ -738,6 +741,23 @@ class AioApp(App[None]):
         elif key == "live":
             self.live_view.start_polling()
         self.set_status("")
+
+    def _sync_owner_tabs(self) -> None:
+        """Show People / Dash / Live only for workspace owners."""
+        try:
+            tabs = self.query_one("#tabs", Tabs)
+        except Exception:
+            return
+        owner = bool(self.ws.is_owner)
+        for key in OWNER_ONLY_TABS:
+            try:
+                tab = tabs.query_one(f"#{key}", Tab)
+            except Exception:
+                continue
+            tab.display = owner
+        # If a member landed on an owner tab (e.g. after role change), bounce home.
+        if not owner and self.switcher.current in OWNER_ONLY_TABS:
+            self.show_tab("chat")
 
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
         key = event.tab.id or "chat"
@@ -790,6 +810,7 @@ class AioApp(App[None]):
         if ws.presence:
             self.chat_view.set_presence(ws.presence)
         self.people_view.set_members(ws.members, ws.me, presence=ws.presence or self.chat_view.presence)
+        self._sync_owner_tabs()
         self._paint_status()
         self._maybe_offer_tour()
 

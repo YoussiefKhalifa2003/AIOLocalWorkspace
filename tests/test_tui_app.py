@@ -21,6 +21,7 @@ from app.cli_pkg.tui.views.chat import (
     looks_like_agent_work,
     render_markdown,
 )
+from textual.widgets import Tab, Tabs
 
 @pytest.fixture(autouse=True)
 def _isolate_aio_prefs(tmp_path, monkeypatch):
@@ -737,24 +738,25 @@ async def test_app_renders_every_tab_for_the_owner():
 
 
 @pytest.mark.asyncio
-async def test_dashboard_and_live_are_owner_only_but_the_rest_of_the_app_is_not():
+async def test_owner_only_tabs_hidden_from_members():
     app = await _boot(owner=False)
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.pause()
         await pilot.pause()
 
-        app.show_tab("dashboard")
-        await pilot.pause()
-        assert app.switcher.current != "dashboard"
+        for tab in ("people", "dashboard", "live"):
+            app.show_tab(tab)
+            await pilot.pause()
+            assert app.switcher.current != tab
 
-        app.show_tab("live")
-        await pilot.pause()
-        assert app.switcher.current != "live"
-
-        for tab in ("board", "agents", "chat", "people"):
+        for tab in ("board", "agents", "chat"):
             app.show_tab(tab)
             await pilot.pause()
             assert app.switcher.current == tab
+
+        tabs = app.query_one("#tabs", Tabs)
+        for key in ("people", "dashboard", "live"):
+            assert tabs.query_one(f"#{key}", Tab).display is False
 
 
 @pytest.mark.asyncio
