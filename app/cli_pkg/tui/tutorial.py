@@ -43,7 +43,7 @@ MEMBER_STEPS: list[TourStep] = [
         title="Type here",
         body="Type in this box: / for AI · ! for commands · @ to ping.",
         tab="chat",
-        spotlight="#composer",
+        spotlight="#composer-row",
     ),
     TourStep(
         id="attach",
@@ -144,6 +144,7 @@ class TutorialCoach(Vertical):
         self._steps: list[TourStep] = []
         self._index = 0
         self._spotlight_node: Any = None
+        self._faded_nodes: list[Any] = []
         self._on_finished: Callable[[bool], None] | None = None
         self._glow_on = False
         self._glow_timer: Timer | None = None
@@ -183,10 +184,6 @@ class TutorialCoach(Vertical):
         self._stop_glow()
         self._clear_spotlight()
         self.remove_class("-active")
-        try:
-            self.app.query_one("#body").remove_class("tour-dim")
-        except Exception:
-            pass
         self._hint.remove_class("-show")
         self._hint.update("")
         cb = self._on_finished
@@ -205,8 +202,70 @@ class TutorialCoach(Vertical):
             self._glow_timer = None
         self._glow_on = False
 
+    @staticmethod
+    def _is_same_or_under(node: Any, ancestor: Any) -> bool:
+        cur = node
+        while cur is not None:
+            if cur is ancestor:
+                return True
+            cur = getattr(cur, "parent", None)
+        return False
+
+    # Regions we can safely fade without covering the spotlight target.
+    _DIM_SELECTORS = (
+        "#tabs-row",
+        "#chat-sidebar",
+        "#transcript",
+        "#picker",
+        "#llm-wait",
+        "#attach-pending",
+        "#chat-title",
+        "#composer-row",
+        "#composer",
+        "#chat-attach",
+        "#columns",
+        "#detail",
+        "#people",
+        "#agents",
+        "#dashboard",
+        "#live",
+        "#status-line",
+        "#chat-list",
+        "#member-list",
+    )
+
+    def _clear_faded(self) -> None:
+        for node in self._faded_nodes:
+            try:
+                node.remove_class("tour-faded")
+            except Exception:
+                pass
+        self._faded_nodes = []
+
+    def _apply_fades(self, spotlight: Any) -> None:
+        """Dim everything except the spotlight widget (and its ancestors)."""
+        self._clear_faded()
+        app = self.app
+        for sel in self._DIM_SELECTORS:
+            try:
+                region = app.query_one(sel)
+            except Exception:
+                continue
+            # Don't fade the target or a container that wraps it
+            if self._is_same_or_under(spotlight, region):
+                continue
+            # Don't fade a child of the spotlight (e.g. #composer inside #composer-row)
+            if self._is_same_or_under(region, spotlight):
+                continue
+            try:
+                region.add_class("tour-faded")
+                self._faded_nodes.append(region)
+            except Exception:
+                pass
+
     def _clear_spotlight(self) -> None:
         self._stop_glow()
+        self._clear_faded()
         node = self._spotlight_node
         self._spotlight_node = None
         if node is not None:
@@ -260,11 +319,6 @@ class TutorialCoach(Vertical):
 
     def _apply_spotlight(self, selector: str | None) -> None:
         self._clear_spotlight()
-        try:
-            body = self.app.query_one("#body")
-            body.add_class("tour-dim")
-        except Exception:
-            pass
         if not selector:
             return
         try:
@@ -272,6 +326,7 @@ class TutorialCoach(Vertical):
         except Exception:
             return
         try:
+            self._apply_fades(node)
             node.add_class("tour-spotlight")
             node.add_class("tour-glow")
             self._spotlight_node = node
