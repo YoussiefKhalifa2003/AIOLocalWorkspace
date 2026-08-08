@@ -21,7 +21,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/aio-hero.png" alt="AIO terminal workspace — chat, presence, and composer" width="920" />
+  <img src="docs/aio-hero-duo.png" alt="AIO on Windows and macOS" width="980" />
+</p>
+
+<p align="center">
+  <sub>Windows Terminal (real) · macOS Terminal (same app)</sub>
 </p>
 
 <p align="center">
@@ -55,7 +59,7 @@ aio                                # terminal 2
 | Who can create what? | **Members → private only** · **Owners → public or private** · pick **`!` or `/` AI** |
 | Demo / onboard friction | Guided **Tour** · invite links |
 
-Built for teams of ~5–6 who want serious agent workflows without leaving the shell.
+Built for teams of ~5-6 who want serious agent workflows without leaving the shell.
 
 ---
 
@@ -90,7 +94,7 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 cp .env.example .env
-# Add at least one LLM key — see Configuration
+# Add at least one LLM key - see Configuration
 
 ./aio seed                                          # or: aio seed
 uvicorn app.main:app --host 0.0.0.0 --port 8000     # keep the API running
@@ -121,8 +125,8 @@ rm -f aio.db && ./aio seed          # reset demo data
 
 | Keys | Opens |
 |------|--------|
-| `c` `b` `g` · `1`–`3` | **Chat** · **Board** · **Agents** *(everyone)* |
-| `p` `d` `v` · `4`–`6` | **People** · **Dash** · **Live** *(owner only — hidden for members)* |
+| `c` `b` `g` · `1`-`3` | **Chat** · **Board** · **Agents** *(everyone)* |
+| `p` `d` `v` · `4`-`6` | **People** · **Dash** · **Live** *(owner only - hidden for members)* |
 | `?` | Keys & commands |
 | `ctrl+n` | Unread @mentions |
 | `ctrl+r` · `q` | Refresh · quit |
@@ -132,8 +136,8 @@ rm -f aio.db && ./aio seed          # reset demo data
 
 | Prefix | Role |
 |--------|------|
-| `/` | AI skills — when the chat’s mode is **AI** (`/ask` `/deepresearch` `/code` …) |
-| `!` | Board / ops — **whispers** in public channels (only you see the exchange) |
+| `/` | AI skills - when the chat’s mode is **AI** (`/ask` `/deepresearch` `/code` …) |
+| `!` | Board / ops - **whispers** in public channels (only you see the exchange) |
 | `@` | Ping people · sound + jump via `ctrl+n` |
 
 Also: **`+` attach** · **mic** · hover **edit / delete** · speaker blocks · **online** dots · **typing** in public channels.
@@ -164,8 +168,8 @@ Your seeded **◆ my room** stays the default private AI room (`/`). **#general*
 
 | Surface | For |
 |---------|-----|
-| Public `#channels` | Humans — talk, @ping; `!` stays private to you |
-| Private `◆` chats | Only you — ops or AI depending on mode |
+| Public `#channels` | Humans - talk, @ping; `!` stays private to you |
+| Private `◆` chats | Only you - ops or AI depending on mode |
 | Board / `!` | Shared work graph |
 | Owner tabs | Roster admin + analytics |
 
@@ -261,9 +265,9 @@ Password: **`demo`**
 
 | Email | Role |
 |-------|------|
-| `a@local.test` | **Owner** — public chats, People, Dash, Live, merge |
-| `omar@local.test` | Member — private chats only + Chat / Board / Agents |
-| `sara@local.test` | Member — same |
+| `a@local.test` | **Owner** - public chats, People, Dash, Live, merge |
+| `omar@local.test` | Member - private chats only + Chat / Board / Agents |
+| `sara@local.test` | Member - same |
 
 ### Two-minute demo
 
@@ -323,5 +327,5 @@ python scripts/tui_pty_check.py
 ---
 
 <p align="center">
-  <sub>AIO — public for the team · private for you · ! for work · / for agents.</sub>
+  <sub>AIO - public for the team · private for you · ! for work · / for agents.</sub>
 </p>
