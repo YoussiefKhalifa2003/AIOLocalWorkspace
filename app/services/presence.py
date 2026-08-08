@@ -11,8 +11,8 @@ from app.db.models import Chat, User, UserPresence, WorkspaceMember, utcnow
 from app.services.auth import AuthContext
 from app.services.chat_access import require_chat_access
 
-ONLINE_SECONDS = 45
-TYPING_SECONDS = 3
+ONLINE_SECONDS = 12
+TYPING_SECONDS = 4
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -31,6 +31,16 @@ def _get_or_create(db: Session, auth: AuthContext) -> UserPresence:
         db.flush()
     elif row.tenant_id != auth.tenant_id:
         row.tenant_id = auth.tenant_id
+    return row
+
+
+def mark_offline(db: Session, auth: AuthContext) -> UserPresence:
+    """Force offline immediately (logout / app exit)."""
+    row = _get_or_create(db, auth)
+    row.last_seen = utcnow() - timedelta(seconds=ONLINE_SECONDS + 5)
+    row.active_chat_id = None
+    row.typing_chat_id = None
+    row.typing_until = None
     return row
 
 

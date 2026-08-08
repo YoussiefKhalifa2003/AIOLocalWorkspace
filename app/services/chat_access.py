@@ -66,6 +66,7 @@ def ensure_private_room(
         project_id=project_id,
         name=f"private - {user.email}",
         kind="private",
+        mode="llm",
         owner_user_id=user.id,
     )
     db.add(chat)
@@ -122,10 +123,14 @@ def list_visible_chats(db: Session, auth: AuthContext) -> list[Chat]:
 
 
 def chat_to_dict(c: Chat) -> dict:
+    mode = (getattr(c, "mode", None) or "").strip().lower()
+    if mode not in ("ops", "llm"):
+        mode = "llm" if (c.kind or "") == "private" else "ops"
     return {
         "id": c.id,
         "name": c.name,
         "kind": c.kind,
+        "mode": mode,
         "project_id": c.project_id,
         "owner_user_id": c.owner_user_id,
     }

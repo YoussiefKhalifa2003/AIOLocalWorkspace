@@ -15,7 +15,6 @@ from app.services.chat_access import (
     chat_to_dict,
     ensure_channel_membership,
     ensure_chat_member,
-    ensure_private_room,
     list_visible_chats,
     require_chat_access,
 )
@@ -28,7 +27,8 @@ router = APIRouter(tags=["chats"])
 
 class ChatIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    kind: str = "channel"
+    kind: str = "channel"  # channel (public) | private
+    mode: str = "ops"  # ops (! only) | llm (/skills)
     project_id: int | None = 1
 
 
@@ -68,27 +68,49 @@ def create_chat(
     auth: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
 ):
+    from app.services.chat_access import is_workspace_owner
+
     kind = (body.kind or "channel").strip().lower()
+    mode = (body.mode or "ops").strip().lower()
     if kind not in ("channel", "private"):
         raise HTTPException(status_code=400, detail="kind must be channel or private")
+    if mode not in ("ops", "llm"):
+        raise HTTPException(status_code=400, detail="mode must be ops or llm")
+
+    owner = is_workspace_owner(db, auth)
+    # Members may only create private chats; owners may create public channels too.
+    if kind == "channel" and not owner:
+        raise HTTPException(
+            status_code=403,
+            detail="only owners can create public channels; use a private chat instead",
+        )
+
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
 
     if kind == "private":
-        user = db.query(User).filter(User.id == auth.user_id).one()
-        chat = ensure_private_room(
-            db,
+        chat = Chat(
             tenant_id=auth.tenant_id,
             project_id=body.project_id,
-            user=user,
+            name=name,
+            kind="private",
+            mode=mode,
+            owner_user_id=auth.user_id,
         )
+        db.add(chat)
+        db.flush()
+        ensure_chat_member(db, tenant_id=auth.tenant_id, chat_id=chat.id, user_id=auth.user_id)
         db.commit()
         return chat_to_dict(chat)
 
     chat = Chat(
         tenant_id=auth.tenant_id,
         project_id=body.project_id,
-        name=body.name.strip(),
+        name=name,
         kind="channel",
-        owner_user_id=None,
+        mode=mode,
+        owner_user_id=auth.user_id,
     )
     db.add(chat)
     db.flush()

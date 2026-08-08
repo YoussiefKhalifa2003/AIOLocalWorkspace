@@ -64,6 +64,17 @@ def _sqlite_migrate() -> None:
         _add("tenants", "invite_uses_left", "INTEGER")
         _add("chat_messages", "edited_at", "DATETIME")
         _add("chat_messages", "deleted_at", "DATETIME")
+        _add("chats", "mode", "VARCHAR(20) DEFAULT 'ops'")
+        # Private rooms are AI by default; shared channels stay commands-first.
+        try:
+            conn.execute(
+                text(
+                    "UPDATE chats SET mode = 'llm' WHERE kind = 'private' "
+                    "AND (mode IS NULL OR mode = '' OR mode = 'ops')"
+                )
+            )
+        except Exception:
+            pass
         # backfill status from done
         ocols = {row[1] for row in conn.execute(text("PRAGMA table_info(objectives)")).fetchall()}
         if "status" in ocols and "done" in ocols:

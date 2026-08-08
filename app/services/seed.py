@@ -47,6 +47,7 @@ def _ensure_general(db: Session, tenant_id: int, project_id: int) -> Chat:
             project_id=project_id,
             name="general",
             kind="channel",
+            mode="ops",
             owner_user_id=None,
         )
         db.add(chat)

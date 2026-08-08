@@ -113,7 +113,7 @@ def _filter(catalog: tuple[Candidate, ...], typed: str) -> list[Candidate]:
 
 
 def candidates_for(
-    trigger: str, typed: str, *, members: list[str], chat_kind: str
+    trigger: str, typed: str, *, members: list[str], chat_kind: str, chat_mode: str = ""
 ) -> list[Candidate]:
     """What the dropdown should show for this trigger."""
     if trigger == "@":
@@ -125,13 +125,33 @@ def candidates_for(
                 out.append(Candidate(f"@{handle} ", f"@{handle}", name))
         return out[:12]
 
-    catalog = COMMANDS if trigger == "!" else (
-        SKILLS if chat_kind == "private" else CHANNEL_SKILLS
-    )
+    mode = (chat_mode or "").strip().lower()
+    if mode not in ("ops", "llm"):
+        mode = "llm" if chat_kind == "private" else "ops"
+    if trigger == "!":
+        catalog = COMMANDS
+    elif mode == "llm":
+        catalog = SKILLS
+    else:
+        catalog = (Candidate("/clear ", "/clear", "wipe this chat for you"),)
     # An exact match means the command is complete; args come after a space.
     if any(c.label[1:].lower() == typed.lower() for c in catalog):
         return []
     return _filter(catalog, typed)
+
+
+def looks_like_agent_work(body: str, chat_kind: str, chat_mode: str = "") -> bool:
+    text = (body or "").strip()
+    if not text or _CLEAR_RE.match(text):
+        return False
+    mode = (chat_mode or "").strip().lower()
+    if mode not in ("ops", "llm"):
+        mode = "llm" if chat_kind == "private" else "ops"
+    if mode != "llm":
+        return False
+    if _SKILL_RE.match(text):
+        return True
+    return text.startswith("/")
 
 
 class CommandPicker(VerticalScroll):
@@ -268,15 +288,6 @@ def skill_name_from_body(body: str) -> str:
         return m.group(1).lower().replace("-", "").replace("_", "")
     m2 = re.match(r"^(?:force\s+)?(code|ask|deepresearch|research|write|review)\b", text, re.I)
     return m2.group(1).lower() if m2 else ""
-
-
-def looks_like_agent_work(body: str, chat_kind: str) -> bool:
-    text = (body or "").strip()
-    if not text or _CLEAR_RE.match(text):
-        return False
-    if _SKILL_RE.match(text):
-        return True
-    return chat_kind == "private" and text.startswith("/")
 
 
 def _inline(line: str) -> str:
@@ -1106,9 +1117,9 @@ class ChatView(Vertical):
 
     POLL_SECONDS = 2.0
     PRESENCE_POLL_SECONDS = 0.5
-    HEARTBEAT_SECONDS = 15.0
+    HEARTBEAT_SECONDS = 4.0
     TYPING_DEBOUNCE_SECONDS = 0.12
-    TYPING_IDLE_SECONDS = 1.25
+    TYPING_IDLE_SECONDS = 1.5
     BINDINGS = [
         ("ctrl+f", "attach_file", "attach file"),
         ("ctrl+m", "voice_toggle", "voice"),
@@ -1201,6 +1212,12 @@ class ChatView(Vertical):
         self._render_pending_attachments()
         self._paint_typing_line()
 
+    def on_unmount(self) -> None:
+        try:
+            self.client.post_presence(offline=True)
+        except Exception:
+            pass
+
     @property
     def tools_suppressed(self) -> bool:
         return time.monotonic() < self._scroll_quiet_until
@@ -1277,8 +1294,10 @@ class ChatView(Vertical):
 
     def set_workspace(self, chats: list[dict], members: list[dict], my_email: str) -> None:
         self.my_email = my_email
-        changed = [(c["id"], c.get("name"), c.get("kind")) for c in chats] != [
-            (c["id"], c.get("name"), c.get("kind")) for c in self.chats
+        changed = [
+            (c["id"], c.get("name"), c.get("kind"), c.get("mode")) for c in chats
+        ] != [
+            (c["id"], c.get("name"), c.get("kind"), c.get("mode")) for c in self.chats
         ]
         self.chats = chats
         if changed:
@@ -1297,11 +1316,17 @@ class ChatView(Vertical):
         for i, chat in enumerate(self.chats):
             cid = int(chat["id"])
             working = " [dim]…[/dim]" if cid in self._llm_jobs else ""
-            label = (
-                f"[#7dd3fc]#[/#7dd3fc] {escape(str(chat.get('name') or ''))}{working}"
-                if chat.get("kind") == "channel"
-                else f"[#c4b5fd]◆[/#c4b5fd] my room{working}"
-            )
+            if chat.get("kind") == "channel":
+                label = f"[#7dd3fc]#[/#7dd3fc] {escape(str(chat.get('name') or ''))}{working}"
+            else:
+                raw_name = str(chat.get("name") or "my room")
+                show = "my room" if raw_name.lower().startswith("private -") else raw_name
+                label = f"[#c4b5fd]◆[/#c4b5fd] {escape(show)}{working}"
+            mode = str(chat.get("mode") or ("llm" if chat.get("kind") == "private" else "ops"))
+            if mode == "llm":
+                label = f"{label} [dim]/[/dim]"
+            else:
+                label = f"{label} [dim]![/dim]"
             item = ListItem(Static(label, markup=True))
             item.chat = chat
             self.chat_list.append(item)
@@ -1415,10 +1440,15 @@ class ChatView(Vertical):
         self._render_pending_attachments()
         chat = self.current_chat
         if chat.get("kind") == "private":
-            self.title_bar.update("[b]my room[/b]  [dim]/skills · notes stay quiet[/dim]")
+            mode = str(chat.get("mode") or "llm")
+            tip = "/skills · only you" if mode == "llm" else "! commands · only you"
+            name = escape(str(chat.get("name") or "my room"))
+            self.title_bar.update(f"[b]◆ {name}[/b]  [dim]{tip}[/dim]")
         else:
             name = escape(str(chat.get("name") or ""))
-            self.title_bar.update(f"[b]#{name}[/b]  [dim]@people · !commands[/dim]")
+            mode = str(chat.get("mode") or "ops")
+            tip = "@people · /skills (whisper)" if mode == "llm" else "@people · !commands"
+            self.title_bar.update(f"[b]#{name}[/b]  [dim]{tip}[/dim]")
         self._sync_llm_ui()
         self.poll_messages()
         self._sync_chat_list_selection()
@@ -1915,12 +1945,12 @@ class ChatView(Vertical):
         self._typing_active = bool(typing)
         self._post_presence_bg(chat_id=cid, typing=typing)
 
-    @work(thread=True, exclusive=True, group="presence-typing")
+    @work(thread=True, group="presence-typing")
     def _post_presence_bg(
-        self, *, chat_id: int | None = None, typing: bool | None = None
+        self, *, chat_id: int | None = None, typing: bool | None = None, offline: bool = False
     ) -> None:
         try:
-            self.client.post_presence(chat_id=chat_id, typing=typing)
+            self.client.post_presence(chat_id=chat_id, typing=typing, offline=offline)
             self._presence_err_shown = False
         except ApiError as exc:
             self._notify_presence_error(exc)
@@ -1996,7 +2026,11 @@ class ChatView(Vertical):
         trigger, start, typed = hit
         names = [str(m.get("name") or m.get("email") or "") for m in self.members]
         items = candidates_for(
-            trigger, typed, members=names, chat_kind=str(self.current_chat.get("kind") or "")
+            trigger,
+            typed,
+            members=names,
+            chat_kind=str(self.current_chat.get("kind") or ""),
+            chat_mode=str(self.current_chat.get("mode") or ""),
         )
         self.picker.show(items, start)
 
@@ -2090,7 +2124,11 @@ class ChatView(Vertical):
 
         self._sending_chats.add(chat_id)
         chat = next((c for c in self.chats if int(c["id"]) == chat_id), {})
-        working = looks_like_agent_work(body, str(chat.get("kind") or ""))
+        working = looks_like_agent_work(
+            body,
+            str(chat.get("kind") or ""),
+            str(chat.get("mode") or ""),
+        )
         if working:
             skill = skill_name_from_body(body) or (body.split()[0].lstrip("/") if body else "skill")
             self._llm_jobs[chat_id] = skill
@@ -2190,7 +2228,11 @@ class ChatView(Vertical):
     def _start_edit(self, chat_id: int, message_id: int, body: str) -> None:
         """Same LLM wait UI as send when the edit re-triggers an agent skill."""
         chat = next((c for c in self.chats if int(c["id"]) == chat_id), {})
-        working = looks_like_agent_work(body, str(chat.get("kind") or ""))
+        working = looks_like_agent_work(
+            body,
+            str(chat.get("kind") or ""),
+            str(chat.get("mode") or ""),
+        )
         if working:
             skill = skill_name_from_body(body) or (
                 body.split()[0].lstrip("/") if body else "skill"
@@ -2390,21 +2432,29 @@ class ChatView(Vertical):
         self.app.call_from_thread(self.app.set_status, msg)
 
     def action_new_channel(self) -> None:
-        def done(name: str | None) -> None:
-            if not name:
-                self.app.set_status("channel cancelled")
+        def done(result: dict[str, Any] | None) -> None:
+            if not result:
+                self.app.set_status("create cancelled")
                 return
-            self.app.set_status(f"[dim]creating #{escape(name)}…[/dim]")
-            self._create_channel_worker(name)
+            name = str(result.get("name") or "").strip()
+            kind = str(result.get("kind") or "private")
+            mode = str(result.get("mode") or "ops")
+            if not name:
+                return
+            label = f"#{name}" if kind == "channel" else f"◆ {name}"
+            self.app.set_status(f"[dim]creating {escape(label)}…[/dim]")
+            self._create_channel_worker(name, kind=kind, mode=mode)
 
-        from app.cli_pkg.tui.widgets import PromptModal
+        ws = getattr(self.app, "ws", None)
+        is_owner = bool(ws and getattr(ws, "is_owner", False))
+        from app.cli_pkg.tui.widgets import CreateChatModal
 
-        self.app.push_screen(PromptModal("Channel name", "standup"), done)
+        self.app.push_screen(CreateChatModal(is_owner=is_owner), done)
 
     @work(thread=True, group="chat-new")
-    def _create_channel_worker(self, name: str) -> None:
+    def _create_channel_worker(self, name: str, *, kind: str = "channel", mode: str = "ops") -> None:
         try:
-            chat = self.client.create_chat(name)
+            chat = self.client.create_chat(name, kind=kind, mode=mode)
             error = ""
         except ApiError as exc:
             chat, error = {}, str(exc)
@@ -2418,7 +2468,10 @@ class ChatView(Vertical):
         self.app.refresh_workspace()
         if new_id:
             self.select_chat(new_id)
-        self.app.set_status(f"[green]#{escape(str(chat.get('name') or ''))} created[/green]")
+        kind = str(chat.get("kind") or "")
+        name = escape(str(chat.get("name") or ""))
+        label = f"#{name}" if kind == "channel" else f"◆ {name}"
+        self.app.set_status(f"[green]{label} created[/green]")
         self.composer.focus()
 
     def begin_kick(self, member: dict[str, Any]) -> None:

@@ -1166,15 +1166,19 @@ def handle_chat_message(
     """Process a user chat message.
 
     - `!...` commands: no LLM; whisper in team channels.
-    - `/status`: AI catch-up in private rooms and team channels (whisper on channels).
-    - Other `/skills`: private rooms only.
-    - Team channels: plain text is human-only.
+    - `/clear`: always available.
+    - `/skills`: only when chat.mode == llm (whisper on public channels).
+    - Team channels (ops): plain text is human-only.
     """
     from app.services.bang_commands import try_bang_command
     from app.services.chat_visibility import mark_whisper
 
     raw_body = (user_message.body or "").strip()
     is_channel = (chat.kind or "channel") == "channel"
+    mode = (getattr(chat, "mode", None) or "").strip().lower()
+    if mode not in ("ops", "llm"):
+        mode = "ops" if is_channel else "llm"
+    allows_llm = mode == "llm"
     whisper = False
 
     # Bang commands - always available
@@ -1201,7 +1205,7 @@ def handle_chat_message(
             db, auth=auth, chat=chat, result=result, speak=speak, whisper=whisper
         )
 
-    # /clear and /status work in channels (whisper) and private rooms
+    # /clear always; other /skills need llm mode
     if raw_body.startswith("/"):
         from app.services.skills import parse_skill
 
@@ -1222,11 +1226,29 @@ def handle_chat_message(
                 whisper=whisper or True,
             )
 
-        parsed = parse_skill(raw_body)
-        if parsed.skill == "status":
+        if not allows_llm:
             if is_channel:
                 mark_whisper(user_message, auth.user_id)
                 whisper = True
+            return _post_lead_reply(
+                db,
+                auth=auth,
+                chat=chat,
+                result=IntentResult(
+                    True,
+                    "This chat is **commands-only** (`!`). "
+                    "Create an AI chat (mode: skills) for `/ask` and other skills.",
+                ),
+                speak=speak,
+                whisper=whisper,
+            )
+
+        if is_channel:
+            mark_whisper(user_message, auth.user_id)
+            whisper = True
+
+        parsed = parse_skill(raw_body)
+        if parsed.skill == "status":
             status_result = _run_status_skill(
                 db, auth=auth, chat=chat, rest=parsed.rest or ""
             )
@@ -1234,15 +1256,6 @@ def handle_chat_message(
                 db, auth=auth, chat=chat, result=status_result, speak=speak, whisper=whisper
             )
 
-    # Team channel: no bare commands, no other slash-AI
-    if is_channel:
-        return [], None, None, False
-
-    # Private room: /skills only for AI; plain text = notes
-    from app.services.skills import parse_skill, recent_private_context
-
-    if raw_body.startswith("/"):
-        parsed = parse_skill(raw_body)
         if parsed.hint and not parsed.agent:
             return _post_lead_reply(
                 db,
@@ -1250,16 +1263,19 @@ def handle_chat_message(
                 chat=chat,
                 result=IntentResult(True, parsed.hint),
                 speak=speak,
-                whisper=False,
+                whisper=whisper,
             )
+
         ask = parsed.rest.strip() or parsed.skill or "help"
         from app.services.attachment_context import build_attachments_prompt_block
+        from app.services.skills import recent_private_context
 
         attach_block = build_attachments_prompt_block(
             db, message_id=user_message.id, tenant_id=auth.tenant_id
         )
-        ctx = recent_private_context(db, chat=chat, user_id=auth.user_id)
-        prompt = ask
+        ctx = ""
+        if not is_channel:
+            ctx = recent_private_context(db, chat=chat, user_id=auth.user_id)
         if ctx:
             prompt = (
                 f"Private room context (recent):\n{ctx}\n\n"
@@ -1273,10 +1289,14 @@ def handle_chat_message(
             db, auth, chat, prompt, forced_agent=parsed.agent
         )
         return _post_lead_reply(
-            db, auth=auth, chat=chat, result=result, speak=speak, whisper=False
+            db, auth=auth, chat=chat, result=result, speak=speak, whisper=whisper
         )
 
-    # Plain notes - no LLM
+    # Team channel / ops private: no slash-AI on plain text
+    if is_channel:
+        return [], None, None, False
+
+    # Private room plain notes - no LLM
     return [], None, None, False
 
 

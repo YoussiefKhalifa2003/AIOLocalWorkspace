@@ -287,6 +287,8 @@ class Chat(Base):
     project_id: Mapped[Optional[int]] = mapped_column(ForeignKey("projects.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     kind: Mapped[str] = mapped_column(String(40), default="channel")  # channel | private
+    # ops = ! commands only · llm = /skills (and !)
+    mode: Mapped[str] = mapped_column(String(20), default="ops", nullable=False)
     owner_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

@@ -409,6 +409,7 @@ def read_mentions(
 class PresenceIn(BaseModel):
     chat_id: int | None = None
     typing: bool | None = None
+    offline: bool = False
 
 
 @router.post("/workspace/presence")
@@ -418,6 +419,11 @@ def post_presence(
     db: Session = Depends(get_db),
 ):
     from app.services import presence as presence_svc
+
+    if body.offline:
+        presence_svc.mark_offline(db, auth)
+        db.commit()
+        return {"status": "ok", "offline": True}
 
     # Always refresh heartbeat; chat_id may be null to clear room.
     presence_svc.upsert_heartbeat(db, auth, body.chat_id)
