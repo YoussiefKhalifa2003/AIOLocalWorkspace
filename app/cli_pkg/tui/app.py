@@ -115,14 +115,23 @@ Header { background: $panel; }
     border-left: tall #d0d0d0;
 }
 #chat-attach.tour-spotlight,
-#chat-attach.tour-spotlight.tour-glow {
+#chat-attach.tour-spotlight.tour-glow,
+#chat-mic.tour-spotlight,
+#chat-mic.tour-spotlight.tour-glow,
+#logout-btn.tour-spotlight,
+#logout-btn.tour-spotlight.tour-glow,
+#chat-new.tour-spotlight,
+#chat-new.tour-spotlight.tour-glow {
     border: double #ffffff;
     background: #ffffff;
     color: #111111;
     text-style: bold;
     opacity: 1;
 }
-#chat-attach.tour-spotlight.tour-glow-dim {
+#chat-attach.tour-spotlight.tour-glow-dim,
+#chat-mic.tour-spotlight.tour-glow-dim,
+#logout-btn.tour-spotlight.tour-glow-dim,
+#chat-new.tour-spotlight.tour-glow-dim {
     border: wide #e0e0e0;
     background: #ffffff 55%;
     color: #111111;
@@ -757,7 +766,7 @@ class AioApp(App[None]):
         self.push_screen(
             ConfirmModal(
                 "Take a 2-minute tour?",
-                "Spotlight walkthrough of Chat, Board, plus (+), and pings.",
+                "Spotlight walkthrough of Chat, Board, plus (+), mic, and Log out.",
                 "You can replay anytime with the Tour button (or F1).",
                 "Start tour",
             ),

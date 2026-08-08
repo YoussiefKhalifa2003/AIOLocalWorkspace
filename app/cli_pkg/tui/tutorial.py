@@ -27,7 +27,7 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="tabs",
         title="Tabs",
-        body="Chat · Board · Agents · People. Owners also get Dash and Live.",
+        body="Chat · Board · Agents · People. Owners also get Dash and Live. Tour + Log out sit on the right.",
         tab="chat",
         spotlight="#tabs-row",
     ),
@@ -39,6 +39,13 @@ MEMBER_STEPS: list[TourStep] = [
         spotlight="#chat-list",
     ),
     TourStep(
+        id="new-channel",
+        title="+ channel",
+        body="Create a room with + channel (or ctrl+shift+n). !newchat still works.",
+        tab="chat",
+        spotlight="#chat-new",
+    ),
+    TourStep(
         id="type",
         title="Type here",
         body="Type in this box: / for AI · ! for commands · @ to ping.",
@@ -48,16 +55,23 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="attach",
         title="Attach",
-        body="The plus (+) on the left of the composer picks a file for your next message. Mic on the right starts voice.",
+        body="Plus (+) on the left picks a file for your next message (ctrl+f works too).",
         tab="chat",
-        spotlight="#composer-row",
+        spotlight="#chat-attach",
     ),
     TourStep(
         id="voice",
-        title="Voice",
-        body="ctrl+m records (or pick an audio file) and fills the composer.",
+        title="Mic",
+        body="Mic on the right (or ctrl+m) records or picks audio into the box.",
         tab="chat",
-        spotlight="#composer-row",
+        spotlight="#chat-mic",
+    ),
+    TourStep(
+        id="edit",
+        title="Edit · delete",
+        body="Hover your own line for edit · delete. Edits keep later messages.",
+        tab="chat",
+        spotlight="#transcript",
     ),
     TourStep(
         id="pings",
@@ -81,6 +95,13 @@ MEMBER_STEPS: list[TourStep] = [
         spotlight="#chat",
         action="select_private",
     ),
+    TourStep(
+        id="logout",
+        title="Log out",
+        body="Log out clears saved sign-in on this machine (or ctrl+shift+l).",
+        tab="chat",
+        spotlight="#logout-btn",
+    ),
 ]
 
 OWNER_EXTRA_STEPS: list[TourStep] = [
@@ -90,6 +111,7 @@ OWNER_EXTRA_STEPS: list[TourStep] = [
         body="Invite teammates. Change roles. Remove members.",
         tab="people",
         spotlight="#people-invite",
+        owner_only=True,
     ),
     TourStep(
         id="dash",
@@ -97,6 +119,7 @@ OWNER_EXTRA_STEPS: list[TourStep] = [
         body="Owner tables: people, models, tokens, open work.",
         tab="dashboard",
         spotlight="#dashboard",
+        owner_only=True,
     ),
     TourStep(
         id="live",
@@ -104,13 +127,15 @@ OWNER_EXTRA_STEPS: list[TourStep] = [
         body="Live gauges and WIP. Polls while you watch.",
         tab="live",
         spotlight="#live",
+        owner_only=True,
     ),
     TourStep(
         id="invite-cmd",
         title="Invite cmd",
         body="!invite mints a join link. Email when configured.",
         tab="chat",
-        spotlight="#composer",
+        spotlight="#composer-row",
+        owner_only=True,
     ),
 ]
 
@@ -221,6 +246,8 @@ class TutorialCoach(Vertical):
     # Regions we can safely fade without covering the spotlight target.
     _DIM_SELECTORS = (
         "#tabs-row",
+        "#tour-btn",
+        "#logout-btn",
         "#chat-sidebar",
         "#transcript",
         "#picker",
@@ -230,6 +257,8 @@ class TutorialCoach(Vertical):
         "#composer-row",
         "#composer",
         "#chat-attach",
+        "#chat-mic",
+        "#chat-new",
         "#columns",
         "#detail",
         "#people",
@@ -298,13 +327,23 @@ class TutorialCoach(Vertical):
                 "[b white]→[/] watch [b]@N[/] on the status bar  ·  then [b]ctrl+n[/]"
             )
             self._hint.add_class("-show")
-        elif step.id in ("type", "attach"):
-            tip = (
-                "[b white]→[/] the glowing box is where you type"
-                if step.id == "type"
-                else "[b white]→[/] plus (+) left · mic right · type in the middle"
-            )
-            self._hint.update(tip)
+        elif step.id == "type":
+            self._hint.update("[b white]→[/] the glowing shell is where you type")
+            self._hint.add_class("-show")
+        elif step.id == "attach":
+            self._hint.update("[b white]→[/] glowing [b]+[/] attaches a file")
+            self._hint.add_class("-show")
+        elif step.id == "voice":
+            self._hint.update("[b white]→[/] glowing [b]mic[/] · or [b]ctrl+m[/]")
+            self._hint.add_class("-show")
+        elif step.id == "edit":
+            self._hint.update("[b white]→[/] hover your own lines for [b]edit[/] / [b]delete[/]")
+            self._hint.add_class("-show")
+        elif step.id == "logout":
+            self._hint.update("[b white]→[/] [b]Log out[/] or [b]ctrl+shift+l[/]")
+            self._hint.add_class("-show")
+        elif step.id == "new-channel":
+            self._hint.update("[b white]→[/] [b]+ channel[/] or [b]ctrl+shift+n[/]")
             self._hint.add_class("-show")
         else:
             self._hint.remove_class("-show")
