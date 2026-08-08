@@ -510,16 +510,28 @@ def test_active_prefix(text, cursor, expected):
 
 
 def test_slash_menu_lists_every_skill_in_a_private_room():
-    items = candidates_for("/", "", members=[], chat_kind="private")
+    items = candidates_for("/", "", members=[], chat_kind="private", chat_mode="llm")
     labels = [c.label for c in items]
     assert labels[:3] == ["/ask", "/deepresearch", "/code"]
     assert "/checklist" in labels
     assert all(c.blurb for c in items), "every row explains itself"
 
 
-def test_slash_menu_in_a_channel_only_offers_what_works_there():
-    labels = [c.label for c in candidates_for("/", "", members=[], chat_kind="channel")]
-    assert labels == ["/status", "/clear"]
+def test_slash_menu_ops_chat_only_offers_clear():
+    labels = [
+        c.label
+        for c in candidates_for("/", "", members=[], chat_kind="channel", chat_mode="ops")
+    ]
+    assert labels == ["/clear"]
+
+
+def test_slash_menu_llm_channel_offers_skills():
+    labels = [
+        c.label
+        for c in candidates_for("/", "", members=[], chat_kind="channel", chat_mode="llm")
+    ]
+    assert "/ask" in labels
+    assert "/clear" in labels
 
 
 def test_bang_menu_filters_as_you_type():
@@ -529,7 +541,7 @@ def test_bang_menu_filters_as_you_type():
 
 def test_menu_closes_once_a_command_is_complete():
     assert candidates_for("!", "list", members=[], chat_kind="channel") == []
-    assert candidates_for("/", "ask", members=[], chat_kind="private") == []
+    assert candidates_for("/", "ask", members=[], chat_kind="private", chat_mode="llm") == []
 
 
 def test_mention_menu_offers_team_and_people():
@@ -540,7 +552,7 @@ def test_mention_menu_offers_team_and_people():
 
 
 def test_candidates_insert_a_trailing_space_so_you_can_keep_typing():
-    only = candidates_for("/", "deep", members=[], chat_kind="private")[0]
+    only = candidates_for("/", "deep", members=[], chat_kind="private", chat_mode="llm")[0]
     assert only.insert == "/deepresearch "
 
 

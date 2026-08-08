@@ -510,6 +510,109 @@ class PromptModal(ModalScreen[str]):
         self.dismiss("")
 
 
+class CreateChatModal(ModalScreen[dict[str, Any] | None]):
+    """Create a chat: name + visibility (owner) + ops vs LLM mode."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, *, is_owner: bool) -> None:
+        super().__init__()
+        self._is_owner = is_owner
+        self._kind = "channel" if is_owner else "private"
+        self._mode = "ops"
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-box"):
+            yield Label("New chat", id="confirm-title")
+            if self._is_owner:
+                yield Static(
+                    "[dim]Public = whole team · Private = only you[/dim]",
+                    markup=True,
+                )
+            else:
+                yield Static(
+                    "[dim]Members create private chats only (only you can see them).[/dim]",
+                    markup=True,
+                )
+            yield Input(placeholder="name (e.g. standup)", id="create-name")
+            with Horizontal(id="create-vis-row"):
+                yield Button(
+                    "Public" if self._is_owner else "Private (locked)",
+                    id="create-kind",
+                    variant="primary" if self._is_owner else "default",
+                    disabled=not self._is_owner,
+                )
+            yield Static(
+                "[dim]Purpose: ! board commands only, or / AI skills[/dim]",
+                markup=True,
+            )
+            with Horizontal(id="create-mode-row"):
+                yield Button("! commands", id="create-mode-ops", variant="primary")
+                yield Button("/ AI skills", id="create-mode-llm")
+            with Horizontal():
+                yield Button("Create", variant="primary", id="create-go")
+                yield Button("Cancel", id="create-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#create-name", Input).focus()
+        self._paint_kind()
+        self._paint_mode()
+
+    def _paint_kind(self) -> None:
+        btn = self.query_one("#create-kind", Button)
+        if not self._is_owner:
+            btn.label = "Private (only you)"
+            return
+        if self._kind == "channel":
+            btn.label = "Public · everyone"
+            btn.variant = "primary"
+        else:
+            btn.label = "Private · only you"
+            btn.variant = "default"
+
+    def _paint_mode(self) -> None:
+        ops = self.query_one("#create-mode-ops", Button)
+        llm = self.query_one("#create-mode-llm", Button)
+        if self._mode == "ops":
+            ops.variant = "primary"
+            llm.variant = "default"
+        else:
+            ops.variant = "default"
+            llm.variant = "primary"
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id or ""
+        if bid == "create-cancel":
+            self.dismiss(None)
+            return
+        if bid == "create-kind" and self._is_owner:
+            self._kind = "private" if self._kind == "channel" else "channel"
+            self._paint_kind()
+            return
+        if bid == "create-mode-ops":
+            self._mode = "ops"
+            self._paint_mode()
+            return
+        if bid == "create-mode-llm":
+            self._mode = "llm"
+            self._paint_mode()
+            return
+        if bid == "create-go":
+            name = self.query_one("#create-name", Input).value.strip()
+            if not name:
+                return
+            self.dismiss({"name": name, "kind": self._kind, "mode": self._mode})
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "create-name":
+            name = event.value.strip()
+            if name:
+                self.dismiss({"name": name, "kind": self._kind, "mode": self._mode})
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class MessageEditModal(ModalScreen[str | None]):
     """Multi-line edit for an own chat message."""
 

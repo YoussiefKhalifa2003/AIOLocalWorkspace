@@ -182,6 +182,29 @@ def test_two_user_presence_smoke(tmp_path, monkeypatch):
     assert omar["online"] is False
 
 
+def test_explicit_offline_is_immediate(tmp_path, monkeypatch):
+    client, info = _boot(tmp_path, monkeypatch)
+    headers = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
+    headers_omar = {"X-API-Key": info["api_key_omar"], "X-User-Email": info["email_omar"]}
+    general = info["chat_general"]
+
+    assert client.post(
+        "/workspace/presence", headers=headers, json={"chat_id": general}
+    ).status_code == 200
+    assert _by_id(
+        client.get("/workspace/presence", headers=headers_omar).json()["users"],
+        info["user_a"],
+    )["online"] is True
+
+    assert client.post(
+        "/workspace/presence", headers=headers, json={"offline": True}
+    ).status_code == 200
+    assert _by_id(
+        client.get("/workspace/presence", headers=headers_omar).json()["users"],
+        info["user_a"],
+    )["online"] is False
+
+
 def test_format_typing_names():
     from app.cli_pkg.tui.views.chat import _format_typing_names
 

@@ -889,7 +889,7 @@ class AioApp(App[None]):
             except Exception:
                 pass
         try:
-            self.client.post_presence(chat_id=None, typing=False)
+            self.client.post_presence(offline=True)
         except Exception:
             pass
         self.chat_view.reset_session_state()

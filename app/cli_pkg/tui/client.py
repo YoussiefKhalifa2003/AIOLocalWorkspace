@@ -182,8 +182,9 @@ class ApiClient:
         *,
         chat_id: int | None = None,
         typing: bool | None = None,
+        offline: bool = False,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"chat_id": chat_id}
+        body: dict[str, Any] = {"chat_id": chat_id, "offline": offline}
         if typing is not None:
             body["typing"] = typing
         return self.post("/workspace/presence", json=body, timeout=10.0)
@@ -264,8 +265,17 @@ class ApiClient:
             raise ApiError("upload failed: bad response")
         return out
 
-    def create_chat(self, name: str) -> dict[str, Any]:
-        return self.post("/chats", json={"name": name, "kind": "channel"})
+    def create_chat(
+        self,
+        name: str,
+        *,
+        kind: str = "channel",
+        mode: str = "ops",
+    ) -> dict[str, Any]:
+        return self.post(
+            "/chats",
+            json={"name": name, "kind": kind, "mode": mode},
+        )
 
     def delete_chat(self, chat_id: int) -> dict[str, Any]:
         return self.delete(f"/chats/{chat_id}")
