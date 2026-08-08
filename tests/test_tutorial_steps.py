@@ -28,3 +28,4 @@ def test_tour_steps_have_spotlights():
         assert len(s.body) <= 120
         assert s.spotlight  # every planned step has a target
     assert any(s.spotlight == "#tabs-row" for s in MEMBER_STEPS)
+    assert any(s.spotlight == "#composer-row" for s in MEMBER_STEPS)

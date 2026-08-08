@@ -68,52 +68,82 @@ Header { background: $panel; }
 #tabs { background: $panel; }
 #status-line { height: 1; padding: 0 1; color: $text-muted; background: $panel; }
 #body { height: 1fr; }
-#body.tour-dim { opacity: 0.42; }
 
-/* Tour spotlight — clean white live glow (no neon pink) */
+/* Tour: fade siblings — never opacity on #body (that dims the spotlight too) */
+.tour-faded {
+    opacity: 0.28;
+}
 .tour-spotlight {
-    border: wide #f0f0f0;
-    background: #ffffff 14%;
+    opacity: 1;
+    border: double #ffffff;
+    background: #ffffff 22%;
     padding: 0 1;
 }
 .tour-spotlight.tour-glow {
     border: double #ffffff;
-    background: #ffffff 32%;
+    background: #ffffff 40%;
 }
 .tour-spotlight.tour-glow-dim {
-    border: wide #c8c8c8;
-    background: #ffffff 8%;
+    border: wide #d8d8d8;
+    background: #ffffff 12%;
 }
-/* Single-line targets: never use a full thick box (it collapses to two bars) */
+/* Single-line targets: left bar only (full box collapses to two lines) */
 #status-line.tour-spotlight,
 #chat-title.tour-spotlight {
     border: none;
     border-left: tall #ffffff;
-    background: #ffffff 24%;
+    background: #ffffff 30%;
     color: #ffffff;
     text-style: bold;
     height: 1;
     padding: 0 1;
+    opacity: 1;
 }
 #status-line.tour-spotlight.tour-glow,
 #chat-title.tour-spotlight.tour-glow {
-    background: #ffffff 45%;
+    background: #ffffff 55%;
     border-left: tall #ffffff;
 }
 #status-line.tour-spotlight.tour-glow-dim,
 #chat-title.tour-spotlight.tour-glow-dim {
-    background: #ffffff 12%;
+    background: #ffffff 18%;
     border-left: tall #d0d0d0;
 }
-#chat-attach.tour-spotlight {
-    border: wide #ffffff;
-    background: #ffffff 40%;
+#chat-attach.tour-spotlight,
+#chat-attach.tour-spotlight.tour-glow {
+    border: double #ffffff;
+    background: #ffffff;
+    color: #111111;
     text-style: bold;
+    opacity: 1;
+}
+#chat-attach.tour-spotlight.tour-glow-dim {
+    border: wide #e0e0e0;
+    background: #ffffff 55%;
     color: #111111;
 }
-#composer.tour-spotlight {
-    border: wide #ffffff;
+/* Beat #composer-row #composer border rules so the glow is visible */
+#composer-row.tour-spotlight,
+#composer-row.tour-spotlight.tour-glow {
+    border: double #ffffff;
     background: #ffffff 18%;
+    padding: 0 1;
+    opacity: 1;
+}
+#composer-row.tour-spotlight.tour-glow-dim {
+    border: wide #d0d0d0;
+    background: #ffffff 8%;
+}
+#composer-row.tour-spotlight #composer,
+#composer.tour-spotlight,
+#composer.tour-spotlight.tour-glow {
+    border: double #ffffff;
+    background: #ffffff 25%;
+    opacity: 1;
+}
+#composer.tour-spotlight.tour-glow-dim {
+    border: wide #d0d0d0;
+    background: #ffffff 10%;
 }
 #tabs-row {
     height: auto;
@@ -121,14 +151,16 @@ Header { background: $panel; }
     background: $panel;
     padding: 0;
 }
-#tabs-row.tour-spotlight {
-    border: wide #f0f0f0;
-    background: #2a2a2a;
-    padding: 0 1;
-}
+#tabs-row.tour-spotlight,
 #tabs-row.tour-spotlight.tour-glow {
     border: double #ffffff;
-    background: #3a3a3a;
+    background: #2a2a2a;
+    padding: 0 1;
+    opacity: 1;
+}
+#tabs-row.tour-spotlight.tour-glow-dim {
+    border: wide #c8c8c8;
+    background: #222222;
 }
 #tabs-row #tabs { width: 1fr; background: transparent; }
 #tour-btn { width: 10; margin: 0 1; }
