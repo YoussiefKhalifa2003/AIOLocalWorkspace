@@ -16,14 +16,25 @@ from app.config import get_settings
 
 
 class MemberItem(ListItem):
-    def __init__(self, member: dict[str, Any], is_me: bool) -> None:
+    def __init__(self, member: dict[str, Any], is_me: bool, *, presence: dict[str, Any] | None = None) -> None:
         self.member = member
         role = str(member.get("role") or "member")
         badge = "[yellow]★ owner[/yellow]" if role == "owner" else "[dim]member[/dim]"
         you = "  [#7dd3fc](you)[/#7dd3fc]" if is_me else ""
         name = escape(str(member.get("name") or "").strip() or "—")
         email = escape(str(member.get("email") or ""))
-        super().__init__(Static(f"[b]{name}[/b]{you}\n[dim]{email}[/dim]  ·  {badge}", markup=True))
+        pres = presence or {}
+        online = bool(pres.get("online"))
+        if online:
+            status = "[green]● online[/green]"
+        else:
+            status = "[dim]● offline[/dim]"
+        super().__init__(
+            Static(
+                f"[b]{name}[/b]{you}\n[dim]{email}[/dim]  ·  {badge}  ·  {status}",
+                markup=True,
+            )
+        )
 
 
 class PeopleView(VerticalScroll):
@@ -32,6 +43,7 @@ class PeopleView(VerticalScroll):
         self.client = client
         self.members: list[dict[str, Any]] = []
         self.me: dict[str, Any] = {}
+        self.presence: list[dict[str, Any]] = []
         self.list_view = ListView(id="people-list")
         self.note = Static("", id="people-note", markup=True)
 
@@ -60,9 +72,31 @@ class PeopleView(VerticalScroll):
             return None
         return self.members[index]
 
-    def set_members(self, members: list[dict[str, Any]], me: dict[str, Any]) -> None:
+    def set_members(
+        self,
+        members: list[dict[str, Any]],
+        me: dict[str, Any],
+        *,
+        presence: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.me = me
-        signature = [(m.get("user_id"), m.get("role"), m.get("email"), m.get("name")) for m in members]
+        if presence is not None:
+            self.presence = presence
+        by_uid = {
+            int(u.get("user_id") or 0): u
+            for u in self.presence
+            if u.get("user_id") is not None
+        }
+        signature = [
+            (
+                m.get("user_id"),
+                m.get("role"),
+                m.get("email"),
+                m.get("name"),
+                (by_uid.get(int(m.get("user_id") or 0)) or {}).get("online"),
+            )
+            for m in members
+        ]
         if signature == getattr(self, "_signature", None):
             self._sync_buttons()
             return
@@ -72,14 +106,18 @@ class PeopleView(VerticalScroll):
         self.list_view.clear()
         my_id = me.get("user_id")
         for m in members:
-            self.list_view.append(MemberItem(m, is_me=m.get("user_id") == my_id))
+            uid = int(m.get("user_id") or 0)
+            self.list_view.append(
+                MemberItem(m, is_me=m.get("user_id") == my_id, presence=by_uid.get(uid))
+            )
         if members:
             self.list_view.index = min(index, len(members) - 1)
         owners = sum(1 for m in members if m.get("role") == "owner")
+        online_n = sum(1 for u in self.presence if u.get("online"))
         self.note.update(
-            f"[dim]{len(members)} member(s) · {owners} owner(s) · pick someone, then use the buttons[/dim]"
+            f"[dim]{len(members)} member(s) · {owners} owner(s) · online {online_n} · pick someone, then use the buttons[/dim]"
             if self.is_owner
-            else "[dim]Only owners can invite, change roles, or remove people.[/dim]"
+            else f"[dim]online {online_n}/{len(members)} · Only owners can invite, change roles, or remove people.[/dim]"
         )
         self._sync_buttons()
 

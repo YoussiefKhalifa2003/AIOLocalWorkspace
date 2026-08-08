@@ -364,3 +364,16 @@ class ChatMention(Base):
     from_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class UserPresence(Base):
+    """Per-user online heartbeat, active room, and channel typing TTL."""
+
+    __tablename__ = "user_presence"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    active_chat_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chats.id"), nullable=True)
+    typing_chat_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chats.id"), nullable=True)
+    typing_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

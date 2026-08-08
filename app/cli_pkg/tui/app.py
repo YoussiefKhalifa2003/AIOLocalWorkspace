@@ -334,6 +334,12 @@ MessageLine .msg-chart { height: 18; width: 100%; }
     color: $text-muted;
     display: none;
 }
+#typing-line {
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+    display: none;
+}
 /* One ChatGPT-style shell: + | input | mic */
 #composer-row {
     height: auto;
@@ -781,9 +787,17 @@ class AioApp(App[None]):
         self.ws = ws
         self.sub_title = f"{ws.me.get('email', '')} · project {self.client.project_id}"
         self.chat_view.set_workspace(ws.chats, ws.members, str(ws.me.get("email") or ""))
-        self.people_view.set_members(ws.members, ws.me)
+        if ws.presence:
+            self.chat_view.set_presence(ws.presence)
+        self.people_view.set_members(ws.members, ws.me, presence=ws.presence or self.chat_view.presence)
         self._paint_status()
         self._maybe_offer_tour()
+
+    def apply_presence(self, users: list[dict[str, Any]]) -> None:
+        """Fast presence poll callback — keep People + status in sync."""
+        self.ws.presence = users
+        self.people_view.set_members(self.ws.members, self.ws.me, presence=users)
+        self._paint_status()
 
     def _maybe_offer_tour(self) -> None:
         if self._tour_offered or self.tour_coach.active:
@@ -853,6 +867,10 @@ class AioApp(App[None]):
                 self.tour_coach.stop(completed=False)
             except Exception:
                 pass
+        try:
+            self.client.post_presence(chat_id=None, typing=False)
+        except Exception:
+            pass
         self.chat_view.reset_session_state()
         last_email = str(self.ws.me.get("email") or "")
         base_url = self.client.base_url
@@ -940,12 +958,16 @@ class AioApp(App[None]):
         runner = get_settings().coding_backend or "llm"
         working = self.board_view.agent_working
         mentions = self.ws.unread
+        presence = self.ws.presence or self.chat_view.presence
+        online_n = sum(1 for u in presence if u.get("online"))
+        total_n = len(presence) if presence else len(self.ws.members)
         parts = [
             f"[dim]repo[/dim] {escape(str(repo))}",
             f"[dim]jobs[/dim] {self.jobs_today}",
             f"[dim]agent working[/dim] {working}",
             f"[dim]runner[/dim] {runner}",
             f"[dim]@[/dim] {mentions}" if not mentions else f"[yellow]@{mentions}[/yellow]",
+            f"[dim]online[/dim] {online_n}/{total_n}",
         ]
         if self._board_error:
             parts.append(f"[red]{escape(self._board_error)}[/red]")
