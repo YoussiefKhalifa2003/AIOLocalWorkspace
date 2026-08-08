@@ -1175,7 +1175,7 @@ class ChatView(Vertical):
         self.mic_btn = Button("mic", id="chat-mic", compact=True, tooltip="voice (ctrl+m)")
         self.composer = Composer(
             self.picker,
-            placeholder="Ask anything — /  !  or  @",
+            placeholder="Ask anything - /  !  or  @",
             id="composer",
         )
 

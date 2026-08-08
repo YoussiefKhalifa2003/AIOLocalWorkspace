@@ -713,13 +713,19 @@ class AioApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.sub_title = f"project {self.client.project_id}"
+        self._set_header(f"project {self.client.project_id}")
         self.refresh_workspace()
         self.refresh_board()
         self.set_interval(6.0, self.refresh_workspace)
         self.set_interval(self.poll_seconds, self.refresh_board)
         self.set_interval(10.0, self._tick_dashboard)
         self.chat_view.composer.focus()
+
+    def _set_header(self, detail: str) -> None:
+        """Title + detail without Textual Header's default em dash separator."""
+        detail = (detail or "").strip()
+        self.title = f"AIO · {detail}" if detail else "AIO"
+        self.sub_title = ""
 
     # tabs ----------------------------------------------------------------
 
@@ -815,7 +821,7 @@ class AioApp(App[None]):
                 self._message = f"[yellow]{escape(flash)}[/yellow]"
         self._prev_unread = unread
         self.ws = ws
-        self.sub_title = f"{ws.me.get('email', '')} · project {self.client.project_id}"
+        self._set_header(f"{ws.me.get('email', '')} · project {self.client.project_id}")
         self.chat_view.set_workspace(ws.chats, ws.members, str(ws.me.get("email") or ""))
         if ws.presence:
             self.chat_view.set_presence(ws.presence)
@@ -906,7 +912,7 @@ class AioApp(App[None]):
         last_email = str(self.ws.me.get("email") or "")
         base_url = self.client.base_url
         clear_credentials()
-        self.set_status("[dim]signed out — sign in to continue[/dim]")
+        self.set_status("[dim]signed out - sign in to continue[/dim]")
 
         def on_done(creds: Credentials | None) -> None:
             if creds is None or creds.is_empty():
@@ -916,7 +922,7 @@ class AioApp(App[None]):
             self.client.headers = auth_headers(creds.api_key, creds.email)
             if creds.project_id:
                 self.client.project_id = int(creds.project_id)
-            self.sub_title = f"project {self.client.project_id}"
+            self._set_header(f"project {self.client.project_id}")
             self.ws = Workspace()
             self.chat_view.chat_id = None
             self.chat_view.chats = []

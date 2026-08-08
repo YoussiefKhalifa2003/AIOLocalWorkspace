@@ -1,6 +1,6 @@
-"""Capture a real AIO TUI screenshot for the README hero.
+"""Seed a polished #general thread for README screenshots, then capture the hero.
 
-Requires the API on :8000. Logs in as the demo owner (a@local.test).
+Requires API on :8000.
 
     .venv/Scripts/python.exe scripts/capture_hero.py
 """
@@ -18,36 +18,75 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT_SVG = ROOT / "docs" / "aio-hero.svg"
 OUT_PNG = ROOT / "docs" / "aio-hero.png"
 
+# Short, product-shaped standup that reads well in a README hero.
+HERO_CHAT: list[tuple[str, str]] = [
+    ("sara@local.test", "standup in 5. anything blocking merge?"),
+    ("a@local.test", "PR is green. Need a quick look at the invite flow?"),
+    ("sara@local.test", "send it. I'll review after this"),
+    ("a@local.test", "@sara it's up. I'll take agent backlog next."),
+    ("sara@local.test", "looks good. merge when ready."),
+]
 
-async def _capture() -> Path:
-    from app.cli_pkg.tui.app import AioApp
+
+def _client_for(email: str):
     from app.cli_pkg.tui.client import ApiClient, login
 
-    data = login("a@local.test", "demo")
-    client = ApiClient(
+    data = login(email, "demo")
+    return ApiClient(
         project_id=1,
         api_key=str(data.get("api_key") or ""),
-        email=str(data.get("email") or "a@local.test"),
+        email=str(data.get("email") or email),
     )
-    me = client.me()
-    print(f"signed in as {me.get('email') or data.get('email')}")
 
-    chats = client.get("/chats")
+
+def _seed_hero_chat() -> tuple[object, int]:
+    """Replace #general history with HERO_CHAT. Returns (owner client, chat_id)."""
+    from datetime import UTC, datetime
+
+    from app.db.models import Chat, ChatMessage
+    from app.db.session import SessionLocal
+
+    owner = _client_for("a@local.test")
+    chats = owner.get("/chats")
     general = next(
         (c for c in chats if c.get("name") == "general" and c.get("kind") == "channel"),
         None,
     )
     if general is None:
         raise SystemExit("no #general chat — run: aio seed")
+    chat_id = int(general["id"])
 
-    # Keep the frame lively without spamming if messages already exist.
-    msgs = client.get(f"/chats/{general['id']}/messages", params={"after_id": 0})
-    rows = msgs if isinstance(msgs, list) else (msgs.get("messages") or [])
-    if len(rows) < 2:
-        client.post(
-            f"/chats/{general['id']}/messages",
-            json={"body": "standup in 5?", "speak": False},
+    # Soft-delete existing public lines so the hero isn't noisy.
+    db = SessionLocal()
+    try:
+        chat = db.query(Chat).filter(Chat.id == chat_id).one()
+        now = datetime.now(UTC)
+        db.query(ChatMessage).filter(
+            ChatMessage.chat_id == chat.id,
+            ChatMessage.deleted_at.is_(None),
+        ).update({ChatMessage.deleted_at: now}, synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+    # Post as each speaker so names/colors look real.
+    clients = {
+        "a@local.test": owner,
+        "sara@local.test": _client_for("sara@local.test"),
+    }
+    for email, body in HERO_CHAT:
+        clients[email].post(
+            f"/chats/{chat_id}/messages",
+            json={"body": body, "speak": False},
         )
+        time.sleep(0.15)
+
+    print(f"seeded {len(HERO_CHAT)} messages into #general")
+    return owner, chat_id
+
+
+async def _capture(client, chat_id: int) -> Path:
+    from app.cli_pkg.tui.app import AioApp
 
     app = AioApp(client, poll_seconds=60.0)
     async with app.run_test(size=(148, 42)) as pilot:
@@ -56,7 +95,7 @@ async def _capture() -> Path:
         await pilot.pause()
 
         chat = app.chat_view
-        chat.select_chat(int(general["id"]))
+        chat.select_chat(int(chat_id))
         await asyncio.sleep(1.5)
         await pilot.pause()
         app.show_tab("chat")
@@ -76,7 +115,6 @@ async def _capture() -> Path:
 
 
 def _svg_to_png(svg_path: Path, png_path: Path) -> bool:
-    """Best-effort rasterize for GitHub."""
     try:
         import cairosvg  # type: ignore
 
@@ -118,13 +156,18 @@ def _svg_to_png(svg_path: Path, png_path: Path) -> bool:
 
 
 def main() -> int:
-    svg = asyncio.run(_capture())
+    client, chat_id = _seed_hero_chat()
+    me = client.me()
+    print(f"capturing as {me.get('email')}")
+    svg = asyncio.run(_capture(client, chat_id))
     if not svg.is_file() or svg.stat().st_size < 500:
         print("screenshot failed", file=sys.stderr)
         return 1
     if not _svg_to_png(svg, OUT_PNG):
-        print("PNG rasterize failed — README can still use the SVG", file=sys.stderr)
+        print("PNG rasterize failed - README can still use the SVG", file=sys.stderr)
         return 0
+    frame = ROOT / "scripts" / "frame_hero.py"
+    subprocess.run([sys.executable, str(frame)], check=False)
     return 0
 
 
