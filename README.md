@@ -21,11 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/aio-hero-duo.png" alt="AIO on Windows and macOS" width="980" />
-</p>
-
-<p align="center">
-  <sub>Windows Terminal (real) · macOS Terminal (same app)</sub>
+  <img src="docs/aio-hero.png" alt="AIO in Windows Terminal: chat, presence, and composer" width="920" />
 </p>
 
 <p align="center">
