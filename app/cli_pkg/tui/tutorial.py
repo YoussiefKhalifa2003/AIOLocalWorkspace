@@ -48,9 +48,16 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="attach",
         title="Attach",
-        body="Click Attach to pick a file the AI can read with your next message.",
+        body="The plus (+) on the left of the composer picks a file for your next message. Mic on the right starts voice.",
         tab="chat",
-        spotlight="#chat-attach",
+        spotlight="#composer-row",
+    ),
+    TourStep(
+        id="voice",
+        title="Voice",
+        body="ctrl+m records (or pick an audio file) and fills the composer.",
+        tab="chat",
+        spotlight="#composer-row",
     ),
     TourStep(
         id="pings",
@@ -62,7 +69,7 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="board",
         title="Board",
-        body="Cards are work. Claim, move, done.",
+        body="Cards are work. [ ] shifts columns; s jumps to any status.",
         tab="board",
         spotlight="#columns",
     ),
@@ -295,7 +302,7 @@ class TutorialCoach(Vertical):
             tip = (
                 "[b white]→[/] the glowing box is where you type"
                 if step.id == "type"
-                else "[b white]→[/] the glowing button is Attach"
+                else "[b white]→[/] plus (+) left · mic right · type in the middle"
             )
             self._hint.update(tip)
             self._hint.add_class("-show")

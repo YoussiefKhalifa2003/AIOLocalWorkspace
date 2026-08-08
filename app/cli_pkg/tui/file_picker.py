@@ -190,3 +190,8 @@ def pick_attachment_files(*, title: str = "Attach file", max_files: int = 1) -> 
     raise RuntimeError(
         f"file picker unavailable on {platform.system()} ({system}): {detail}"
     )
+
+
+def pick_audio_files(*, title: str = "Choose audio for transcription") -> list[Path]:
+    """Fallback when mic recording is unavailable — pick a wav/mp3/m4a/ogg file."""
+    return pick_attachment_files(title=title, max_files=1)

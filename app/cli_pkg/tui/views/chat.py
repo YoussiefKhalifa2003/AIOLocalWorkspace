@@ -13,6 +13,7 @@ from typing import Any
 from rich.markup import escape
 from textual import events, work
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Input, Label, ListItem, ListView, Markdown, ProgressBar, Static
 
@@ -192,6 +193,9 @@ class Composer(Input):
         if self.picker.open:
             if event.key in ("up", "down"):
                 self.picker.move(-1 if event.key == "up" else 1)
+                chat_view = getattr(self.app, "chat_view", None)
+                if chat_view is not None:
+                    chat_view.refresh_ghost()
                 event.prevent_default()
                 event.stop()
                 return
@@ -204,6 +208,15 @@ class Composer(Input):
                     return
             if event.key == "escape":
                 self.picker.close()
+                chat_view = getattr(self.app, "chat_view", None)
+                if chat_view is not None:
+                    chat_view.refresh_ghost()
+                event.prevent_default()
+                event.stop()
+                return
+        elif event.key == "tab":
+            chat_view = getattr(self.app, "chat_view", None)
+            if chat_view is not None and chat_view.accept_ghost_hint():
                 event.prevent_default()
                 event.stop()
                 return
@@ -229,6 +242,9 @@ class Composer(Input):
         self.value = self.value[:start] + candidate.insert + rest
         self.cursor_position = start + len(candidate.insert)
         self.picker.close()
+        chat_view = getattr(self.app, "chat_view", None)
+        if chat_view is not None:
+            chat_view.refresh_ghost()
 
 
 def skill_name_from_body(body: str) -> str:
@@ -255,23 +271,99 @@ def _inline(line: str) -> str:
     return line
 
 
+_ARG_HINTS: dict[str, str] = {
+    "/ask": "your question…",
+    "/deepresearch": "topic…",
+    "/code": "what to build…",
+    "/write": "what to draft…",
+    "/review": "what to check…",
+    "/checklist": "goal…",
+    "/status": "optional focus…",
+    "!add": "card title…",
+    "!set": "#id status…",
+    "!done": "#id…",
+    "!remove": "#id…",
+    "!assign": "#id @person…",
+    "!link": "#id url…",
+    "!claim": "path…",
+    "!release": "path…",
+    "!issue": "blocker…",
+    "!resolve": "#id…",
+    "!invite": "email@domain or seats…",
+    "!attach": "optional path…",
+}
+
+
+def _format_table(rows: list[list[str]], max_width: int = 72) -> list[str]:
+    """Monospace-align a simple GFM table; clip overly wide columns."""
+    if not rows:
+        return []
+    cols = max(len(r) for r in rows)
+    widths = [0] * cols
+    for r in rows:
+        for i, cell in enumerate(r):
+            widths[i] = max(widths[i], len(cell))
+    # Shrink proportionally if too wide
+    total = sum(widths) + 3 * max(0, cols - 1)
+    if total > max_width and total > 0:
+        scale = max_width / total
+        widths = [max(4, int(w * scale)) for w in widths]
+
+    def cell(text: str, w: int) -> str:
+        if len(text) > w:
+            return text[: max(1, w - 1)] + "…"
+        return text.ljust(w)
+
+    out: list[str] = []
+    for i, r in enumerate(rows):
+        padded = [cell(r[j] if j < len(r) else "", widths[j]) for j in range(cols)]
+        line = " │ ".join(padded)
+        out.append(f"[#cbd5e1]{line}[/#cbd5e1]")
+        if i == 0:
+            out.append("[dim]" + "─┼─".join("─" * w for w in widths) + "[/dim]")
+    return out
+
+
 def render_markdown(text: str) -> str:
     """Agents answer in markdown; give the terminal the shape without the syntax.
 
-    Deliberately small: headings, bold, bullets, fenced code. Anything fancier
-    is left as written rather than risking mangled output.
+    Headings, bold, bullets, numbered lists, fenced code, hr, simple GFM tables.
     """
     out: list[str] = []
     in_code = False
+    table_buf: list[list[str]] = []
+
+    def flush_table() -> None:
+        nonlocal table_buf
+        if table_buf:
+            out.extend(_format_table(table_buf))
+            table_buf = []
+
     for line in escape(text).split("\n"):
         stripped = line.strip()
         if stripped.startswith("```"):
+            flush_table()
             in_code = not in_code
             lang = stripped[3:].strip()
-            out.append(f"[dim]{'┄' * 3} {lang or 'code'} {'┄' * 3}[/dim]" if in_code else "[dim]┄┄┄[/dim]")
+            out.append(
+                f"[dim]{'┄' * 3} {lang or 'code'} {'┄' * 3}[/dim]"
+                if in_code
+                else "[dim]┄┄┄[/dim]"
+            )
             continue
         if in_code:
             out.append(f"[#a5b4fc]{line}[/#a5b4fc]")
+            continue
+        # GFM table row (skip separator lines like |---|---|)
+        if "|" in stripped and stripped.startswith("|"):
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            if cells and all(re.match(r"^:?-+:?$", c or "") for c in cells):
+                continue  # alignment row
+            table_buf.append(cells)
+            continue
+        flush_table()
+        if re.match(r"^(-{3,}|\*{3,}|_{3,})$", stripped):
+            out.append("[dim]────────────────[/dim]")
             continue
         heading = re.match(r"^(#{1,6})\s+(.*)$", stripped)
         if heading:
@@ -280,7 +372,14 @@ def render_markdown(text: str) -> str:
         if stripped.startswith("> "):
             out.append(f"[dim i]{_inline(stripped[2:])}[/dim i]")
             continue
+        numbered = re.match(r"^(\s*)(\d+)\.\s+(.*)$", line)
+        if numbered:
+            out.append(
+                f"{numbered.group(1)}[b]{numbered.group(2)}.[/b] {_inline(numbered.group(3))}"
+            )
+            continue
         out.append(_inline(re.sub(r"^(\s*)[-*]\s+", r"\1• ", line)))
+    flush_table()
     return "\n".join(out)
 
 
@@ -291,6 +390,147 @@ def short_time(iso: str) -> str:
         return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone().strftime("%H:%M")
     except ValueError:
         return ""
+
+
+# Same palette as the web client (stable color per person / agent).
+_MEMBER_COLORS: tuple[str, ...] = (
+    "#5b9fd4",  # blue
+    "#d4a05b",  # amber
+    "#c75b8a",  # rose
+    "#5bc4a8",  # teal
+    "#9b7bd4",  # violet
+    "#d47a5b",  # coral
+    "#7bb05b",  # olive
+    "#5b8ad4",  # indigo
+)
+_AGENT_COLORS: dict[str, str] = {
+    "lead": "#66aa66",
+    "ask": "#44aa99",
+    "deepresearch": "#338888",
+    "research": "#44aa99",
+    "writing": "#aa8844",
+    "write": "#aa8844",
+    "coding": "#44aaff",
+    "code": "#44aaff",
+    "code_review": "#4488aa",
+    "review": "#4488aa",
+    "checklist": "#aa66aa",
+    "status": "#77aa99",
+}
+
+
+def _hash_str(s: str) -> int:
+    h = 0
+    for ch in s:
+        h = ((h << 5) - h + ord(ch)) & 0xFFFFFFFF
+        if h >= 0x80000000:
+            h -= 0x100000000
+    return abs(int(h))
+
+
+def color_for_member(email: str, *, member_emails: list[str] | None = None) -> str:
+    """Stable name/rail color — mirrors web colorForMember."""
+    key = (email or "").strip().lower()
+    if not key:
+        return "#888888"
+    if member_emails:
+        for i, em in enumerate(member_emails):
+            if str(em or "").strip().lower() == key:
+                return _MEMBER_COLORS[i % len(_MEMBER_COLORS)]
+    return _MEMBER_COLORS[_hash_str(key) % len(_MEMBER_COLORS)]
+
+
+def color_for_message(
+    message: dict[str, Any], *, member_emails: list[str] | None = None
+) -> str:
+    agent = message.get("agent")
+    if agent:
+        return _AGENT_COLORS.get(str(agent).lower(), "#66aa66")
+    return color_for_member(
+        str(message.get("sender_email") or message.get("sender") or ""),
+        member_emails=member_emails,
+    )
+
+# Discord-style: same speaker stacks until someone else / an agent / ~4 minutes pass.
+_GROUP_GAP_SECONDS = 4 * 60
+
+
+def message_speaker_key(message: dict[str, Any]) -> str:
+    """Identity used to decide whether two bubbles share one name header."""
+    if message.get("agent"):
+        return f"agent:{message.get('agent')}"
+    email = str(message.get("sender_email") or "").strip().lower()
+    if email:
+        return f"user:{email}"
+    name = str(message.get("sender") or "").strip().lower()
+    return f"user:{name or '?'}"
+
+
+def _message_created_at(message: dict[str, Any]) -> datetime | None:
+    raw = str(message.get("created_at") or "")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def should_group_with_previous(
+    previous: dict[str, Any] | None, current: dict[str, Any]
+) -> bool:
+    """True when `current` should hide its name (continuation of `previous`)."""
+    if previous is None or current.get("deleted_at"):
+        return False
+    if previous.get("deleted_at"):
+        return False
+    if message_speaker_key(previous) != message_speaker_key(current):
+        return False
+    t0 = _message_created_at(previous)
+    t1 = _message_created_at(current)
+    if t0 is not None and t1 is not None:
+        gap = abs((t1 - t0).total_seconds())
+        if gap > _GROUP_GAP_SECONDS:
+            return False
+    return True
+
+
+def group_messages(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Split ordered messages into speaker blocks (same rules as should_group_with_previous)."""
+    groups: list[list[dict[str, Any]]] = []
+    for row in rows:
+        if not groups:
+            groups.append([row])
+            continue
+        prev = groups[-1][-1]
+        if should_group_with_previous(prev, row):
+            groups[-1].append(row)
+        else:
+            groups.append([row])
+    return groups
+
+
+def blocks_fingerprint(groups: list[list[dict[str, Any]]]) -> tuple[Any, ...]:
+    """Stable id for block structure (ids + speaker). Content changes do not alter this."""
+    return tuple(
+        (tuple(int(m["id"]) for m in g), message_speaker_key(g[0]) if g else "")
+        for g in groups
+    )
+
+
+def message_content_key(message: dict[str, Any]) -> tuple[Any, ...]:
+    """Detect body/attachment edits without treating polls as structural changes."""
+    atts = message.get("attachments") or []
+    att_ids = tuple(
+        sorted(int(a["id"]) for a in atts if isinstance(a, dict) and a.get("id") is not None)
+    )
+    return (
+        str(message.get("body") or ""),
+        str(message.get("edited_at") or ""),
+        str(message.get("deleted_at") or ""),
+        str(message.get("visibility") or ""),
+        att_ids,
+    )
 
 
 def _strip_control_markers(raw: str) -> str:
@@ -332,48 +572,227 @@ def _cache_attachment_png(client: ApiClient, att: dict[str, Any]) -> Path | None
     return path
 
 
-class MessageView(Vertical):
-    """One chat message: text (+ markdown links) and optional inline chart images."""
+class AttachmentFile(Static):
+    """Clickable non-image attachment row."""
+
+    BINDINGS = [
+        ("enter", "open_attachment", "open"),
+        ("o", "open_attachment", "open"),
+    ]
+
+    def __init__(self, att: dict[str, Any], client: ApiClient) -> None:
+        name = str(att.get("filename") or "file")
+        super().__init__(
+            f"[underline]📎 {escape(name)}[/underline]  [dim]enter/o open[/dim]",
+            markup=True,
+            classes="msg-file",
+        )
+        self.can_focus = True
+        self.att = att
+        self.client = client
+
+    def on_click(self) -> None:
+        self.action_open_attachment()
+
+    def action_open_attachment(self) -> None:
+        chat = getattr(self.app, "chat_view", None)
+        if chat is not None:
+            chat.open_attachment(self.att)
+
+
+class MemberKick(Static):
+    """Quiet text action beside a member — reveals on row hover."""
 
     DEFAULT_CSS = """
-    MessageView { height: auto; padding: 0 0 1 0; }
-    MessageView.agent-msg { border-left: outer $accent 30%; padding-left: 1; }
-    MessageView.whisper-msg { color: $text-muted; }
-    MessageView.highlight-ping {
+    MemberKick {
+        width: 6;
+        height: 1;
+        content-align: right middle;
+        color: transparent;
+    }
+    """
+
+    def __init__(self, member: dict[str, Any]) -> None:
+        super().__init__("kick", classes="member-kick")
+        self.can_focus = True
+        self.member = member
+        self.user_id = int(member.get("user_id") or 0)
+
+    def on_click(self) -> None:
+        chat = getattr(self.app, "chat_view", None)
+        if chat is not None:
+            chat.begin_kick(self.member)
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key in ("enter", "space"):
+            self.on_click()
+            event.stop()
+
+
+class MsgTool(Static):
+    """Inline edit/delete text control on own messages (not a chunky Button)."""
+
+    def __init__(self, label: str, action: str) -> None:
+        super().__init__(label, classes=f"msg-tool msg-tool-{action}")
+        self.can_focus = False
+        self._action = action  # "edit" | "delete"
+
+    def on_click(self) -> None:
+        parent = self.parent
+        while parent is not None and not isinstance(parent, MessageLine):
+            parent = parent.parent
+        if not isinstance(parent, MessageLine):
+            return
+        if self._action == "edit":
+            parent.action_edit_own()
+        else:
+            parent.action_delete_own()
+
+
+class MessageLine(Vertical):
+    """One body line inside a SpeakerBlock — no rail, no name header."""
+
+    can_focus = True
+
+    BINDINGS = [
+        Binding("e", "edit_own", "edit", show=False),
+        Binding("delete", "delete_own", "delete", show=False),
+        Binding("backspace", "delete_own", "delete", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    MessageLine {
+        height: auto;
+        padding: 0 0 0 1;
+        margin: 0;
+    }
+    MessageLine.whisper-msg { color: $text-muted; }
+    MessageLine.highlight-ping {
         background: $warning 20%;
-        border-left: tall $warning;
+    }
+    MessageLine .msg-line {
+        height: auto;
+        width: 100%;
+        align: left top;
+    }
+    MessageLine .msg-body-col {
+        width: 1fr;
+        height: auto;
+    }
+    MessageLine .msg-body { height: auto; }
+    MessageLine .msg-tools {
+        display: none;
+        width: auto;
+        height: 1;
+        align: right top;
         padding-left: 1;
     }
-    MessageView .msg-head { height: 1; }
-    MessageView .msg-body { height: auto; }
-    MessageView .msg-chart {
+    MessageLine.tools-visible .msg-tools {
+        display: block;
+    }
+    MessageLine .msg-tool {
+        width: auto;
+        min-width: 6;
+        height: 1;
+        margin-left: 1;
+        content-align: right middle;
+    }
+    MessageLine.tools-visible .msg-tool-edit {
+        color: #7dd3fc;
+        text-style: underline;
+    }
+    MessageLine.tools-visible .msg-tool-delete {
+        color: #f87171;
+        text-style: underline;
+    }
+    MessageLine .msg-chart {
         height: 18;
         width: 100%;
         margin: 1 0 0 0;
     }
-    MessageView .msg-file { color: $text-muted; height: 1; }
+    MessageLine .msg-file { color: $text-muted; height: 1; }
+    MessageLine .msg-file:focus { color: $accent; text-style: bold; }
     """
 
     def __init__(
-        self, message: dict[str, Any], my_email: str, client: ApiClient | None = None
+        self,
+        message: dict[str, Any],
+        my_email: str,
+        client: ApiClient | None = None,
+        *,
+        member_emails: list[str] | None = None,
     ) -> None:
         super().__init__()
         self.message_id = int(message["id"])
         self.my_email = my_email
         self.client = client
         self.message = message
-        self._head = Static("", classes="msg-head", markup=True)
+        self._member_emails_cache = list(member_emails or [])
+        self._tools = Horizontal(classes="msg-tools")
+        self._edit_btn = MsgTool("edit", "edit")
+        self._del_btn = MsgTool("delete", "delete")
         self._body_static = Static("", classes="msg-body", markup=True)
         self._body_md = Markdown("", classes="msg-body")
         self._chart_ids: tuple[int, ...] = ()
+        self._tools_ready = False
+        self._hide_timer = None
+
+    @property
+    def is_mine(self) -> bool:
+        if self.message.get("agent") or self.message.get("deleted_at"):
+            return False
+        return str(self.message.get("sender_email") or "") == self.my_email
+
+    def _member_emails(self) -> list[str]:
+        if self._member_emails_cache:
+            return self._member_emails_cache
+        chat = getattr(self.app, "chat_view", None)
+        if chat is None:
+            return []
+        return [str(m.get("email") or "") for m in getattr(chat, "members", [])]
 
     def compose(self) -> ComposeResult:
-        yield self._head
-        yield self._body_static
-        yield self._body_md
+        with Horizontal(classes="msg-line"):
+            with Vertical(classes="msg-body-col"):
+                yield self._body_static
+                yield self._body_md
+            with self._tools:
+                yield self._edit_btn
+                yield self._del_btn
 
     def on_mount(self) -> None:
+        self._tools_ready = True
         self.update_message(self.message)
+
+    def _cancel_hide_timer(self) -> None:
+        if self._hide_timer is not None:
+            try:
+                self._hide_timer.stop()
+            except Exception:
+                pass
+            self._hide_timer = None
+
+    def _show_tools(self) -> None:
+        if not self.is_mine:
+            return
+        self._cancel_hide_timer()
+        self.add_class("tools-visible")
+
+    def _schedule_hide_tools(self) -> None:
+        self._cancel_hide_timer()
+        self._hide_timer = self.set_timer(0.14, self._hide_tools)
+
+    def _hide_tools(self) -> None:
+        self._hide_timer = None
+        self.remove_class("tools-visible")
+
+    def on_enter(self, event: events.Enter) -> None:
+        if self.is_mine:
+            self._show_tools()
+
+    def on_leave(self, event: events.Leave) -> None:
+        if self.is_mine:
+            self._schedule_hide_tools()
 
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
         href = (event.href or "").strip()
@@ -381,34 +800,39 @@ class MessageView(Vertical):
             webbrowser.open(href)
             event.stop()
 
+    def action_edit_own(self) -> None:
+        if not self.is_mine:
+            return
+        chat = getattr(self.app, "chat_view", None)
+        if chat is not None:
+            chat.begin_edit_message(self)
+
+    def action_delete_own(self) -> None:
+        if not self.is_mine:
+            return
+        chat = getattr(self.app, "chat_view", None)
+        if chat is not None:
+            chat.begin_delete_message(self)
+
     def update_message(self, message: dict[str, Any]) -> None:
         self.message = message
         self.set_class(bool(message.get("agent")), "agent-msg")
         self.set_class(bool(message.get("visibility") == "whisper"), "whisper-msg")
-
-        agent = message.get("agent")
-        if agent:
-            who = f"[b #7dd3fc]@{escape(str(agent))}[/]"
-        else:
-            name = str(message.get("sender") or message.get("sender_email") or "user")
-            mine = str(message.get("sender_email") or "") == self.my_email
-            colour = "#a7f3d0" if mine else "#fbbf24"
-            who = f"[b {colour}]{escape(name)}[/]"
-
-        meta = [short_time(str(message.get("created_at") or ""))]
-        if message.get("edited_at"):
-            meta.append("edited")
-        if message.get("visibility") == "whisper":
-            meta.append("only you")
-        self._head.update(f"{who} [dim]{' · '.join(x for x in meta if x)}[/dim]")
+        mine = self.is_mine
+        self.set_class(mine, "mine-msg")
+        if not mine:
+            self.remove_class("tools-visible")
 
         if message.get("deleted_at"):
+            self.set_class(False, "mine-msg")
+            self.remove_class("tools-visible")
             self._body_md.display = False
             self._body_static.display = True
             self._body_static.update("[dim i]message deleted[/dim i]")
             self._clear_extras()
             return
 
+        agent = message.get("agent")
         raw = _strip_control_markers(str(message.get("body") or ""))
         use_md = bool(agent) and bool(raw.strip())
         if use_md:
@@ -418,7 +842,6 @@ class MessageView(Vertical):
         else:
             self._body_md.display = False
             self._body_static.display = True
-            # User messages: linkify bare URLs as markdown so they stay clickable
             if re.search(r"https?://|mailto:", raw):
                 linked = re.sub(
                     r"(https?://[^\s<]+)|(mailto:[^\s<]+)",
@@ -428,6 +851,13 @@ class MessageView(Vertical):
                 self._body_static.display = False
                 self._body_md.display = True
                 self._body_md.update(linked)
+            elif raw and (
+                "```" in raw
+                or "|" in raw
+                or re.search(r"^#+\s", raw, re.M)
+                or re.search(r"^\d+\.\s", raw, re.M)
+            ):
+                self._body_static.update(render_markdown(raw))
             else:
                 self._body_static.update(escape(raw) if raw else "")
 
@@ -435,7 +865,9 @@ class MessageView(Vertical):
 
     def _clear_extras(self) -> None:
         for child in list(self.children):
-            if child in (self._head, self._body_static, self._body_md):
+            if "msg-line" in child.classes:
+                continue
+            if child in (self._body_static, self._body_md):
                 continue
             child.remove()
         self._chart_ids = ()
@@ -460,24 +892,28 @@ class MessageView(Vertical):
             if image_atts and self.client is not None:
                 self._mount_charts(image_atts)
             for a in file_atts:
-                self.mount(
-                    Static(
-                        f"[dim]📎 {escape(str(a.get('filename') or ''))}[/dim]",
-                        markup=True,
-                        classes="msg-file",
+                if self.client is not None:
+                    self.mount(AttachmentFile(a, self.client))
+                else:
+                    self.mount(
+                        Static(
+                            f"[dim]📎 {escape(str(a.get('filename') or ''))}[/dim]",
+                            markup=True,
+                            classes="msg-file",
+                        )
                     )
-                )
-        elif file_atts and not any(
-            getattr(c, "classes", None) and "msg-file" in c.classes for c in self.children
-        ):
+        elif file_atts and not any(isinstance(c, AttachmentFile) for c in self.children):
             for a in file_atts:
-                self.mount(
-                    Static(
-                        f"[dim]📎 {escape(str(a.get('filename') or ''))}[/dim]",
-                        markup=True,
-                        classes="msg-file",
+                if self.client is not None:
+                    self.mount(AttachmentFile(a, self.client))
+                else:
+                    self.mount(
+                        Static(
+                            f"[dim]📎 {escape(str(a.get('filename') or ''))}[/dim]",
+                            markup=True,
+                            classes="msg-file",
+                        )
                     )
-                )
 
     @work(thread=True, exclusive=False, group="msg-charts")
     def _mount_charts(self, image_atts: list[dict[str, Any]]) -> None:
@@ -517,12 +953,96 @@ class MessageView(Vertical):
                 )
 
 
+class SpeakerBlock(Vertical):
+    """One speaker turn: single colored rail + name header + stacked MessageLines."""
+
+    DEFAULT_CSS = """
+    SpeakerBlock {
+        height: auto;
+        padding: 1 1 1 1;
+        margin: 1 0 0 0;
+        border-left: wide transparent;
+        background: transparent;
+    }
+    SpeakerBlock.agent-block {
+        background: $panel;
+    }
+    SpeakerBlock.has-mine:hover {
+        background: $boost;
+    }
+    SpeakerBlock .block-head {
+        height: 1;
+        width: 100%;
+        margin: 0 0 0 0;
+        text-style: bold;
+    }
+    """
+
+    def __init__(
+        self,
+        messages: list[dict[str, Any]],
+        my_email: str,
+        client: ApiClient | None = None,
+        *,
+        member_emails: list[str] | None = None,
+    ) -> None:
+        super().__init__(classes="speaker-block")
+        self.messages = list(messages)
+        self.my_email = my_email
+        self.client = client
+        self.member_emails = list(member_emails or [])
+        first = self.messages[0]
+        self.speaker_color = color_for_message(first, member_emails=self.member_emails)
+        self._head = Static("", classes="block-head", markup=True)
+        self.lines = [
+            MessageLine(m, my_email, client=client, member_emails=self.member_emails)
+            for m in self.messages
+        ]
+
+    def compose(self) -> ComposeResult:
+        yield self._head
+        for line in self.lines:
+            yield line
+
+    def on_mount(self) -> None:
+        try:
+            self.styles.border_left = ("wide", self.speaker_color)
+        except Exception:
+            try:
+                self.styles.border_left = ("tall", self.speaker_color)
+            except Exception:
+                pass
+        if any(line.is_mine for line in self.lines):
+            self.add_class("has-mine")
+        if self.messages and self.messages[0].get("agent"):
+            self.add_class("agent-block")
+        self._render_head()
+
+    def _render_head(self) -> None:
+        message = self.messages[0]
+        color = self.speaker_color
+        agent = message.get("agent")
+        if agent:
+            who = f"[b {color}]@{escape(str(agent))}[/]"
+        else:
+            name = str(message.get("sender") or message.get("sender_email") or "user")
+            who = f"[b {color}]{escape(name)}[/]"
+        meta = [short_time(str(message.get("created_at") or ""))]
+        if message.get("edited_at"):
+            meta.append("edited")
+        if message.get("visibility") == "whisper":
+            meta.append("only you")
+        self._head.update(f"{who}  [dim]{escape(' · '.join(x for x in meta if x))}[/dim]")
+
+
 class ChatView(Vertical):
     """Sidebar + transcript + composer."""
 
-    POLL_SECONDS = 1.5
+    POLL_SECONDS = 2.0
     BINDINGS = [
         ("ctrl+f", "attach_file", "attach file"),
+        ("ctrl+m", "voice_toggle", "voice"),
+        ("ctrl+shift+n", "new_channel", "new channel"),
     ]
 
     def __init__(self, client: ApiClient) -> None:
@@ -532,7 +1052,9 @@ class ChatView(Vertical):
         self.chats: list[dict[str, Any]] = []
         self.members: list[dict[str, Any]] = []
         self.my_email = ""
-        self._views: dict[int, MessageView] = {}
+        self._rows: dict[int, dict[str, Any]] = {}
+        self._views: dict[int, MessageLine] = {}
+        self._blocks_fp: tuple[Any, ...] | None = None
         self._last_id = 0
         self._last_sync = ""
         # Per-chat in-flight sends / LLM jobs (other rooms stay typable)
@@ -543,10 +1065,14 @@ class ChatView(Vertical):
         self._setup_opened: set[int] = set()
         self._setup_busy = False
         self._attach_busy = False
+        self._recording = False
+        self._voice_path: Path | None = None
+        self._voice = None  # lazily created VoiceRecorder
 
         self.sidebar = VerticalScroll(id="chat-sidebar")
         self.chat_list = ListView(id="chat-list")
-        self.member_list = ListView(id="member-list")
+        self.member_list = VerticalScroll(id="member-list")
+        self.new_chat_btn = Button("+ channel", id="chat-new")
         self.transcript = VerticalScroll(id="transcript")
         self.title_bar = Static("", id="chat-title", markup=True)
         self.picker = CommandPicker()
@@ -555,18 +1081,21 @@ class ChatView(Vertical):
             total=None, show_eta=False, show_percentage=False, id="llm-wait-bar"
         )
         self.attach_pending = Static("", id="attach-pending", markup=True)
+        self.composer_ghost = Static("", id="composer-ghost", markup=True)
+        self.attach_btn = Button("+", id="chat-attach", compact=True, tooltip="attach file")
+        self.mic_btn = Button("mic", id="chat-mic", compact=True, tooltip="voice (ctrl+m)")
         self.composer = Composer(
             self.picker,
-            placeholder="type /  !  or  @  · Attach button · enter to send",
+            placeholder="Ask anything — /  !  or  @",
             id="composer",
         )
-        self.attach_btn = Button("Attach", id="chat-attach", variant="primary")
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="chat-body"):
             with self.sidebar:
                 yield Label("CHATS", classes="side-head")
                 yield self.chat_list
+                yield self.new_chat_btn
                 yield Label("MEMBERS", classes="side-head")
                 yield self.member_list
             with Vertical(id="chat-main"):
@@ -577,14 +1106,58 @@ class ChatView(Vertical):
                     yield self.llm_label
                     yield self.llm_bar
                 yield self.attach_pending
+                yield self.composer_ghost
                 with Horizontal(id="composer-row"):
-                    yield self.composer
                     yield self.attach_btn
-
+                    yield self.composer
+                    yield self.mic_btn
     def on_mount(self) -> None:
         self.set_interval(self.POLL_SECONDS, self.poll_messages)
         self._sync_llm_ui()
         self._render_pending_attachments()
+
+    def reset_session_state(self) -> None:
+        """Clear transcript / pending attach / voice when signing out."""
+        self.chat_id = None
+        self.chats = []
+        self.members = []
+        self.my_email = ""
+        self._rows.clear()
+        self._views.clear()
+        self._blocks_fp = None
+        self._last_id = 0
+        self._last_sync = ""
+        self._sending_chats.clear()
+        self._llm_jobs.clear()
+        self._pending = None
+        self._pending_attachments = []
+        self._setup_opened.clear()
+        self._setup_busy = False
+        self._attach_busy = False
+        self._recording = False
+        self._voice_path = None
+        try:
+            self.transcript.remove_children()
+        except Exception:
+            pass
+        try:
+            self.chat_list.clear()
+        except Exception:
+            pass
+        try:
+            self.member_list.remove_children()
+        except Exception:
+            pass
+        self.title_bar.update("")
+        self.composer.value = ""
+        self.composer.disabled = False
+        self.attach_btn.disabled = False
+        self.mic_btn.label = "mic"
+        self.mic_btn.remove_class("recording")
+        self.picker.close()
+        self._render_pending_attachments()
+        self._sync_llm_ui()
+        self.refresh_ghost()
 
     # sidebar -------------------------------------------------------------
 
@@ -638,11 +1211,28 @@ class ChatView(Vertical):
             item.set_class(active, "active-chat")
 
     def _render_members(self) -> None:
-        self.member_list.clear()
+        self.member_list.remove_children()
+        ws = getattr(self.app, "ws", None)
+        is_owner = bool(ws and getattr(ws, "is_owner", False))
+        me_id = int((ws.me or {}).get("user_id") or 0) if ws else 0
+        emails = [str(x.get("email") or "") for x in self.members]
         for m in self.members:
+            user_id = int(m.get("user_id") or 0)
             crown = " [yellow]★[/yellow]" if m.get("role") == "owner" else ""
             name = escape(str(m.get("name") or m.get("email") or ""))
-            self.member_list.append(ListItem(Static(f"[dim]●[/dim] {name}{crown}", markup=True)))
+            dot = color_for_member(str(m.get("email") or ""), member_emails=emails)
+            label = Static(
+                f"[{dot}]●[/] {name}{crown}",
+                markup=True,
+                classes="member-name",
+            )
+            row = Horizontal(classes="member-row")
+            row.member = m
+            row.user_id = user_id
+            self.member_list.mount(row)
+            row.mount(label)
+            if is_owner and user_id and user_id != me_id:
+                row.mount(MemberKick(m))
 
     @property
     def current_chat(self) -> dict[str, Any]:
@@ -652,7 +1242,9 @@ class ChatView(Vertical):
         if chat_id == self.chat_id:
             return
         self.chat_id = chat_id
+        self._rows.clear()
         self._views.clear()
+        self._blocks_fp = None
         self._last_id = 0
         self._last_sync = ""
         self.transcript.remove_children()
@@ -661,10 +1253,10 @@ class ChatView(Vertical):
         self._render_pending_attachments()
         chat = self.current_chat
         if chat.get("kind") == "private":
-            self.title_bar.update("[b]my room[/b]  [dim]/skills · Attach · notes stay quiet[/dim]")
+            self.title_bar.update("[b]my room[/b]  [dim]/skills · notes stay quiet[/dim]")
         else:
             name = escape(str(chat.get("name") or ""))
-            self.title_bar.update(f"[b]#{name}[/b]  [dim]@people · !commands · Attach[/dim]")
+            self.title_bar.update(f"[b]#{name}[/b]  [dim]@people · !commands[/dim]")
         self._sync_llm_ui()
         self.poll_messages()
         self._sync_chat_list_selection()
@@ -718,13 +1310,19 @@ class ChatView(Vertical):
         self.attach_pending.display = True
         self.attach_pending.update(
             f"[b]attached[/b] {names}  "
-            f"[dim]({len(rows)}/5) · Attach add · esc clear last · !attach-clear[/dim]"
+            f"[dim]({len(rows)}/5) · + add · esc clear last · !attach-clear[/dim]"
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "chat-attach":
             event.stop()
             self.action_attach_file()
+        elif event.button.id == "chat-mic":
+            event.stop()
+            self.action_voice_toggle()
+        elif event.button.id == "chat-new":
+            event.stop()
+            self.action_new_channel()
 
     def action_attach_file(self) -> None:
         """Open the OS file chooser (Attach button / ctrl+f / !attach)."""
@@ -888,30 +1486,77 @@ class ChatView(Vertical):
         if chat_id != self.chat_id:
             return  # the user switched chats while the request was in flight
         self._last_sync = stamp
+        # Empty poll: do nothing (was re-rendering every message every tick → lag)
+        if not rows:
+            return
         at_bottom = self.transcript.scroll_offset.y >= self.transcript.max_scroll_y - 2
+        touch_ids: list[int] = []
         for row in rows:
             mid = int(row["id"])
             self._last_id = max(self._last_id, mid)
-            existing = self._views.get(mid)
-            if existing is not None:
-                if row.get("deleted_at"):
-                    existing.remove()
-                    self._views.pop(mid, None)
-                else:
-                    existing.update_message(row)
-                continue
             if row.get("deleted_at"):
+                self._rows.pop(mid, None)
                 continue
-            view = MessageView(row, self.my_email, client=self.client)
-            self._views[mid] = view
-            self.transcript.mount(view)
+            prev = self._rows.get(mid)
+            self._rows[mid] = row
+            if prev is None or message_content_key(prev) != message_content_key(row):
+                touch_ids.append(mid)
             self._maybe_open_setup(row)
+        self._refresh_transcript_blocks(
+            scroll_bottom=at_bottom,
+            touch_ids=touch_ids,
+        )
         # Keep / remount thinking bubble if this room still has an LLM job
         if self._active_llm_skill() and (
             self._pending is None or self._pending not in self.transcript.children
         ):
             self._sync_llm_ui()
-        if rows and at_bottom:
+
+    def _ordered_rows(self) -> list[dict[str, Any]]:
+        return [self._rows[k] for k in sorted(self._rows)]
+
+    def _member_emails_list(self) -> list[str]:
+        return [str(m.get("email") or "") for m in self.members]
+
+    def _refresh_transcript_blocks(
+        self,
+        *,
+        scroll_bottom: bool = False,
+        force: bool = False,
+        touch_ids: list[int] | None = None,
+    ) -> None:
+        """Rebuild SpeakerBlocks from _rows, or patch only changed lines when structure is stable."""
+        rows = self._ordered_rows()
+        groups = group_messages(rows)
+        fp = blocks_fingerprint(groups)
+        if not force and fp == self._blocks_fp:
+            for mid in touch_ids or ():
+                view = self._views.get(mid)
+                row = self._rows.get(mid)
+                if view is not None and row is not None:
+                    view.update_message(row)
+            if scroll_bottom and touch_ids:
+                self.call_after_refresh(self.transcript.scroll_end, animate=False)
+            return
+
+        self._blocks_fp = fp
+        self.transcript.remove_children()
+        self._views.clear()
+        self._pending = None
+        emails = self._member_emails_list()
+        for group in groups:
+            block = SpeakerBlock(
+                group,
+                self.my_email,
+                client=self.client,
+                member_emails=emails,
+            )
+            self.transcript.mount(block)
+            for line in block.lines:
+                self._views[line.message_id] = line
+        if self._active_llm_skill():
+            self._sync_llm_ui()
+        if scroll_bottom:
             self.call_after_refresh(self.transcript.scroll_end, animate=False)
 
     def _maybe_open_setup(self, row: dict[str, Any]) -> None:
@@ -963,6 +1608,7 @@ class ChatView(Vertical):
         if event.input is not self.composer:
             return
         self.refresh_picker()
+        self.refresh_ghost()
 
     def refresh_picker(self) -> None:
         hit = active_prefix(self.composer.value, self.composer.cursor_position)
@@ -976,10 +1622,50 @@ class ChatView(Vertical):
         )
         self.picker.show(items, start)
 
+    def refresh_ghost(self) -> None:
+        """Dim hint above the composer: active picker row or next-arg tip."""
+        if self.picker.open:
+            chosen = self.picker.selected
+            if chosen is not None:
+                self.composer_ghost.display = True
+                self.composer_ghost.update(
+                    f"[dim]{escape(chosen.insert)}[/dim]  [dim]{escape(chosen.blurb)}[/dim]"
+                )
+                return
+        text = self.composer.value
+        # Command complete (picker closed) — show arg hint
+        for label, hint in _ARG_HINTS.items():
+            if text == label or text.startswith(label + " "):
+                if text.rstrip() == label.rstrip() or text == label:
+                    # needs trailing space or args
+                    self.composer_ghost.display = True
+                    self.composer_ghost.update(f"[dim]{escape(label)} {escape(hint)}[/dim]")
+                    return
+                if text.startswith(label + " ") and not text[len(label) + 1 :].strip():
+                    self.composer_ghost.display = True
+                    self.composer_ghost.update(f"[dim]{escape(hint)}[/dim]")
+                    return
+        self.composer_ghost.update("")
+        self.composer_ghost.display = False
+
+    def accept_ghost_hint(self) -> bool:
+        """Tab with picker closed: ensure trailing space after a bare command."""
+        text = self.composer.value
+        for label in _ARG_HINTS:
+            if text == label.rstrip() or text == label:
+                insert = label if label.endswith(" ") else label + " "
+                self.composer.value = insert
+                self.composer.cursor_position = len(insert)
+                self.refresh_picker()
+                self.refresh_ghost()
+                return True
+        return False
+
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         # Keep picker cursor paint in sync if Textual moves highlight itself
         if event.list_view is self.picker.list_view and self.picker.open:
             self.picker._paint_cursor()
+            self.refresh_ghost()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.list_view is self.picker.list_view:
@@ -1073,7 +1759,9 @@ class ChatView(Vertical):
             return
         if data.get("cleared"):
             if viewing:
+                self._rows.clear()
                 self._views.clear()
+                self._blocks_fp = None
                 self._last_id = 0
                 self._last_sync = ""
                 self.transcript.remove_children()
@@ -1094,3 +1782,356 @@ class ChatView(Vertical):
         else:
             self.app.set_status(f"[dim]agent finished in chat #{chat_id}[/dim]")
         self.app.refresh_workspace()
+
+    # edit / delete / open / channel / kick / voice -----------------------
+
+    def begin_edit_message(self, view: MessageLine) -> None:
+        if self.chat_id is None or not view.is_mine:
+            return
+        body = str(view.message.get("body") or "")
+        chat_id = int(self.chat_id)
+        mid = int(view.message_id)
+        if chat_id in self._llm_jobs or chat_id in self._sending_chats:
+            self.app.set_status("[yellow]wait for the current job to finish[/yellow]")
+            return
+
+        def done(new_body: str | None) -> None:
+            if new_body is None:
+                self.app.set_status("edit cancelled")
+                return
+            text = new_body.strip()
+            if not text:
+                self.app.set_status("[yellow]body required[/yellow]")
+                return
+            self._start_edit(chat_id, mid, text)
+
+        from app.cli_pkg.tui.widgets import MessageEditModal
+
+        self.app.push_screen(MessageEditModal(body), done)
+
+    def _start_edit(self, chat_id: int, message_id: int, body: str) -> None:
+        """Same LLM wait UI as send when the edit re-triggers an agent skill."""
+        chat = next((c for c in self.chats if int(c["id"]) == chat_id), {})
+        working = looks_like_agent_work(body, str(chat.get("kind") or ""))
+        if working:
+            skill = skill_name_from_body(body) or (
+                body.split()[0].lstrip("/") if body else "skill"
+            )
+            self._llm_jobs[chat_id] = skill
+            if self.chat_id == chat_id:
+                self._sync_llm_ui()
+                self.app.set_status(f"[#7dd3fc]/{escape(skill)} running…[/]")
+            else:
+                self._render_chat_list()
+                self.app.set_status(
+                    f"[#7dd3fc]/{escape(skill)} running in another room…[/]"
+                )
+        else:
+            self.app.set_status("[dim]saving edit…[/dim]")
+        self._edit_worker(chat_id, message_id, body)
+
+    @work(thread=True, group="chat-edit")
+    def _edit_worker(self, chat_id: int, message_id: int, body: str) -> None:
+        try:
+            data = self.client.edit_message(chat_id, message_id, body)
+            error = ""
+        except ApiError as exc:
+            data, error = {}, str(exc)
+        self.app.call_from_thread(self._apply_edit_result, chat_id, data, error)
+
+    def begin_delete_message(self, view: MessageLine) -> None:
+        if self.chat_id is None or not view.is_mine:
+            return
+        chat_id = int(self.chat_id)
+        mid = int(view.message_id)
+        snippet = escape(str(view.message.get("body") or "")[:80])
+
+        def confirmed(yes: bool | None) -> None:
+            if not yes:
+                self.app.set_status("delete cancelled")
+                return
+            self.app.set_status("[dim]deleting…[/dim]")
+            self._delete_worker(chat_id, mid)
+
+        from app.cli_pkg.tui.widgets import ConfirmModal
+
+        self.app.push_screen(
+            ConfirmModal(
+                "Delete message",
+                snippet or "[dim](empty)[/dim]",
+                "Removes this message and following agent replies.",
+                "Delete",
+            ),
+            confirmed,
+        )
+
+    @work(thread=True, group="chat-edit")
+    def _delete_worker(self, chat_id: int, message_id: int) -> None:
+        try:
+            data = self.client.delete_message(chat_id, message_id)
+            error = ""
+        except ApiError as exc:
+            data, error = {}, str(exc)
+        self.app.call_from_thread(self._apply_delete_result, chat_id, message_id, data, error)
+
+    def _drop_ids(self, ids: list[Any]) -> None:
+        for raw in ids:
+            try:
+                mid = int(raw)
+            except (TypeError, ValueError):
+                continue
+            self._rows.pop(mid, None)
+            self._views.pop(mid, None)
+
+    def _mount_replies(self, replies: list[dict]) -> None:
+        for row in replies:
+            if not row or row.get("id") is None or row.get("deleted_at"):
+                continue
+            mid = int(row["id"])
+            self._rows[mid] = row
+            self._last_id = max(self._last_id, mid)
+        self._refresh_transcript_blocks(scroll_bottom=True)
+
+    def _apply_edit_result(self, chat_id: int, data: dict, error: str) -> None:
+        self._llm_jobs.pop(chat_id, None)
+        viewing = self.chat_id == chat_id
+        if viewing:
+            if self._pending is not None:
+                try:
+                    self._pending.remove()
+                except Exception:
+                    pass
+                self._pending = None
+            self._sync_llm_ui()
+            self.composer.disabled = False
+        else:
+            self._render_chat_list()
+            self._sync_llm_ui()
+        if error:
+            self.app.set_status(f"[red]edit failed: {escape(error)}[/red]")
+            return
+        if not viewing:
+            self.app.set_status("edit saved (other chat)")
+            return
+        self._drop_ids(list(data.get("removed_ids") or []))
+        msg = data.get("message") or {}
+        mid = int(msg.get("id") or 0)
+        if mid and msg:
+            self._rows[mid] = msg
+        for row in list(data.get("replies") or []):
+            if not row or row.get("id") is None or row.get("deleted_at"):
+                continue
+            rid = int(row["id"])
+            self._rows[rid] = row
+            self._last_id = max(self._last_id, rid)
+        self._refresh_transcript_blocks(scroll_bottom=True, force=True)
+        self.app.set_status("[green]message updated[/green]")
+        self.poll_messages()
+
+    def _apply_delete_result(
+        self, chat_id: int, message_id: int, data: dict, error: str
+    ) -> None:
+        if error:
+            self.app.set_status(f"[red]delete failed: {escape(error)}[/red]")
+            return
+        if chat_id != self.chat_id:
+            return
+        removed = list(data.get("removed_ids") or [])
+        removed.append(message_id)
+        self._drop_ids(removed)
+        self._refresh_transcript_blocks(force=True)
+        self.app.set_status("message deleted")
+
+    def open_attachment(self, att: dict[str, Any]) -> None:
+        self.app.set_status("[dim]opening…[/dim]")
+        self._open_attachment_worker(att)
+
+    @work(thread=True, group="chat-open-att")
+    def _open_attachment_worker(self, att: dict[str, Any]) -> None:
+        name = str(att.get("filename") or "file")
+        url = str(att.get("url") or "")
+        att_id = att.get("id")
+        if not url and att_id:
+            url = f"/attachments/{att_id}"
+        try:
+            if not url:
+                raise ApiError("no attachment url")
+            data = self.client.download_bytes(url, timeout=120.0)
+            suffix = Path(name).suffix or ".bin"
+            path = Path(tempfile.gettempdir()) / f"aio-open-{att_id or 'x'}{suffix}"
+            path.write_bytes(data)
+            webbrowser.open(path.as_uri())
+            msg = f"[green]opened {escape(name)}[/green]"
+        except (ApiError, OSError) as exc:
+            msg = f"[red]open failed: {escape(str(exc))}[/red]"
+        self.app.call_from_thread(self.app.set_status, msg)
+
+    def action_new_channel(self) -> None:
+        def done(name: str | None) -> None:
+            if not name:
+                self.app.set_status("channel cancelled")
+                return
+            self.app.set_status(f"[dim]creating #{escape(name)}…[/dim]")
+            self._create_channel_worker(name)
+
+        from app.cli_pkg.tui.widgets import PromptModal
+
+        self.app.push_screen(PromptModal("Channel name", "standup"), done)
+
+    @work(thread=True, group="chat-new")
+    def _create_channel_worker(self, name: str) -> None:
+        try:
+            chat = self.client.create_chat(name)
+            error = ""
+        except ApiError as exc:
+            chat, error = {}, str(exc)
+        self.app.call_from_thread(self._after_create_channel, chat, error)
+
+    def _after_create_channel(self, chat: dict, error: str) -> None:
+        if error or not chat:
+            self.app.set_status(f"[red]create failed: {escape(error or 'unknown')}[/red]")
+            return
+        new_id = int(chat.get("id") or 0)
+        self.app.refresh_workspace()
+        if new_id:
+            self.select_chat(new_id)
+        self.app.set_status(f"[green]#{escape(str(chat.get('name') or ''))} created[/green]")
+        self.composer.focus()
+
+    def begin_kick(self, member: dict[str, Any]) -> None:
+        ws = getattr(self.app, "ws", None)
+        if ws is None or not ws.is_owner:
+            self.app.set_status("[yellow]owner only[/yellow]")
+            return
+        user_id = int(member.get("user_id") or 0)
+        if not user_id:
+            return
+        me = int((ws.me or {}).get("user_id") or 0)
+        if user_id == me:
+            self.app.set_status("[yellow]you can't remove yourself[/yellow]")
+            return
+        email = str(member.get("email") or "")
+        label = escape(str(member.get("name") or email))
+
+        def confirmed(yes: bool | None) -> None:
+            if not yes:
+                self.app.set_status("kick cancelled")
+                return
+            self._kick_worker(user_id, email)
+
+        from app.cli_pkg.tui.widgets import ConfirmModal
+
+        self.app.push_screen(
+            ConfirmModal(
+                "Remove from workspace",
+                f"{label}\n{escape(email)}",
+                "They lose access immediately. Their messages stay.",
+                "Remove",
+            ),
+            confirmed,
+        )
+
+    @work(thread=True, group="chat-kick")
+    def _kick_worker(self, user_id: int, email: str) -> None:
+        try:
+            self.client.remove_member(user_id)
+            msg = f"removed {escape(email)}"
+        except ApiError as exc:
+            msg = f"[red]{escape(str(exc))}[/red]"
+        self.app.call_from_thread(self.app.set_status, msg)
+        self.app.call_from_thread(self.app.refresh_workspace)
+
+    def action_voice_toggle(self) -> None:
+        if self._recording:
+            self._stop_voice_and_transcribe()
+            return
+        self._start_voice_or_fallback()
+
+    def _set_recording_ui(self, on: bool) -> None:
+        self._recording = on
+        try:
+            row = self.query_one("#composer-row", Horizontal)
+        except Exception:
+            row = None
+        if row is not None:
+            row.set_class(on, "recording")
+        self.composer.set_class(on, "recording")
+        self.mic_btn.set_class(on, "recording")
+        self.mic_btn.label = "mic" if not on else "rec"
+
+    def _start_voice_or_fallback(self) -> None:
+        from app.cli_pkg.tui.voice import VoiceError, VoiceRecorder
+
+        if self._voice is None:
+            self._voice = VoiceRecorder()
+        try:
+            self._voice.start()
+        except VoiceError as exc:
+            self.app.set_status(f"[yellow]mic unavailable ({escape(str(exc))}) — pick audio file[/yellow]")
+            self._voice_file_fallback()
+            return
+        self._set_recording_ui(True)
+        self.app.set_status("[red]recording…[/red] mic / ctrl+m to stop")
+
+    def _stop_voice_and_transcribe(self) -> None:
+        from app.cli_pkg.tui.voice import VoiceError
+
+        self._set_recording_ui(False)
+        try:
+            path = self._voice.stop() if self._voice else None
+        except VoiceError as exc:
+            self.app.set_status(f"[red]record failed: {escape(str(exc))}[/red]")
+            return
+        if path is None:
+            return
+        self.app.set_status("[dim]transcribing…[/dim]")
+        self._transcribe_worker(str(path))
+
+    def _voice_file_fallback(self) -> None:
+        self._pick_audio_transcribe_worker()
+
+    @work(thread=True, group="chat-voice")
+    def _pick_audio_transcribe_worker(self) -> None:
+        from app.cli_pkg.tui.file_picker import pick_audio_files
+
+        try:
+            paths = pick_audio_files()
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.app.set_status, f"[red]audio picker: {escape(str(exc))}[/red]"
+            )
+            return
+        if not paths:
+            self.app.call_from_thread(self.app.set_status, "voice cancelled")
+            return
+        self.app.call_from_thread(self.app.set_status, "[dim]transcribing…[/dim]")
+        self._transcribe_sync(str(paths[0]))
+
+    @work(thread=True, group="chat-voice")
+    def _transcribe_worker(self, path: str) -> None:
+        self._transcribe_sync(path)
+
+    def _transcribe_sync(self, path: str) -> None:
+        try:
+            text = self.client.transcribe(path)
+            error = ""
+        except ApiError as exc:
+            text, error = "", str(exc)
+        self.app.call_from_thread(self._after_transcribe, text, error)
+
+    def _after_transcribe(self, text: str, error: str) -> None:
+        if error:
+            self.app.set_status(f"[red]stt failed: {escape(error)}[/red]")
+            return
+        if not text:
+            self.app.set_status("[yellow]empty transcript[/yellow]")
+            return
+        cur = self.composer.value
+        if cur and not cur.endswith(" "):
+            cur += " "
+        self.composer.value = cur + text
+        self.composer.cursor_position = len(self.composer.value)
+        self.composer.focus()
+        self.refresh_picker()
+        self.refresh_ghost()
+        self.app.set_status("[green]transcript ready[/green]")
