@@ -8,6 +8,7 @@ from typing import Any, Callable
 from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.timer import Timer
 from textual.widgets import Button, Static
 
 
@@ -26,7 +27,7 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="tabs",
         title="Tabs",
-        body="Chat Board Agents People. Owners also get Dash and Live.",
+        body="Chat · Board · Agents · People. Owners also get Dash and Live.",
         tab="chat",
         spotlight="#tabs-row",
     ),
@@ -39,22 +40,22 @@ MEMBER_STEPS: list[TourStep] = [
     ),
     TourStep(
         id="type",
-        title="Type",
-        body="/ AI skills · ! board commands · @ ping someone.",
+        title="Type here",
+        body="Type in this box: / for AI · ! for commands · @ to ping.",
         tab="chat",
         spotlight="#composer",
     ),
     TourStep(
         id="attach",
         title="Attach",
-        body="Attach files the AI can read with your next message.",
+        body="Click Attach to pick a file the AI can read with your next message.",
         tab="chat",
         spotlight="#chat-attach",
     ),
     TourStep(
         id="pings",
         title="Pings",
-        body="When @'d: sound + badge. Open with ctrl+n.",
+        body="When someone @mentions you: sound + @N on this bar. Then press ctrl+n.",
         tab="chat",
         spotlight="#status-line",
     ),
@@ -82,7 +83,6 @@ OWNER_EXTRA_STEPS: list[TourStep] = [
         body="Invite teammates. Change roles. Remove members.",
         tab="people",
         spotlight="#people-invite",
-        owner_only=True,
     ),
     TourStep(
         id="dash",
@@ -90,7 +90,6 @@ OWNER_EXTRA_STEPS: list[TourStep] = [
         body="Owner tables: people, models, tokens, open work.",
         tab="dashboard",
         spotlight="#dashboard",
-        owner_only=True,
     ),
     TourStep(
         id="live",
@@ -98,7 +97,6 @@ OWNER_EXTRA_STEPS: list[TourStep] = [
         body="Live gauges and WIP. Polls while you watch.",
         tab="live",
         spotlight="#live",
-        owner_only=True,
     ),
     TourStep(
         id="invite-cmd",
@@ -106,7 +104,6 @@ OWNER_EXTRA_STEPS: list[TourStep] = [
         body="!invite mints a join link. Email when configured.",
         tab="chat",
         spotlight="#composer",
-        owner_only=True,
     ),
 ]
 
@@ -119,19 +116,25 @@ def build_tour_steps(*, is_owner: bool) -> list[TourStep]:
 
 
 class TutorialCoach(Vertical):
-    """Bottom coach card: step text + Back / Next / Skip."""
+    """Bottom coach card: step text + Back / Next / Skip + pulsing white glow."""
 
     DEFAULT_CSS = """
     TutorialCoach {
         height: auto;
         display: none;
-        padding: 0 1 1 1;
-        background: $panel;
-        border-top: thick #ff2ea6;
+        padding: 1 1 1 1;
+        background: #161616;
+        border-top: solid #e8e8e8;
     }
     TutorialCoach.-active { display: block; }
-    #tour-head { height: 1; }
-    #tour-body { height: auto; color: $text-muted; }
+    #tour-head { height: 1; color: #ffffff; text-style: bold; }
+    #tour-body { height: auto; color: #d0d0d0; }
+    #tour-hint {
+        height: 1;
+        color: #a0a0a0;
+        display: none;
+    }
+    #tour-hint.-show { display: block; }
     #tour-actions { height: 3; align: left middle; }
     #tour-actions Button { margin-right: 1; }
     """
@@ -142,12 +145,16 @@ class TutorialCoach(Vertical):
         self._index = 0
         self._spotlight_node: Any = None
         self._on_finished: Callable[[bool], None] | None = None
+        self._glow_on = False
+        self._glow_timer: Timer | None = None
         self._head = Static("", id="tour-head", markup=True)
         self._body = Static("", id="tour-body", markup=True)
+        self._hint = Static("", id="tour-hint", markup=True)
 
     def compose(self) -> ComposeResult:
         yield self._head
         yield self._body
+        yield self._hint
         with Horizontal(id="tour-actions"):
             yield Button("Back", id="tour-back")
             yield Button("Next", variant="primary", id="tour-next")
@@ -173,12 +180,15 @@ class TutorialCoach(Vertical):
         self._enter_step()
 
     def stop(self, *, completed: bool) -> None:
+        self._stop_glow()
         self._clear_spotlight()
         self.remove_class("-active")
         try:
             self.app.query_one("#body").remove_class("tour-dim")
         except Exception:
             pass
+        self._hint.remove_class("-show")
+        self._hint.update("")
         cb = self._on_finished
         self._on_finished = None
         self._steps = []
@@ -186,12 +196,24 @@ class TutorialCoach(Vertical):
         if cb:
             cb(completed)
 
+    def _stop_glow(self) -> None:
+        if self._glow_timer is not None:
+            try:
+                self._glow_timer.stop()
+            except Exception:
+                pass
+            self._glow_timer = None
+        self._glow_on = False
+
     def _clear_spotlight(self) -> None:
+        self._stop_glow()
         node = self._spotlight_node
         self._spotlight_node = None
         if node is not None:
             try:
                 node.remove_class("tour-spotlight")
+                node.remove_class("tour-glow")
+                node.remove_class("tour-glow-dim")
             except Exception:
                 pass
 
@@ -201,9 +223,26 @@ class TutorialCoach(Vertical):
         step = self._steps[self._index]
         n = len(self._steps)
         self._head.update(
-            f"[b]Tour[/b]  {self._index + 1}/{n}  ·  [b]{escape(step.title)}[/b]"
+            f"Tour  {self._index + 1}/{n}  ·  {escape(step.title)}"
         )
         self._body.update(escape(step.body))
+        # Extra key hint for steps that need a shortcut callout
+        if step.id == "pings":
+            self._hint.update(
+                "[b white]→[/] watch [b]@N[/] on the status bar  ·  then [b]ctrl+n[/]"
+            )
+            self._hint.add_class("-show")
+        elif step.id in ("type", "attach"):
+            tip = (
+                "[b white]→[/] the glowing box is where you type"
+                if step.id == "type"
+                else "[b white]→[/] the glowing button is Attach"
+            )
+            self._hint.update(tip)
+            self._hint.add_class("-show")
+        else:
+            self._hint.remove_class("-show")
+            self._hint.update("")
 
         app = self.app
         if step.tab and hasattr(app, "show_tab"):
@@ -234,10 +273,27 @@ class TutorialCoach(Vertical):
             return
         try:
             node.add_class("tour-spotlight")
+            node.add_class("tour-glow")
             self._spotlight_node = node
-            node.scroll_visible(animate=False)
+            self._glow_on = True
+            try:
+                node.scroll_visible(animate=False)
+            except Exception:
+                pass
+            self._glow_timer = self.set_interval(0.55, self._tick_glow)
         except Exception:
             self._spotlight_node = None
+
+    def _tick_glow(self) -> None:
+        node = self._spotlight_node
+        if node is None:
+            return
+        self._glow_on = not self._glow_on
+        try:
+            node.set_class(self._glow_on, "tour-glow")
+            node.set_class(not self._glow_on, "tour-glow-dim")
+        except Exception:
+            pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id or ""

@@ -68,12 +68,52 @@ Header { background: $panel; }
 #tabs { background: $panel; }
 #status-line { height: 1; padding: 0 1; color: $text-muted; background: $panel; }
 #body { height: 1fr; }
-#body.tour-dim { opacity: 0.45; }
-/* Tour spotlight — hot magenta, thick frame, obvious fill (not amber $accent) */
+#body.tour-dim { opacity: 0.42; }
+
+/* Tour spotlight — clean white live glow (no neon pink) */
 .tour-spotlight {
-    border: thick #ff2ea6;
-    background: #ff2ea6 28%;
+    border: wide #f0f0f0;
+    background: #ffffff 14%;
     padding: 0 1;
+}
+.tour-spotlight.tour-glow {
+    border: double #ffffff;
+    background: #ffffff 32%;
+}
+.tour-spotlight.tour-glow-dim {
+    border: wide #c8c8c8;
+    background: #ffffff 8%;
+}
+/* Single-line targets: never use a full thick box (it collapses to two bars) */
+#status-line.tour-spotlight,
+#chat-title.tour-spotlight {
+    border: none;
+    border-left: tall #ffffff;
+    background: #ffffff 24%;
+    color: #ffffff;
+    text-style: bold;
+    height: 1;
+    padding: 0 1;
+}
+#status-line.tour-spotlight.tour-glow,
+#chat-title.tour-spotlight.tour-glow {
+    background: #ffffff 45%;
+    border-left: tall #ffffff;
+}
+#status-line.tour-spotlight.tour-glow-dim,
+#chat-title.tour-spotlight.tour-glow-dim {
+    background: #ffffff 12%;
+    border-left: tall #d0d0d0;
+}
+#chat-attach.tour-spotlight {
+    border: wide #ffffff;
+    background: #ffffff 40%;
+    text-style: bold;
+    color: #111111;
+}
+#composer.tour-spotlight {
+    border: wide #ffffff;
+    background: #ffffff 18%;
 }
 #tabs-row {
     height: auto;
@@ -82,10 +122,13 @@ Header { background: $panel; }
     padding: 0;
 }
 #tabs-row.tour-spotlight {
-    /* Border the row, never the Tabs widget (border on Tabs crushes labels). */
-    border: thick #ff2ea6;
-    background: #3b0a2e;
+    border: wide #f0f0f0;
+    background: #2a2a2a;
     padding: 0 1;
+}
+#tabs-row.tour-spotlight.tour-glow {
+    border: double #ffffff;
+    background: #3a3a3a;
 }
 #tabs-row #tabs { width: 1fr; background: transparent; }
 #tour-btn { width: 10; margin: 0 1; }
