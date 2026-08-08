@@ -12,7 +12,7 @@ from typing import Any
 from rich.markup import escape
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import (
     Button,
@@ -26,16 +26,19 @@ from textual.widgets import (
     Tabs,
 )
 
+from app.cli_pkg.prefs import is_tutorial_done, mark_tutorial_done
 from app.cli_pkg.session import Credentials, load_credentials, save_credentials
 from app.cli_pkg.tui.client import ApiClient, ApiError, Workspace, login
 from app.cli_pkg.tui.client import board_fingerprint  # noqa: F401  (re-export for callers)
+from app.cli_pkg.tui.ping_sound import play_ping_sound, unread_rise_flash
+from app.cli_pkg.tui.tutorial import TutorialCoach, build_tour_steps
 from app.cli_pkg.tui.views.agents import AgentsView
 from app.cli_pkg.tui.views.board import BoardView
 from app.cli_pkg.tui.views.chat import ChatView
 from app.cli_pkg.tui.views.dashboard import DashboardView
 from app.cli_pkg.tui.views.live import LiveView
 from app.cli_pkg.tui.views.people import PeopleView
-from app.cli_pkg.tui.widgets import HelpModal, MentionsModal
+from app.cli_pkg.tui.widgets import ConfirmModal, HelpModal, MentionsModal
 from app.config import get_settings
 
 TABS: list[tuple[str, str]] = [
@@ -65,6 +68,27 @@ Header { background: $panel; }
 #tabs { background: $panel; }
 #status-line { height: 1; padding: 0 1; color: $text-muted; background: $panel; }
 #body { height: 1fr; }
+#body.tour-dim { opacity: 0.45; }
+/* Tour spotlight — hot magenta, thick frame, obvious fill (not amber $accent) */
+.tour-spotlight {
+    border: thick #ff2ea6;
+    background: #ff2ea6 28%;
+    padding: 0 1;
+}
+#tabs-row {
+    height: auto;
+    min-height: 3;
+    background: $panel;
+    padding: 0;
+}
+#tabs-row.tour-spotlight {
+    /* Border the row, never the Tabs widget (border on Tabs crushes labels). */
+    border: thick #ff2ea6;
+    background: #3b0a2e;
+    padding: 0 1;
+}
+#tabs-row #tabs { width: 1fr; background: transparent; }
+#tour-btn { width: 10; margin: 0 1; }
 
 .view-head { text-style: bold; padding: 1 1 0 1; }
 .view-sub, #agent-info { color: $text-muted; padding: 0 1 1 1; }
@@ -75,7 +99,24 @@ Header { background: $panel; }
 #chat-sidebar { width: 26; border-right: solid $panel-lighten-2; }
 .side-head { color: $accent 70%; text-style: bold; padding: 1 1 0 1; }
 #chat-list { height: auto; max-height: 40%; background: transparent; }
+#chat-list ListItem { padding: 0 1; height: 1; }
+/* Always show cursor + active room (even when composer has focus) */
+#chat-list ListItem.-highlight {
+    background: #22d3ee 35%;
+}
+#chat-list ListItem.active-chat {
+    background: #22d3ee 28%;
+    border-left: tall #22d3ee;
+    text-style: bold;
+}
+#chat-list ListItem.active-chat.-highlight {
+    background: #22d3ee 50%;
+}
 #member-list { height: auto; background: transparent; }
+#member-list ListItem { padding: 0 1; }
+#member-list ListItem.-highlight {
+    background: #a78bfa 30%;
+}
 #chat-main { width: 1fr; }
 #chat-title { height: 1; padding: 0 1; background: $panel; }
 #transcript { height: 1fr; padding: 0 2; }
@@ -104,9 +145,15 @@ MessageView .msg-chart { height: 18; width: 100%; }
 #chat-attach { width: 12; margin-left: 1; height: 3; }
 #picker {
     height: auto; max-height: 10; margin: 0 1;
-    border: round $accent; background: $surface;
+    border: round #22d3ee; background: $surface;
 }
-#picker ListItem { padding: 0 1; }
+#picker ListItem { padding: 0 1; height: 1; }
+/* Picker keeps focus on composer — still paint the highlighted row */
+#picker ListItem.-highlight {
+    background: #22d3ee 45%;
+    border-left: tall #22d3ee;
+    text-style: bold;
+}
 
 /* people ---------------------------------------------------------------- */
 #people-list { height: 1fr; }
@@ -296,6 +343,8 @@ class AioApp(App[None]):
         ("ctrl+r", "refresh_all", "refresh"),
         ("ctrl+w", "help", "help"),
         ("ctrl+n", "mentions", "mentions"),
+        ("ctrl+f", "attach_file", "attach"),
+        ("f1", "start_tour", "tour"),
         # Letters: the fast way around when you are not typing a message.
         ("c", "tab_chat", "c chat"),
         ("b", "tab_board", "b board"),
@@ -314,7 +363,6 @@ class AioApp(App[None]):
         ("ctrl+e", "tab_people", ""),
         ("ctrl+d", "tab_dashboard", ""),
         ("ctrl+v", "tab_live", ""),
-        ("ctrl+f", "attach_file", "attach"),
         ("1", "tab_chat", ""),
         ("2", "tab_board", ""),
         ("3", "tab_agents", ""),
@@ -345,18 +393,24 @@ class AioApp(App[None]):
         self.jobs_today = 0
         self._message = ""
         self._board_error = ""
+        self._prev_unread: int | None = None
+        self._tour_offered = False
         self.chat_view = ChatView(client)
         self.board_view = BoardView(client)
         self.agents_view = AgentsView(client)
         self.people_view = PeopleView(client)
         self.dashboard_view = DashboardView(client)
         self.live_view = LiveView(client)
+        self.tour_coach = TutorialCoach()
+        self.tour_btn = Button("Tour", id="tour-btn")
         self.status_line = Static("", id="status-line", markup=True)
         self.switcher = ContentSwitcher(initial="chat", id="body")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield Tabs(*[Tab(label, id=key) for key, label in TABS], id="tabs")
+        with Horizontal(id="tabs-row"):
+            yield Tabs(*[Tab(label, id=key) for key, label in TABS], id="tabs")
+            yield self.tour_btn
         with self.switcher:
             yield self.chat_view
             yield self.board_view
@@ -364,6 +418,7 @@ class AioApp(App[None]):
             yield self.people_view
             yield self.dashboard_view
             yield self.live_view
+        yield self.tour_coach
         yield self.status_line
         yield Footer()
 
@@ -444,11 +499,70 @@ class AioApp(App[None]):
         if ws.error:
             self.set_status(f"[red]{escape(ws.error)}[/red]")
             return
+        prev = self._prev_unread
+        unread = int(ws.unread or 0)
+        should_ping, flash = unread_rise_flash(prev, unread, ws.mentions)
+        if should_ping:
+            play_ping_sound()
+            if flash:
+                self._message = f"[yellow]{escape(flash)}[/yellow]"
+        self._prev_unread = unread
         self.ws = ws
         self.sub_title = f"{ws.me.get('email', '')} · project {self.client.project_id}"
         self.chat_view.set_workspace(ws.chats, ws.members, str(ws.me.get("email") or ""))
         self.people_view.set_members(ws.members, ws.me)
         self._paint_status()
+        self._maybe_offer_tour()
+
+    def _maybe_offer_tour(self) -> None:
+        if self._tour_offered or self.tour_coach.active:
+            return
+        email = str(self.ws.me.get("email") or "")
+        if not email or is_tutorial_done(email):
+            return
+        self._tour_offered = True
+        self.call_after_refresh(self._offer_tour_modal)
+
+    def _offer_tour_modal(self) -> None:
+        def done(ok: bool | None) -> None:
+            email = str(self.ws.me.get("email") or "")
+            if ok:
+                self.action_start_tour()
+            elif email:
+                # Don't nag again; Tour button still replays.
+                mark_tutorial_done(email)
+
+        self.push_screen(
+            ConfirmModal(
+                "Take a 2-minute tour?",
+                "Spotlight walkthrough of Chat, Board, Attach, and pings.",
+                "You can replay anytime with the Tour button (or F1).",
+                "Start tour",
+            ),
+            done,
+        )
+
+    def action_start_tour(self) -> None:
+        if self.tour_coach.active:
+            return
+        steps = build_tour_steps(is_owner=self.ws.is_owner)
+        email = str(self.ws.me.get("email") or "")
+
+        def finished(completed: bool) -> None:
+            self.tour_btn.disabled = False
+            if completed and email:
+                mark_tutorial_done(email)
+                self.set_status("[green]tour complete[/green]")
+            else:
+                self.set_status("tour skipped")
+
+        self.tour_btn.disabled = True
+        self.tour_coach.start(steps, on_finished=finished)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "tour-btn":
+            event.stop()
+            self.action_start_tour()
 
     @work(thread=True, exclusive=True, group="board-poll")
     def refresh_board(self) -> None:
@@ -518,15 +632,23 @@ class AioApp(App[None]):
     # mentions -------------------------------------------------------------
 
     def action_mentions(self) -> None:
-        def done(chat_id: int | None) -> None:
-            if chat_id is None or chat_id == 0:
+        def done(result: dict[str, Any] | None) -> None:
+            if not result:
                 return
-            if chat_id == -1:
+            action = result.get("action")
+            if action == "mark_all":
                 self._mark_read_worker([])
                 return
-            self._mark_read_worker([])
-            self.show_tab("chat")
-            self.chat_view.select_chat(int(chat_id))
+            if action != "open":
+                return
+            mention_id = int(result.get("mention_id") or 0)
+            chat_id = int(result.get("chat_id") or 0)
+            message_id = int(result.get("message_id") or 0)
+            if mention_id:
+                self._mark_read_worker([mention_id])
+            if chat_id:
+                self.show_tab("chat")
+                self.chat_view.open_mention(chat_id, message_id)
 
         self.push_screen(MentionsModal(self.ws.mentions), done)
 
