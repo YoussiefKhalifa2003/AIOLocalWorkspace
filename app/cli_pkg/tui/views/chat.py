@@ -20,6 +20,7 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, Markdown, 
 
 from app.cli_pkg.tui.client import ApiClient, ApiError
 from app.cli_pkg.tui.file_picker import pick_attachment_files
+from app.services.chat_access import can_delete_chat, chat_mode_of
 
 # Mirrors looksLikeAgentWork() in the web client: which sends spin up a model.
 _SKILL_RE = re.compile(
@@ -125,9 +126,7 @@ def candidates_for(
                 out.append(Candidate(f"@{handle} ", f"@{handle}", name))
         return out[:12]
 
-    mode = (chat_mode or "").strip().lower()
-    if mode not in ("ops", "llm"):
-        mode = "llm" if chat_kind == "private" else "ops"
+    mode = chat_mode_of({"kind": chat_kind, "mode": chat_mode})
     if trigger == "!":
         catalog = COMMANDS
     elif mode == "llm":
@@ -144,9 +143,7 @@ def looks_like_agent_work(body: str, chat_kind: str, chat_mode: str = "") -> boo
     text = (body or "").strip()
     if not text or _CLEAR_RE.match(text):
         return False
-    mode = (chat_mode or "").strip().lower()
-    if mode not in ("ops", "llm"):
-        mode = "llm" if chat_kind == "private" else "ops"
+    mode = chat_mode_of({"kind": chat_kind, "mode": chat_mode})
     if mode != "llm":
         return False
     if _SKILL_RE.match(text):
@@ -1124,6 +1121,7 @@ class ChatView(Vertical):
         ("ctrl+f", "attach_file", "attach file"),
         ("ctrl+m", "voice_toggle", "voice"),
         ("ctrl+shift+n", "new_channel", "new channel"),
+        ("ctrl+shift+x", "delete_chat", "delete chat"),
     ]
 
     def __init__(self, client: ApiClient) -> None:
@@ -1162,6 +1160,7 @@ class ChatView(Vertical):
         self.chat_list = ListView(id="chat-list")
         self.member_list = VerticalScroll(id="member-list")
         self.new_chat_btn = Button("+ channel", id="chat-new")
+        self.delete_chat_btn = Button("delete", id="chat-del", compact=True, tooltip="delete chat")
         self.transcript = VerticalScroll(id="transcript")
         self.title_bar = Static("", id="chat-title", markup=True)
         self.picker = CommandPicker()
@@ -1185,7 +1184,9 @@ class ChatView(Vertical):
             with self.sidebar:
                 yield Label("CHATS", classes="side-head")
                 yield self.chat_list
-                yield self.new_chat_btn
+                with Horizontal(id="chat-side-actions"):
+                    yield self.new_chat_btn
+                    yield self.delete_chat_btn
                 yield Label("MEMBERS", classes="side-head")
                 yield self.member_list
             with Vertical(id="chat-main"):
@@ -1322,7 +1323,7 @@ class ChatView(Vertical):
                 raw_name = str(chat.get("name") or "my room")
                 show = "my room" if raw_name.lower().startswith("private -") else raw_name
                 label = f"[#c4b5fd]◆[/#c4b5fd] {escape(show)}{working}"
-            mode = str(chat.get("mode") or ("llm" if chat.get("kind") == "private" else "ops"))
+            mode = chat_mode_of(chat)
             if mode == "llm":
                 label = f"{label} [dim]/[/dim]"
             else:
@@ -1335,6 +1336,7 @@ class ChatView(Vertical):
         if self.chats:
             self.chat_list.index = active_idx
         self._sync_chat_list_selection()
+        self._sync_delete_btn()
 
     def _sync_chat_list_selection(self) -> None:
         """Mark the open room so it stays visible when focus is in the composer."""
@@ -1440,13 +1442,16 @@ class ChatView(Vertical):
         self._render_pending_attachments()
         chat = self.current_chat
         if chat.get("kind") == "private":
-            mode = str(chat.get("mode") or "llm")
+            mode = chat_mode_of(chat)
             tip = "/skills · only you" if mode == "llm" else "! commands · only you"
-            name = escape(str(chat.get("name") or "my room"))
+            raw_name = str(chat.get("name") or "my room")
+            name = escape(
+                "my room" if raw_name.lower().startswith("private -") else raw_name
+            )
             self.title_bar.update(f"[b]◆ {name}[/b]  [dim]{tip}[/dim]")
         else:
             name = escape(str(chat.get("name") or ""))
-            mode = str(chat.get("mode") or "ops")
+            mode = chat_mode_of(chat)
             tip = "@people · /skills (whisper)" if mode == "llm" else "@people · !commands"
             self.title_bar.update(f"[b]#{name}[/b]  [dim]{tip}[/dim]")
         self._sync_llm_ui()
@@ -1454,6 +1459,7 @@ class ChatView(Vertical):
         self._sync_chat_list_selection()
         self.heartbeat_presence()
         self._paint_typing_line()
+        self._sync_delete_btn()
         # Keep list cursor on the open room
         for i, chat in enumerate(self.chats):
             if int(chat["id"]) == int(chat_id):
@@ -1517,6 +1523,9 @@ class ChatView(Vertical):
         elif event.button.id == "chat-new":
             event.stop()
             self.action_new_channel()
+        elif event.button.id == "chat-del":
+            event.stop()
+            self.action_delete_chat()
 
     def action_attach_file(self) -> None:
         """Open the OS file chooser (Attach button / ctrl+f / !attach)."""
@@ -2030,7 +2039,7 @@ class ChatView(Vertical):
             typed,
             members=names,
             chat_kind=str(self.current_chat.get("kind") or ""),
-            chat_mode=str(self.current_chat.get("mode") or ""),
+            chat_mode=chat_mode_of(self.current_chat),
         )
         self.picker.show(items, start)
 
@@ -2127,7 +2136,7 @@ class ChatView(Vertical):
         working = looks_like_agent_work(
             body,
             str(chat.get("kind") or ""),
-            str(chat.get("mode") or ""),
+            chat_mode_of(chat),
         )
         if working:
             skill = skill_name_from_body(body) or (body.split()[0].lstrip("/") if body else "skill")
@@ -2231,7 +2240,7 @@ class ChatView(Vertical):
         working = looks_like_agent_work(
             body,
             str(chat.get("kind") or ""),
-            str(chat.get("mode") or ""),
+            chat_mode_of(chat),
         )
         if working:
             skill = skill_name_from_body(body) or (
@@ -2438,11 +2447,12 @@ class ChatView(Vertical):
                 return
             name = str(result.get("name") or "").strip()
             kind = str(result.get("kind") or "private")
-            mode = str(result.get("mode") or "ops")
+            mode = str(result.get("mode") or "llm")
             if not name:
                 return
             label = f"#{name}" if kind == "channel" else f"◆ {name}"
-            self.app.set_status(f"[dim]creating {escape(label)}…[/dim]")
+            purpose = "AI skills" if mode == "llm" else "commands only"
+            self.app.set_status(f"[dim]creating {escape(label)} ({purpose})…[/dim]")
             self._create_channel_worker(name, kind=kind, mode=mode)
 
         ws = getattr(self.app, "ws", None)
@@ -2452,7 +2462,7 @@ class ChatView(Vertical):
         self.app.push_screen(CreateChatModal(is_owner=is_owner), done)
 
     @work(thread=True, group="chat-new")
-    def _create_channel_worker(self, name: str, *, kind: str = "channel", mode: str = "ops") -> None:
+    def _create_channel_worker(self, name: str, *, kind: str = "private", mode: str = "llm") -> None:
         try:
             chat = self.client.create_chat(name, kind=kind, mode=mode)
             error = ""
@@ -2465,14 +2475,108 @@ class ChatView(Vertical):
             self.app.set_status(f"[red]create failed: {escape(error or 'unknown')}[/red]")
             return
         new_id = int(chat.get("id") or 0)
+        # Keep the create response (incl. mode) so /skills work before the next poll.
+        if new_id and not any(int(c.get("id") or 0) == new_id for c in self.chats):
+            self.chats = list(self.chats) + [chat]
+            self._render_chat_list()
         self.app.refresh_workspace()
         if new_id:
             self.select_chat(new_id)
         kind = str(chat.get("kind") or "")
+        mode = chat_mode_of(chat)
         name = escape(str(chat.get("name") or ""))
         label = f"#{name}" if kind == "channel" else f"◆ {name}"
-        self.app.set_status(f"[green]{label} created[/green]")
+        tip = "type /ask …" if mode == "llm" else "type !help"
+        self.app.set_status(f"[green]{label}[/green]  [dim]{tip}[/dim]")
         self.composer.focus()
+
+    def _me_user_id(self) -> int:
+        ws = getattr(self.app, "ws", None)
+        return int((ws.me or {}).get("user_id") or 0) if ws else 0
+
+    def _is_workspace_owner(self) -> bool:
+        ws = getattr(self.app, "ws", None)
+        return bool(ws and getattr(ws, "is_owner", False))
+
+    def _can_delete_current(self) -> bool:
+        return can_delete_chat(
+            self.current_chat,
+            self._me_user_id(),
+            is_workspace_owner=self._is_workspace_owner(),
+        )
+
+    def _sync_delete_btn(self) -> None:
+        try:
+            btn = self.delete_chat_btn
+        except Exception:
+            return
+        ok = self._can_delete_current()
+        btn.disabled = not ok
+        btn.display = True
+        btn.tooltip = (
+            "delete this chat"
+            if ok
+            else "can't delete general, your default private room, or chats you didn't create"
+        )
+
+    def action_delete_chat(self) -> None:
+        chat = self.current_chat
+        if not self._can_delete_current():
+            self.app.set_status(
+                "[yellow]can't delete general, your default private room, or chats you didn't create[/yellow]"
+            )
+            return
+        name = str(chat.get("name") or "")
+        kind = str(chat.get("kind") or "")
+        label = f"#{name}" if kind == "channel" else f"◆ {name}"
+
+        def done(yes: bool | None) -> None:
+            if not yes:
+                self.app.set_status("delete cancelled")
+                return
+            self.app.set_status(f"[dim]deleting {escape(label)}…[/dim]")
+            self._delete_chat_worker(int(chat["id"]), label)
+
+        from app.cli_pkg.tui.widgets import ConfirmModal
+
+        self.app.push_screen(
+            ConfirmModal(
+                "Delete chat",
+                f"Delete {label}?",
+                "Messages in this chat will be removed. This cannot be undone.",
+                "Delete",
+            ),
+            done,
+        )
+
+    @work(thread=True, group="chat-del")
+    def _delete_chat_worker(self, chat_id: int, label: str) -> None:
+        try:
+            self.client.delete_chat(chat_id)
+            error = ""
+        except ApiError as exc:
+            error = str(exc)
+        self.app.call_from_thread(self._after_delete_chat, chat_id, label, error)
+
+    def _after_delete_chat(self, chat_id: int, label: str, error: str) -> None:
+        if error:
+            self.app.set_status(f"[red]delete failed: {escape(error)}[/red]")
+            return
+        self.chats = [c for c in self.chats if int(c.get("id") or 0) != int(chat_id)]
+        if self.chat_id == chat_id:
+            self.chat_id = None
+            self._rows.clear()
+            self._views.clear()
+            self.transcript.remove_children()
+            if self.chats:
+                self.select_chat(int(self.chats[0]["id"]))
+            else:
+                self._render_chat_list()
+                self.title_bar.update("")
+        else:
+            self._render_chat_list()
+        self.app.refresh_workspace()
+        self.app.set_status(f"[dim]deleted {escape(label)}[/dim]")
 
     def begin_kick(self, member: dict[str, Any]) -> None:
         ws = getattr(self.app, "ws", None)

@@ -65,12 +65,13 @@ def _sqlite_migrate() -> None:
         _add("chat_messages", "edited_at", "DATETIME")
         _add("chat_messages", "deleted_at", "DATETIME")
         _add("chats", "mode", "VARCHAR(20) DEFAULT 'ops'")
-        # Private rooms are AI by default; shared channels stay commands-first.
+        # One-time-ish: default private rooms without a mode become AI rooms.
+        # Do NOT rewrite explicit mode='ops' private chats on every boot.
         try:
             conn.execute(
                 text(
                     "UPDATE chats SET mode = 'llm' WHERE kind = 'private' "
-                    "AND (mode IS NULL OR mode = '' OR mode = 'ops')"
+                    "AND (mode IS NULL OR mode = '')"
                 )
             )
         except Exception:

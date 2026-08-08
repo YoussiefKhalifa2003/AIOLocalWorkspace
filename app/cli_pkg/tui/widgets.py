@@ -519,7 +519,9 @@ class CreateChatModal(ModalScreen[dict[str, Any] | None]):
         super().__init__()
         self._is_owner = is_owner
         self._kind = "channel" if is_owner else "private"
-        self._mode = "ops"
+        # Default to AI skills — the common reason to create a new room.
+        self._mode = "llm"
+        self._summary = Static("", id="create-summary", markup=True)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
@@ -543,12 +545,13 @@ class CreateChatModal(ModalScreen[dict[str, Any] | None]):
                     disabled=not self._is_owner,
                 )
             yield Static(
-                "[dim]Purpose: ! board commands only, or / AI skills[/dim]",
+                "[dim]Purpose — pick one (this controls /skills vs ! only)[/dim]",
                 markup=True,
             )
             with Horizontal(id="create-mode-row"):
-                yield Button("! commands", id="create-mode-ops", variant="primary")
-                yield Button("/ AI skills", id="create-mode-llm")
+                yield Button("/ AI skills", id="create-mode-llm", variant="primary")
+                yield Button("! commands only", id="create-mode-ops")
+            yield self._summary
             with Horizontal():
                 yield Button("Create", variant="primary", id="create-go")
                 yield Button("Cancel", id="create-cancel")
@@ -557,6 +560,7 @@ class CreateChatModal(ModalScreen[dict[str, Any] | None]):
         self.query_one("#create-name", Input).focus()
         self._paint_kind()
         self._paint_mode()
+        self._paint_summary()
 
     def _paint_kind(self) -> None:
         btn = self.query_one("#create-kind", Button)
@@ -573,12 +577,20 @@ class CreateChatModal(ModalScreen[dict[str, Any] | None]):
     def _paint_mode(self) -> None:
         ops = self.query_one("#create-mode-ops", Button)
         llm = self.query_one("#create-mode-llm", Button)
-        if self._mode == "ops":
+        if self._mode == "llm":
+            llm.variant = "primary"
+            ops.variant = "default"
+        else:
             ops.variant = "primary"
             llm.variant = "default"
+
+    def _paint_summary(self) -> None:
+        vis = "public" if self._kind == "channel" else "private"
+        if self._mode == "llm":
+            purpose = "[b]/ AI skills[/b] (and ! commands)"
         else:
-            ops.variant = "default"
-            llm.variant = "primary"
+            purpose = "[b]! commands only[/b] (no /ask)"
+        self._summary.update(f"[dim]Creating[/dim] {vis} · {purpose}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id or ""
@@ -588,14 +600,17 @@ class CreateChatModal(ModalScreen[dict[str, Any] | None]):
         if bid == "create-kind" and self._is_owner:
             self._kind = "private" if self._kind == "channel" else "channel"
             self._paint_kind()
+            self._paint_summary()
             return
         if bid == "create-mode-ops":
             self._mode = "ops"
             self._paint_mode()
+            self._paint_summary()
             return
         if bid == "create-mode-llm":
             self._mode = "llm"
             self._paint_mode()
+            self._paint_summary()
             return
         if bid == "create-go":
             name = self.query_one("#create-name", Input).value.strip()

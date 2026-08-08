@@ -307,10 +307,20 @@ Header { background: $panel; }
     color: #f87171;
     text-style: underline;
 }
-#chat-new {
-    width: auto;
+#chat-side-actions {
+    height: auto;
     margin: 0 1 1 1;
-    min-width: 14;
+    align: left middle;
+}
+#chat-new {
+    width: 1fr;
+    margin: 0 1 0 0;
+    min-width: 10;
+}
+#chat-del {
+    width: auto;
+    min-width: 8;
+    margin: 0;
 }
 #chat-main { width: 1fr; }
 #chat-title { height: 1; padding: 0 1; background: $panel; }

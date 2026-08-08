@@ -51,9 +51,44 @@ class ChatMemberIn(BaseModel):
 
 
 def _delete_chat(db: Session, chat_id: int) -> None:
-    db.query(ChatMessage).filter(ChatMessage.chat_id == chat_id).delete()
-    db.query(ChatMember).filter(ChatMember.chat_id == chat_id).delete()
-    db.query(Chat).filter(Chat.id == chat_id).delete()
+    """Remove a chat and every row that references it (FK-safe)."""
+    from app.db.models import ChatClearCursor, ChatMention, UserPresence, WorkIssue
+    from app.services.attachments import delete_file
+
+    # Presence / issues may point at this chat without cascading.
+    db.query(UserPresence).filter(UserPresence.active_chat_id == chat_id).update(
+        {UserPresence.active_chat_id: None},
+        synchronize_session=False,
+    )
+    db.query(UserPresence).filter(UserPresence.typing_chat_id == chat_id).update(
+        {
+            UserPresence.typing_chat_id: None,
+            UserPresence.typing_until: None,
+        },
+        synchronize_session=False,
+    )
+    db.query(WorkIssue).filter(WorkIssue.source_chat_id == chat_id).update(
+        {WorkIssue.source_chat_id: None},
+        synchronize_session=False,
+    )
+
+    # Child rows that FK to messages or the chat itself.
+    db.query(ChatMention).filter(ChatMention.chat_id == chat_id).delete(
+        synchronize_session=False
+    )
+    for att in db.query(ChatAttachment).filter(ChatAttachment.chat_id == chat_id).all():
+        delete_file(att.storage_path)
+        db.delete(att)
+    db.query(ChatClearCursor).filter(ChatClearCursor.chat_id == chat_id).delete(
+        synchronize_session=False
+    )
+    db.query(ChatMessage).filter(ChatMessage.chat_id == chat_id).delete(
+        synchronize_session=False
+    )
+    db.query(ChatMember).filter(ChatMember.chat_id == chat_id).delete(
+        synchronize_session=False
+    )
+    db.query(Chat).filter(Chat.id == chat_id).delete(synchronize_session=False)
 
 
 @router.get("/chats")
@@ -135,15 +170,29 @@ def delete_chat(
     auth: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
 ):
+    from app.services.chat_access import (
+        can_delete_chat,
+        is_default_private_room,
+        is_workspace_owner,
+    )
+
     chat = require_chat_access(db, auth, chat_id)
-    if chat.kind == "private" and chat.owner_user_id != auth.user_id:
-        raise HTTPException(status_code=403, detail="cannot delete another user's private room")
     if chat.name == "general" and chat.kind == "channel":
         raise HTTPException(status_code=400, detail="cannot delete general channel")
+    if is_default_private_room(chat):
+        raise HTTPException(status_code=400, detail="cannot delete your default private room")
+    if not can_delete_chat(
+        chat, auth.user_id, is_workspace_owner=is_workspace_owner(db, auth)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="you can only delete chats you created",
+        )
     name = chat.name
+    kind = chat.kind
     _delete_chat(db, chat_id)
     db.commit()
-    return {"status": "ok", "id": chat_id, "name": name}
+    return {"status": "ok", "id": chat_id, "name": name, "kind": kind}
 
 
 @router.post("/chats/{chat_id}/members")
