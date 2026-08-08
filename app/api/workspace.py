@@ -404,3 +404,43 @@ def read_mentions(
     n = mark_mentions_read(db, auth, ids)
     db.commit()
     return {"status": "ok", "marked": n}
+
+
+class PresenceIn(BaseModel):
+    chat_id: int | None = None
+    typing: bool | None = None
+
+
+@router.post("/workspace/presence")
+def post_presence(
+    body: PresenceIn,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    from app.services import presence as presence_svc
+
+    # Always refresh heartbeat; chat_id may be null to clear room.
+    presence_svc.upsert_heartbeat(db, auth, body.chat_id)
+    if body.typing is True:
+        if body.chat_id is None:
+            raise HTTPException(status_code=400, detail="chat_id required when typing")
+        presence_svc.set_typing(db, auth, int(body.chat_id), True)
+    elif body.typing is False:
+        if body.chat_id is not None:
+            # Clear typing for that channel (also validates channel kind)
+            try:
+                presence_svc.set_typing(db, auth, int(body.chat_id), False)
+            except HTTPException:
+                presence_svc.clear_typing(db, auth)
+        else:
+            presence_svc.clear_typing(db, auth)
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/workspace/presence")
+def get_presence(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)):
+    from app.services import presence as presence_svc
+
+    return {"users": presence_svc.list_presence(db, auth)}
+

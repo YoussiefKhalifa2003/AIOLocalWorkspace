@@ -28,6 +28,19 @@ _SKILL_RE = re.compile(
 )
 _CLEAR_RE = re.compile(r"^[/!]clear\b", re.I)
 
+
+def _format_typing_names(names: list[str]) -> str:
+    if not names:
+        return ""
+    if len(names) == 1:
+        return f"{names[0]} is typing…"
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]} are typing…"
+    if len(names) == 3:
+        return f"{names[0]}, {names[1]}, and {names[2]} are typing…"
+    return f"{names[0]}, {names[1]}, and {len(names) - 2} others…"
+
+
 @dataclass(frozen=True)
 class Candidate:
     """One row in the autocomplete dropdown."""
@@ -1092,6 +1105,10 @@ class ChatView(Vertical):
     """Sidebar + transcript + composer."""
 
     POLL_SECONDS = 2.0
+    PRESENCE_POLL_SECONDS = 0.5
+    HEARTBEAT_SECONDS = 15.0
+    TYPING_DEBOUNCE_SECONDS = 0.12
+    TYPING_IDLE_SECONDS = 1.25
     BINDINGS = [
         ("ctrl+f", "attach_file", "attach file"),
         ("ctrl+m", "voice_toggle", "voice"),
@@ -1104,6 +1121,7 @@ class ChatView(Vertical):
         self.chat_id: int | None = None
         self.chats: list[dict[str, Any]] = []
         self.members: list[dict[str, Any]] = []
+        self.presence: list[dict[str, Any]] = []
         self.my_email = ""
         self._rows: dict[int, dict[str, Any]] = {}
         self._views: dict[int, MessageLine] = {}
@@ -1123,6 +1141,11 @@ class ChatView(Vertical):
         self._recording = False
         self._voice_path: Path | None = None
         self._voice = None  # lazily created VoiceRecorder
+        self._typing_debounce = None
+        self._typing_idle = None
+        self._typing_active = False
+        self._presence_sig: tuple[Any, ...] | None = None
+        self._presence_err_shown = False
 
         self.sidebar = VerticalScroll(id="chat-sidebar")
         self.chat_list = ListView(id="chat-list")
@@ -1136,6 +1159,7 @@ class ChatView(Vertical):
             total=None, show_eta=False, show_percentage=False, id="llm-wait-bar"
         )
         self.attach_pending = Static("", id="attach-pending", markup=True)
+        self.typing_line = Static("", id="typing-line", markup=True)
         self.composer_ghost = Static("", id="composer-ghost", markup=True)
         self.attach_btn = Button("+", id="chat-attach", compact=True, tooltip="attach file")
         self.mic_btn = Button("mic", id="chat-mic", compact=True, tooltip="voice (ctrl+m)")
@@ -1161,6 +1185,7 @@ class ChatView(Vertical):
                     yield self.llm_label
                     yield self.llm_bar
                 yield self.attach_pending
+                yield self.typing_line
                 yield self.composer_ghost
                 with Horizontal(id="composer-row"):
                     yield self.attach_btn
@@ -1169,8 +1194,12 @@ class ChatView(Vertical):
 
     def on_mount(self) -> None:
         self.set_interval(self.POLL_SECONDS, self.poll_messages)
+        self.set_interval(self.PRESENCE_POLL_SECONDS, self.poll_presence)
+        self.set_interval(self.HEARTBEAT_SECONDS, self.heartbeat_presence)
+        self.call_after_refresh(self.heartbeat_presence)
         self._sync_llm_ui()
         self._render_pending_attachments()
+        self._paint_typing_line()
 
     @property
     def tools_suppressed(self) -> bool:
@@ -1194,9 +1223,14 @@ class ChatView(Vertical):
 
     def reset_session_state(self) -> None:
         """Clear transcript / pending attach / voice when signing out."""
+        self._clear_typing_timers()
+        if self._typing_active and self.chat_id is not None:
+            self._post_presence_bg(chat_id=None, typing=False)
         self.chat_id = None
         self.chats = []
         self.members = []
+        self.presence = []
+        self._presence_sig = None
         self.my_email = ""
         self._rows.clear()
         self._views.clear()
@@ -1214,6 +1248,7 @@ class ChatView(Vertical):
         self._attach_busy = False
         self._recording = False
         self._voice_path = None
+        self._typing_active = False
         try:
             self.transcript.remove_children()
         except Exception:
@@ -1236,6 +1271,7 @@ class ChatView(Vertical):
         self._render_pending_attachments()
         self._sync_llm_ui()
         self.refresh_ghost()
+        self._paint_typing_line()
 
     # sidebar -------------------------------------------------------------
 
@@ -1288,22 +1324,65 @@ class ChatView(Vertical):
             )
             item.set_class(active, "active-chat")
 
+    def set_presence(self, users: list[dict[str, Any]]) -> None:
+        """Apply presence roster from poll / workspace (keep last good on empty failure)."""
+        if not isinstance(users, list):
+            return
+        sig = tuple(
+            (
+                u.get("user_id"),
+                u.get("online"),
+                u.get("typing_chat_id"),
+                u.get("name"),
+            )
+            for u in users
+        )
+        if sig == self._presence_sig:
+            return
+        self._presence_sig = sig
+        self.presence = users
+        self._render_members()
+        self._paint_typing_line()
+        # People tab + status bar
+        app = self.app
+        if hasattr(app, "apply_presence"):
+            app.apply_presence(users)  # type: ignore[attr-defined]
+
+    def _presence_by_user(self) -> dict[int, dict[str, Any]]:
+        out: dict[int, dict[str, Any]] = {}
+        for u in self.presence:
+            try:
+                out[int(u.get("user_id") or 0)] = u
+            except (TypeError, ValueError):
+                continue
+        return out
+
     def _render_members(self) -> None:
         self.member_list.remove_children()
         ws = getattr(self.app, "ws", None)
         is_owner = bool(ws and getattr(ws, "is_owner", False))
         me_id = int((ws.me or {}).get("user_id") or 0) if ws else 0
         emails = [str(x.get("email") or "") for x in self.members]
-        for m in self.members:
+        by_uid = self._presence_by_user()
+
+        def sort_key(m: dict[str, Any]) -> tuple:
+            uid = int(m.get("user_id") or 0)
+            online = bool((by_uid.get(uid) or {}).get("online"))
+            name = str(m.get("name") or m.get("email") or "").lower()
+            return (0 if online else 1, name)
+
+        for m in sorted(self.members, key=sort_key):
             user_id = int(m.get("user_id") or 0)
             crown = " [yellow]★[/yellow]" if m.get("role") == "owner" else ""
             name = escape(str(m.get("name") or m.get("email") or ""))
-            dot = color_for_member(str(m.get("email") or ""), member_emails=emails)
-            label = Static(
-                f"[{dot}]●[/] {name}{crown}",
-                markup=True,
-                classes="member-name",
-            )
+            pres = by_uid.get(user_id) or {}
+            online = bool(pres.get("online"))
+            if online:
+                dot = color_for_member(str(m.get("email") or ""), member_emails=emails)
+                label_text = f"[{dot}]●[/] {name}{crown}"
+            else:
+                label_text = f"[dim]●[/dim] [dim]{name}[/dim]{crown}"
+            label = Static(label_text, markup=True, classes="member-name")
             row = Horizontal(classes="member-row")
             row.member = m
             row.user_id = user_id
@@ -1319,6 +1398,10 @@ class ChatView(Vertical):
     def select_chat(self, chat_id: int) -> None:
         if chat_id == self.chat_id:
             return
+        old_id = self.chat_id
+        if self._typing_active and old_id is not None:
+            self._emit_typing(False, chat_id=old_id)
+        self._clear_typing_timers()
         self.chat_id = chat_id
         self._rows.clear()
         self._views.clear()
@@ -1339,6 +1422,8 @@ class ChatView(Vertical):
         self._sync_llm_ui()
         self.poll_messages()
         self._sync_chat_list_selection()
+        self.heartbeat_presence()
+        self._paint_typing_line()
         # Keep list cursor on the open room
         for i, chat in enumerate(self.chats):
             if int(chat["id"]) == int(chat_id):
@@ -1781,6 +1866,127 @@ class ChatView(Vertical):
             return
         self.refresh_picker()
         self.refresh_ghost()
+        self._on_composer_typing()
+
+    def _clear_typing_timers(self) -> None:
+        for attr in ("_typing_debounce", "_typing_idle"):
+            t = getattr(self, attr, None)
+            if t is not None:
+                try:
+                    t.stop()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+    def _on_composer_typing(self) -> None:
+        if self.current_chat.get("kind") != "channel" or self.chat_id is None:
+            if self._typing_active:
+                self._emit_typing(False)
+            return
+        text = self.composer.value.strip()
+        self._clear_typing_timers()
+        if not text:
+            if self._typing_active:
+                self._emit_typing(False)
+            return
+        # First keystroke posts immediately; later keys only refresh TTL.
+        if not self._typing_active:
+            self._emit_typing(True)
+        else:
+            self._typing_debounce = self.set_timer(
+                self.TYPING_DEBOUNCE_SECONDS, self._emit_typing_true
+            )
+        self._typing_idle = self.set_timer(
+            self.TYPING_IDLE_SECONDS, self._emit_typing_false
+        )
+
+    def _emit_typing_true(self) -> None:
+        self._emit_typing(True)
+
+    def _emit_typing_false(self) -> None:
+        self._emit_typing(False)
+
+    def _emit_typing(self, typing: bool, *, chat_id: int | None = None) -> None:
+        cid = int(chat_id) if chat_id is not None else self.chat_id
+        if cid is None:
+            return
+        if typing and self.current_chat.get("kind") != "channel" and chat_id is None:
+            return
+        self._typing_active = bool(typing)
+        self._post_presence_bg(chat_id=cid, typing=typing)
+
+    @work(thread=True, exclusive=True, group="presence-typing")
+    def _post_presence_bg(
+        self, *, chat_id: int | None = None, typing: bool | None = None
+    ) -> None:
+        try:
+            self.client.post_presence(chat_id=chat_id, typing=typing)
+            self._presence_err_shown = False
+        except ApiError as exc:
+            self._notify_presence_error(exc)
+
+    @work(thread=True, exclusive=True, group="presence-heartbeat")
+    def heartbeat_presence(self) -> None:
+        try:
+            self.client.post_presence(chat_id=self.chat_id, typing=None)
+            self._presence_err_shown = False
+        except ApiError as exc:
+            self._notify_presence_error(exc)
+
+    @work(thread=True, exclusive=True, group="presence-poll")
+    def poll_presence(self) -> None:
+        try:
+            users = self.client.get_presence()
+        except ApiError as exc:
+            self._notify_presence_error(exc)
+            return
+        self._presence_err_shown = False
+        self.app.call_from_thread(self.set_presence, users)
+
+    def _notify_presence_error(self, exc: ApiError) -> None:
+        if self._presence_err_shown:
+            return
+        self._presence_err_shown = True
+        msg = str(exc)
+        if "404" in msg or "not found" in msg.lower():
+            tip = "presence API missing — restart uvicorn"
+        else:
+            tip = f"presence: {msg}"
+        try:
+            self.app.call_from_thread(self.app.set_status, f"[red]{tip}[/red]")
+        except Exception:
+            pass
+
+    def _paint_typing_line(self) -> None:
+        try:
+            line = self.typing_line
+        except Exception:
+            return
+        chat = self.current_chat
+        if chat.get("kind") != "channel" or self.chat_id is None:
+            line.update("")
+            line.display = False
+            return
+        ws = getattr(self.app, "ws", None)
+        me_id = int((ws.me or {}).get("user_id") or 0) if ws else 0
+        names: list[str] = []
+        for u in self.presence:
+            if not u.get("online"):
+                continue
+            if int(u.get("user_id") or 0) == me_id:
+                continue
+            if int(u.get("typing_chat_id") or 0) != int(self.chat_id):
+                continue
+            name = str(u.get("name") or u.get("email") or "").strip()
+            if name:
+                names.append(name)
+        text = _format_typing_names(names)
+        if not text:
+            line.update("")
+            line.display = False
+            return
+        line.display = True
+        line.update(f"[dim i]{escape(text)}[/dim i]")
 
     def refresh_picker(self) -> None:
         hit = active_prefix(self.composer.value, self.composer.cursor_position)

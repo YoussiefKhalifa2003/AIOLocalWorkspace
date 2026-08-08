@@ -50,6 +50,7 @@ class Workspace:
     members: list[dict[str, Any]] = field(default_factory=list)
     mentions: list[dict[str, Any]] = field(default_factory=list)
     unread: int = 0
+    presence: list[dict[str, Any]] = field(default_factory=list)
     error: str = ""
 
     @property
@@ -157,7 +158,7 @@ class ApiClient:
         return self._safe("/workspace/members", [])
 
     def workspace(self) -> Workspace:
-        """One poll: identity, chat list, members, mentions."""
+        """One poll: identity, chat list, members, mentions, presence."""
         try:
             me = self.me()
         except ApiError as exc:
@@ -165,13 +166,32 @@ class ApiClient:
         chats = self._safe("/chats", [])
         members = self._safe("/workspace/members", [])
         mentions = self._safe("/workspace/mentions", {}) or {}
+        presence_payload = self._safe("/workspace/presence", {}) or {}
+        presence = presence_payload.get("users") if isinstance(presence_payload, dict) else []
         return Workspace(
             me=me,
             chats=chats if isinstance(chats, list) else [],
             members=members if isinstance(members, list) else [],
             mentions=mentions.get("mentions") or [],
             unread=int(mentions.get("unread") or 0),
+            presence=presence if isinstance(presence, list) else [],
         )
+
+    def post_presence(
+        self,
+        *,
+        chat_id: int | None = None,
+        typing: bool | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"chat_id": chat_id}
+        if typing is not None:
+            body["typing"] = typing
+        return self.post("/workspace/presence", json=body, timeout=10.0)
+
+    def get_presence(self) -> list[dict[str, Any]]:
+        out = self.get("/workspace/presence", timeout=10.0)
+        users = out.get("users") if isinstance(out, dict) else []
+        return users if isinstance(users, list) else []
 
     # chat ----------------------------------------------------------------
 
