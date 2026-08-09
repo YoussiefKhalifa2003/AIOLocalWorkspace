@@ -26,6 +26,11 @@ def _sys(text: str) -> str:
     return f"{text.rstrip()} {CHAT_MARKDOWN}"
 
 
+def _release_db(db: Session) -> None:
+    """Commit so SQLite does not hold a write lock across slow network/LLM I/O."""
+    db.commit()
+
+
 def _save_artifact(db: Session, job: Job, title: str, content: str) -> Artifact:
     art = Artifact(
         tenant_id=job.tenant_id,
@@ -82,6 +87,9 @@ def _agent_chat(
         backend = "openrouter"
     elif force == "opencode":
         backend = "opencode"
+
+    # Flush model_used etc., then drop the write lock before HTTP to the LLM.
+    _release_db(db)
 
     try:
         if backend == "opencode":
@@ -436,6 +444,7 @@ def run_deepresearch(db: Session, job: Job, llm: LLMClient) -> None:
         )
     else:
         queries = _research_queries(db, job, llm, text)
+        _release_db(db)
         hits: list = []
         seen: set[str] = set()
         for q in queries:
@@ -447,6 +456,7 @@ def run_deepresearch(db: Session, job: Job, llm: LLMClient) -> None:
         docs = fetch_documents(hits[: settings.research_max_results * 2])
         good = [d for d in docs if d.ok and d.text][: settings.research_max_results]
         evidence = build_evidence_block(good)
+        _release_db(db)
 
         if not good:
             body = _agent_chat(
@@ -916,6 +926,9 @@ def execute_job(db: Session, job: Job, llm: LLMClient | None = None) -> None:
         event_type="job_started",
         message=f"started {job.agent_type}",
     )
+    # Commit before long LLM / web fetches so SQLite does not hold a write lock
+    # for minutes — otherwise other clients' presence/message polls ReadTimeout.
+    db.commit()
     try:
         handler = AGENTS.get(job.agent_type)
         if handler is None:

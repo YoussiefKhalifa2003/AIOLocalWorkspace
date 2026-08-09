@@ -22,6 +22,33 @@ class ApiError(RuntimeError):
     """A request failed; the message is already human readable."""
 
 
+def is_transient_api_error(exc: BaseException) -> bool:
+    """True for blips that should not sticky-red the CLI (Mac + Windows).
+
+    Covers httpx timeouts, brief Wi‑Fi drops, and SQLite busy while the API
+    host runs a long /deepresearch. Matching is case-insensitive so Windows
+    phrasing like "The read operation timed out" still qualifies.
+    """
+    msg = str(exc).lower()
+    needles = (
+        "readtimeout",
+        "connecttimeout",
+        "connecterror",
+        "pooltimeout",
+        "timeout",
+        "timed out",
+        "temporarily unavailable",
+        "connection reset",
+        "connection aborted",
+        "database is locked",
+        "sqlite_busy",
+        "winerror 10060",  # Windows WSAETIMEDOUT
+        "winerror 10054",  # Windows connection reset
+        "winerror 10061",  # connection refused (API restarting)
+    )
+    return any(n in msg for n in needles)
+
+
 def resolve_attach_path(raw: str | Path) -> Path:
     """Resolve a user-typed path for CLI attach (cwd-relative, ~, Windows paths)."""
     text = str(raw or "").strip().strip('"').strip("'")
@@ -187,10 +214,10 @@ class ApiClient:
         body: dict[str, Any] = {"chat_id": chat_id, "offline": offline}
         if typing is not None:
             body["typing"] = typing
-        return self.post("/workspace/presence", json=body, timeout=10.0)
+        return self.post("/workspace/presence", json=body, timeout=25.0)
 
     def get_presence(self) -> list[dict[str, Any]]:
-        out = self.get("/workspace/presence", timeout=10.0)
+        out = self.get("/workspace/presence", timeout=25.0)
         users = out.get("users") if isinstance(out, dict) else []
         return users if isinstance(users, list) else []
 

@@ -2,6 +2,7 @@ from collections.abc import Generator
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.config import get_settings
 from app.db.models import Base
@@ -9,10 +10,13 @@ from app.db.models import Base
 _settings = get_settings()
 _is_sqlite = _settings.database_url.startswith("sqlite")
 connect_args: dict = {}
+engine_kwargs: dict = {}
 if _is_sqlite:
-    # Polling + writes contend on one file; wait instead of failing with "database is locked"
+    # Polling + writes contend on one file; wait instead of failing with "database is locked".
+    # NullPool: each request gets its own connection (important on Windows file locks).
     connect_args = {"check_same_thread": False, "timeout": 30}
-engine = create_engine(_settings.database_url, connect_args=connect_args)
+    engine_kwargs["poolclass"] = NullPool
+engine = create_engine(_settings.database_url, connect_args=connect_args, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -22,8 +26,17 @@ def _set_sqlite_pragma(dbapi_connection, _connection_record):
         return
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.execute("PRAGMA journal_mode=WAL")
+    # WAL: readers (presence) don't block behind writers — works on Mac + Windows local disk.
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+    except Exception:  # noqa: BLE001
+        pass
     cursor.execute("PRAGMA busy_timeout=30000")
+    # NORMAL + WAL: shorter fsync windows (esp. noticeable on Windows NTFS).
+    try:
+        cursor.execute("PRAGMA synchronous=NORMAL")
+    except Exception:  # noqa: BLE001
+        pass
     cursor.close()
 
 

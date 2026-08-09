@@ -20,8 +20,10 @@ from app.services.rooms import ensure_project_rooms
 from app.services.workspace_invite import rotate_invite_token
 
 
-def _set_demo_password(user: User) -> None:
-    if not user.password_hash:
+def _set_demo_password(user: User, *, force: bool = False) -> None:
+    # Demo accounts always use DEMO_PASSWORD locally; force-reset keeps
+    # a@local.test / demo working across machine handoffs.
+    if force or not user.password_hash:
         user.password_hash = hash_password(DEMO_PASSWORD)
 
 
@@ -87,7 +89,7 @@ def seed_demo_data(db: Session | None = None) -> dict:
                 conflict = db.query(User).filter(User.email == "a@local.test", User.id != u1.id).first()
                 if conflict is None:
                     u1.email = "a@local.test"
-            _set_demo_password(u1)
+            _set_demo_password(u1, force=True)
 
         p1 = (
             db.query(Project)

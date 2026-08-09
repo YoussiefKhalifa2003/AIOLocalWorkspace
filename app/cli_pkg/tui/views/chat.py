@@ -18,7 +18,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Input, Label, ListItem, ListView, Markdown, ProgressBar, Static
 
-from app.cli_pkg.tui.client import ApiClient, ApiError
+from app.cli_pkg.tui.client import ApiClient, ApiError, is_transient_api_error
 from app.cli_pkg.tui.file_picker import pick_attachment_files
 from app.services.chat_access import can_delete_chat, chat_mode_of
 
@@ -2010,6 +2010,14 @@ class ChatView(Vertical):
         self.app.call_from_thread(self.set_presence, users)
 
     def _notify_presence_error(self, exc: ApiError) -> None:
+<<<<<<< HEAD
+=======
+        # Transient while the API host runs a long /deepresearch (SQLite busy) or
+        # Wi‑Fi blips — keep last good roster; don't sticky-red the status bar.
+        # Same logic on Windows (WinError timeouts) and macOS.
+        if is_transient_api_error(exc):
+            return
+>>>>>>> 4cd34fc (Ship CLI attachments, presence, Tour, invite CLI-first signup, and SQLite concurrency fixes for Mac/Windows)
         if self._presence_err_shown:
             return
         self._presence_err_shown = True

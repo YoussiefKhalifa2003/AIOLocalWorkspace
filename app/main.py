@@ -29,6 +29,24 @@ from app.db.session import init_db
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    # Fresh Mac/Windows checkouts often have an empty aio.db — seed demo owner
+    # (a@local.test / demo) so Sign in works without a manual `aio seed`.
+    try:
+        from sqlalchemy import func
+
+        from app.db.models import User
+        from app.db.session import SessionLocal
+        from app.services.seed import seed_demo_data
+
+        db = SessionLocal()
+        try:
+            if db.query(func.count(User.id)).scalar() == 0:
+                seed_demo_data(db)
+                db.commit()
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from app.services.outlook_invite import fix_playwright_browsers_path
 
