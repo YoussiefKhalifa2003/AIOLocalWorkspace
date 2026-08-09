@@ -57,7 +57,7 @@ def upsert_heartbeat(db: Session, auth: AuthContext, chat_id: int | None) -> Use
 
 
 def set_typing(db: Session, auth: AuthContext, chat_id: int, typing: bool) -> UserPresence:
-    """Set or clear typing — shared channels only."""
+    """Set or clear typing - shared channels only."""
     chat = require_chat_access(db, auth, chat_id)
     if chat.kind != "channel":
         raise HTTPException(status_code=400, detail="typing only allowed in shared channels")

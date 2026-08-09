@@ -1,4 +1,4 @@
-"""Spotlight Tour for the CLI — shared member path + owner extras."""
+"""Spotlight Tour for the CLI - shared member path + owner extras."""
 
 from __future__ import annotations
 
@@ -195,7 +195,7 @@ class TutorialCoach(Vertical):
     }
     """
 
-    # Chrome targets already on-screen — scrolling them can shove the coach off-view.
+    # Chrome targets already on-screen - scrolling them can shove the coach off-view.
     _NO_SCROLL_SELECTORS = frozenset(
         {
             "#tabs-row",
@@ -448,7 +448,7 @@ class TutorialCoach(Vertical):
         self.call_after_refresh(self._apply_spotlight, step.spotlight)
 
     def _ensure_mentions_btn_visible(self) -> None:
-        """@N is hidden with zero unread — show a demo badge for the tour step."""
+        """@N is hidden with zero unread - show a demo badge for the tour step."""
         try:
             btn = self.app.query_one("#mentions-btn", Button)
         except Exception:

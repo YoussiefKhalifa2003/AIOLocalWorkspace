@@ -197,7 +197,7 @@ def test_plain_edit_keeps_later_user_messages(tmp_path, monkeypatch):
 
 
 def test_skill_edit_keeps_later_user_messages(tmp_path, monkeypatch):
-    """Even /skill edits must not delete later user lines — only following agent replies."""
+    """Even /skill edits must not delete later user lines - only following agent replies."""
     client, info = _boot(tmp_path, monkeypatch)
     ha = {"X-API-Key": info["api_key_a"], "X-User-Email": info["email_a"]}
     g = info["chat_general"]

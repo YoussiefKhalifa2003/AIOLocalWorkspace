@@ -12,7 +12,7 @@ from textual.widgets import Button, Input, Label, Link, ListItem, ListView, Prog
 
 
 def card_badges(card: dict[str, Any]) -> str:
-    """At most one status cue on the card face — rest lives in the detail pane."""
+    """At most one status cue on the card face - rest lives in the detail pane."""
     if card.get("can_merge"):
         return "[yellow]mergeable[/yellow]"
     if card.get("status") == "agent_backlog":
@@ -25,7 +25,7 @@ def card_badges(card: dict[str, Any]) -> str:
 
 
 class CardItem(ListItem):
-    """One board card: airy tile — title + owner, optional single badge."""
+    """One board card: airy tile - title + owner, optional single badge."""
 
     def __init__(self, card: dict[str, Any]) -> None:
         self.card = card
@@ -287,7 +287,7 @@ class ObjectiveSetupModal(ModalScreen[dict[str, Any] | None]):
         hint = (
             "Update the brief and subtasks, then Save."
             if self._editing
-            else "Optional — add a short brief and subtasks, or skip."
+            else "Optional - add a short brief and subtasks, or skip."
         )
         with Vertical(id="setup-box"):
             yield Label(f"{head} #{self.objective_id}", id="confirm-title")
@@ -372,13 +372,13 @@ class InviteEmailModal(ModalScreen[dict[str, Any] | None]):
         if self.domain:
             hint = (
                 f"[dim]Only @{escape(self.domain)} addresses. "
-                "Outlook Web sends the mail (free — no SMTP billing).[/dim]"
+                "Outlook Web sends the mail (free - no SMTP billing).[/dim]"
             )
             placeholder = f"colleague@{self.domain}"
         else:
             hint = (
                 "[dim]Any email. Outlook Web sends the mail "
-                "(free — no SMTP billing).[/dim]"
+                "(free - no SMTP billing).[/dim]"
             )
             placeholder = "colleague@email.com"
         with Vertical(id="confirm-box"):
@@ -519,7 +519,7 @@ class CreateChatModal(ModalScreen[dict[str, Any] | None]):
         super().__init__()
         self._is_owner = is_owner
         self._kind = "channel" if is_owner else "private"
-        # Default to AI skills — the common reason to create a new room.
+        # Default to AI skills - the common reason to create a new room.
         self._mode = "llm"
         self._summary = Static("", id="create-summary", markup=True)
 
@@ -545,7 +545,7 @@ class CreateChatModal(ModalScreen[dict[str, Any] | None]):
                     disabled=not self._is_owner,
                 )
             yield Static(
-                "[dim]Purpose — pick one (this controls /skills vs ! only)[/dim]",
+                "[dim]Purpose - pick one (this controls /skills vs ! only)[/dim]",
                 markup=True,
             )
             with Horizontal(id="create-mode-row"):

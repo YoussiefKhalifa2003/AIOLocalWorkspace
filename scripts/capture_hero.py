@@ -53,7 +53,7 @@ def _seed_hero_chat() -> tuple[object, int]:
         None,
     )
     if general is None:
-        raise SystemExit("no #general chat — run: aio seed")
+        raise SystemExit("no #general chat - run: aio seed")
     chat_id = int(general["id"])
 
     # Soft-delete existing public lines so the hero isn't noisy.

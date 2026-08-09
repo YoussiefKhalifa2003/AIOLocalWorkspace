@@ -57,7 +57,7 @@ def launch_coding_cli(which: str, *, cwd: str | None = None) -> tuple[bool, str]
     if not bin_path:
         return (
             False,
-            f"{label} CLI not on PATH — install it then run aio doctor",
+            f"{label} CLI not on PATH - install it then run aio doctor",
         )
 
     work = cwd or str(Path.cwd())

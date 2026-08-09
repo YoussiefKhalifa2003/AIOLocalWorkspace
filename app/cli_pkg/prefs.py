@@ -1,4 +1,4 @@
-"""Local CLI preferences (~/.aio/prefs.json) — non-secret UI flags."""
+"""Local CLI preferences (~/.aio/prefs.json) - non-secret UI flags."""
 
 from __future__ import annotations
 

@@ -33,7 +33,7 @@ def test_tour_steps_have_spotlights():
         assert s.title
         assert s.body
         assert len(s.body) <= 120
-        # Mentions step explains @N next to Tour — no spotlight on purpose
+        # Mentions step explains @N next to Tour - no spotlight on purpose
         if s.id == "pings":
             assert s.spotlight is None
             assert "tour" in s.body.lower()

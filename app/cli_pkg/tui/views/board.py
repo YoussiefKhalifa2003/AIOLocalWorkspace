@@ -130,7 +130,7 @@ class BoardView(Horizontal):
                     [{**c, "status": c.get("status") or col["id"]} for c in col.get("cards", [])]
                 )
         finally:
-            # Highlighted events can land after set_cards returns — clear on next paint.
+            # Highlighted events can land after set_cards returns - clear on next paint.
             self.call_after_refresh(self._finish_apply)
 
     def _finish_apply(self) -> None:
@@ -179,7 +179,7 @@ class BoardView(Horizontal):
     def _require_owner(self) -> bool:
         if self.is_owner:
             return True
-        self.app.set_status("[yellow]owner only — members see their own cards[/yellow]")
+        self.app.set_status("[yellow]owner only - members see their own cards[/yellow]")
         return False
 
     def edit_card(self) -> None:

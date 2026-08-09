@@ -424,7 +424,7 @@
           try {
             if (status === "agent_backlog") {
               setVoiceStatus(
-                `Objective #${oid}: agent started — stay on Board, it updates live`
+                `Objective #${oid}: agent started - stay on Board, it updates live`
               );
             }
             state.boardFingerprint = "";
@@ -759,7 +759,7 @@
           { method: "POST", body: JSON.stringify({ confirm: true }) }
         );
         close();
-        setVoiceStatus(`Merged PR #${prNum} into ${out.base || "main"} — card is done`);
+        setVoiceStatus(`Merged PR #${prNum} into ${out.base || "main"} - card is done`);
         state.boardFingerprint = "";
         await loadBoard();
       } catch (e) {
@@ -2041,7 +2041,7 @@
     const label = skill ? `/${skill}` : "agent";
     div.innerHTML =
       `<div class="meta"><span class="who">${label}</span> <span class="msg-id">working</span></div>` +
-      `<div class="body"><span class="llm-dots">Thinking</span> — generating a reply` +
+      `<div class="body"><span class="llm-dots">Thinking</span> - generating a reply` +
       `<div class="llm-pending-track"><div class="llm-pending-bar"></div></div></div>`;
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
@@ -2074,13 +2074,13 @@
     bar.classList.add("indeterminate");
     if (label) {
       label.textContent = skill
-        ? `Running /${skill} — model is working…`
-        : "Agent working — model is generating…";
+        ? `Running /${skill} - model is working…`
+        : "Agent working - model is generating…";
     }
     if (hint) {
       hint.textContent = skill
-        ? `/${skill} in progress in this room — switch chats to keep talking elsewhere`
-        : "Model working in this room — switch chats to keep talking elsewhere";
+        ? `/${skill} in progress in this room - switch chats to keep talking elsewhere`
+        : "Model working in this room - switch chats to keep talking elsewhere";
     }
     showPendingBubble(skill);
   }

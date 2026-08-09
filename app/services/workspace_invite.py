@@ -73,7 +73,7 @@ def mint_invite_link(
 
     When send_email=True, Outlook Web (Playwright) delivers the link. If
     INVITE_ALLOWED_DOMAIN is set, the address must match that domain. Failures
-    are returned in the `outlook` field — the link is still minted.
+    are returned in the `outlook` field - the link is still minted.
     """
     uses = clamp_invite_uses(max_uses)
     token = rotate_invite_token(db, tenant, max_uses=uses)

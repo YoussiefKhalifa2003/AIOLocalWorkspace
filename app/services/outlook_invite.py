@@ -93,7 +93,7 @@ def ensure_playwright_browsers() -> Path:
             "Could not install Chromium.\n"
             "From the WORK folder run:\n"
             "  .venv/bin/python -m playwright install chromium\n"
-            "(Do not use Homebrew `playwright` — use the venv command above.)"
+            "(Do not use Homebrew `playwright` - use the venv command above.)"
         )
 
     with sync_playwright() as p:
@@ -114,7 +114,7 @@ def send_invite_via_outlook(
     workspace: str = "AIO",
     headless: bool | None = None,
 ) -> dict:
-    """Compose + send an Outlook mail. Never raises — result is in the returned dict."""
+    """Compose + send an Outlook mail. Never raises - result is in the returned dict."""
     try:
         to = assert_allowed_invite_email(to_email)
     except ValueError as exc:
@@ -139,7 +139,7 @@ def send_invite_via_outlook(
             "ok": False,
             "skipped": False,
             "reason": (
-                "playwright not installed — "
+                "playwright not installed - "
                 "pip install playwright && .venv/bin/python -m playwright install chromium"
             ),
         }

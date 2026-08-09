@@ -245,7 +245,7 @@ _DEEPRESEARCH_SHAPE = (
     "2) Key findings (bullets with concrete claims)\n"
     "3) At least one markdown table comparing options, metrics, risks, or timelines\n"
     "4) Deeper analysis: drivers, tradeoffs, edge cases\n"
-    "5) Optional chart ONLY when numbers clearly benefit from a visual — never ASCII art. "
+    "5) Optional chart ONLY when numbers clearly benefit from a visual - never ASCII art. "
     "If (and only if) a chart helps, append one or more fenced blocks exactly like:\n"
     "```aio-chart\n"
     '{"title":"…","type":"bar|line|pie","labels":["A","B"],'
@@ -355,7 +355,7 @@ def _finalize_deepresearch_content(db: Session, job: Job, content: str) -> str:
     except (TypeError, ValueError):
         chat_id = None
     if not chat_id:
-        # No chat context (e.g. CLI pipeline without chat) — keep captions, drop images
+        # No chat context (e.g. CLI pipeline without chat) - keep captions, drop images
         return cleaned
 
     req = db.query(WorkRequest).filter(WorkRequest.id == job.request_id).one_or_none()
@@ -603,7 +603,7 @@ def run_coding(db: Session, job: Job, llm: LLMClient) -> None:
     if runner in WORKSPACE_BACKENDS:
         workspace = _workspace_for_job(payload)
         # Chat /code (or mis-set CODING_BACKEND) without a board workspace:
-        # never spawn Codex/Claude with cwd=None — use the LLM coding path.
+        # never spawn Codex/Claude with cwd=None - use the LLM coding path.
         if not workspace and not forced_cli:
             logger.info(
                 "coding runner %s skipped (no workspace); using LLM for job %s",

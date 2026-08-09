@@ -453,7 +453,7 @@ def _hash_str(s: str) -> int:
 
 
 def color_for_member(email: str, *, member_emails: list[str] | None = None) -> str:
-    """Stable name/rail color — mirrors web colorForMember."""
+    """Stable name/rail color - mirrors web colorForMember."""
     key = (email or "").strip().lower()
     if not key:
         return "#888888"
@@ -625,7 +625,7 @@ class AttachmentFile(Static):
 
 
 class MemberKick(Static):
-    """Quiet text action beside a member — reveals on row hover."""
+    """Quiet text action beside a member - reveals on row hover."""
 
     DEFAULT_CSS = """
     MemberKick {
@@ -674,7 +674,7 @@ class MsgTool(Static):
 
 
 class MessageLine(Vertical):
-    """One body line inside a SpeakerBlock — no rail, no name header."""
+    """One body line inside a SpeakerBlock - no rail, no name header."""
 
     can_focus = True
 
@@ -817,7 +817,7 @@ class MessageLine(Vertical):
         if not self.is_mine:
             return
         chat = getattr(self.app, "chat_view", None)
-        # While scrolling, lines race under a fixed pointer — skip tool chrome.
+        # While scrolling, lines race under a fixed pointer - skip tool chrome.
         if chat is not None and getattr(chat, "tools_suppressed", False):
             return
         if chat is not None:
@@ -1594,7 +1594,7 @@ class ChatView(Vertical):
         self._attach_busy = False
         self.attach_btn.disabled = False
         if self.chat_id != chat_id:
-            self.app.set_status("[yellow]chat changed — attachment discarded[/yellow]")
+            self.app.set_status("[yellow]chat changed - attachment discarded[/yellow]")
             self.composer.focus()
             return
         for att in uploaded:
@@ -1634,7 +1634,7 @@ class ChatView(Vertical):
         return True
 
     def _try_local_open_cli_command(self, body: str) -> bool:
-        """Handle !claude / !codex — open interactive CLI in a new window."""
+        """Handle !claude / !codex - open interactive CLI in a new window."""
         lower = body.strip().lower()
         if lower not in ("!claude", "!codex"):
             return False
@@ -1688,7 +1688,7 @@ class ChatView(Vertical):
         if self._pending is None or self._pending not in self.transcript.children:
             self._pending = Static(
                 f"[b #7dd3fc]@{escape(label)}[/] [dim]thinking…[/dim]\n"
-                "[dim i]generating a reply — switch rooms to keep chatting[/dim i]",
+                "[dim i]generating a reply - switch rooms to keep chatting[/dim i]",
                 markup=True,
                 classes="pending-msg",
             )
@@ -1769,7 +1769,7 @@ class ChatView(Vertical):
             self.transcript.mount(widget)
 
     def _append_message_rows(self, rows: list[dict[str, Any]]) -> None:
-        """Grow the transcript in place — no remove_children (avoids blank flash / scroll jump)."""
+        """Grow the transcript in place - no remove_children (avoids blank flash / scroll jump)."""
         emails = self._member_emails_list()
         for row in rows:
             blocks = [c for c in self.transcript.children if isinstance(c, SpeakerBlock)]
@@ -1857,7 +1857,7 @@ class ChatView(Vertical):
                     self.call_after_refresh(self.transcript.scroll_end, animate=False)
                 return
 
-        # Trailing deletes (e.g. edit removed later agent replies) — trim without blank remount.
+        # Trailing deletes (e.g. edit removed later agent replies) - trim without blank remount.
         can_trim = (
             not force
             and bool(old_flat)
@@ -2015,7 +2015,7 @@ class ChatView(Vertical):
         self._presence_err_shown = True
         msg = str(exc)
         if "404" in msg or "not found" in msg.lower():
-            tip = "presence API missing — restart uvicorn"
+            tip = "presence API missing - restart uvicorn"
         else:
             tip = f"presence: {msg}"
         try:
@@ -2081,7 +2081,7 @@ class ChatView(Vertical):
                 )
                 return
         text = self.composer.value
-        # Command complete (picker closed) — show arg hint
+        # Command complete (picker closed) - show arg hint
         for label, hint in _ARG_HINTS.items():
             if text == label or text.startswith(label + " "):
                 if text.rstrip() == label.rstrip() or text == label:
@@ -2430,7 +2430,7 @@ class ChatView(Vertical):
         self._resync_blocks_fingerprint()
         self._refresh_transcript_blocks(scroll_bottom=at_bottom, touch_ids=touch)
         self.app.set_status("[green]message updated[/green]")
-        # Don't force a second full history rebuild — next poll will pick up stragglers.
+        # Don't force a second full history rebuild - next poll will pick up stragglers.
         self.poll_messages()
 
     def _apply_delete_result(
@@ -2674,7 +2674,7 @@ class ChatView(Vertical):
         try:
             self._voice.start()
         except VoiceError as exc:
-            self.app.set_status(f"[yellow]mic unavailable ({escape(str(exc))}) — pick audio file[/yellow]")
+            self.app.set_status(f"[yellow]mic unavailable ({escape(str(exc))}) - pick audio file[/yellow]")
             self._voice_file_fallback()
             return
         self._set_recording_ui(True)

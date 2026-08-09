@@ -65,7 +65,7 @@ def test_gate_a_board_and_patch_permissions(tmp_path, monkeypatch):
     assert "columns" in board
     assert {c["id"] for c in board["columns"]} >= {"todo", "doing", "blocked", "done"}
     cards = [card for col in board["columns"] for card in col["cards"]]
-    # Members only see creator/assignee cards — Omar must not see Sara's.
+    # Members only see creator/assignee cards - Omar must not see Sara's.
     for c in cards:
         assert info["email_omar"] in (c.get("owner_email") or "") or c.get(
             "user_id"

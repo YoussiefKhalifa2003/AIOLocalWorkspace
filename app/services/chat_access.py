@@ -138,7 +138,7 @@ def chat_mode_of(chat: dict | object | None) -> str:
 
 
 def is_default_private_room(chat: dict | object | None) -> bool:
-    """Seeded 'my room' — never user-deletable."""
+    """Seeded 'my room' - never user-deletable."""
     if chat is None:
         return False
     if isinstance(chat, dict):

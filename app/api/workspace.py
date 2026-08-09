@@ -242,7 +242,7 @@ def invite_email(
     db.commit()
     outlook = data.get("outlook") or {}
     if not outlook.get("ok") and not outlook.get("skipped"):
-        # Link still minted — surface the mail failure clearly.
+        # Link still minted - surface the mail failure clearly.
         data["email_error"] = outlook.get("reason") or "outlook send failed"
     return data
 

@@ -1,6 +1,6 @@
 # AIOPlayground
 
-Sandbox GitHub repo for **[AIO](https://github.com/YoussiefKhalifa2003)** — the multi-agent workplace that runs in your terminal.
+Sandbox GitHub repo for **[AIO](https://github.com/YoussiefKhalifa2003)** - the multi-agent workplace that runs in your terminal.
 
 This repository is **not** the AIO application. It is the safe place AIO opens **pull requests** when board cards are sent to coding agents (**Codex**, **Claude Code**, or the LLM runner).
 
@@ -22,7 +22,7 @@ Keep this repo intentionally small: ideally **`README.md` only** on `main`, so d
 
 ## Link from AIO
 
-In the AIO project `.env` (local only — never commit tokens):
+In the AIO project `.env` (local only - never commit tokens):
 
 ```env
 GITHUB_REPO=YoussiefKhalifa2003/AIOPlayground
@@ -33,7 +33,7 @@ Optional per-project override exists in AIO; the global `GITHUB_REPO` is enough 
 
 Then in AIO:
 
-1. `aio doctor` — confirm GitHub token + repo  
+1. `aio doctor` - confirm GitHub token + repo  
 2. Board: create a card → **`a`** → **codex** or **claude_code**  
 3. Watch **agent_backlog** → **in_review** · open the PR badge  
 4. Owner: **`m`** (or `aio merge <id> --yes`) when mergeable  
@@ -68,7 +68,7 @@ For a demo-ready `main`:
 2. Close open PRs.  
 3. Delete stale `aio/obj-*` remote branches.  
 
-AIO’s local board wipe (`aio board-wipe --yes`) clears cards and `data/workspaces/obj-*` on the API host — it does **not** automatically reset this GitHub repo.
+AIO’s local board wipe (`aio board-wipe --yes`) clears cards and `data/workspaces/obj-*` on the API host - it does **not** automatically reset this GitHub repo.
 
 ---
 
@@ -83,7 +83,7 @@ AIO’s local board wipe (`aio board-wipe --yes`) clears cards and `data/workspa
 
 ## Notes
 
-- Treat every agent PR as a **demo** — review before merging.  
+- Treat every agent PR as a **demo** - review before merging.  
 - Prefer resetting `main` to README-only between showcases so the next PR is easy to see.  
 - Do not store API keys, `.env`, or AIO database files here.
 

@@ -702,7 +702,7 @@ async def test_app_renders_every_tab_for_the_owner():
         await pilot.pause()
         assert {id(v) for v in app.chat_view._views.values()} == line_ids
 
-        # New message must append in place — existing MessageLine widgets stay alive
+        # New message must append in place - existing MessageLine widgets stay alive
         # (no blank flash from remove_children).
         before = dict(app.chat_view._views)
         max_id = max(before)

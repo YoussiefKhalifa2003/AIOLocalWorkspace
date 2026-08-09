@@ -184,7 +184,7 @@ def create_pr_from_artifact(
                 json={"ref": f"refs/heads/{branch}", "sha": new_sha},
             )
             if ref_create.status_code >= 400:
-                # Branch may already exist from a prior attempt — force-update tip.
+                # Branch may already exist from a prior attempt - force-update tip.
                 ref_upd = client.patch(
                     f"https://api.github.com/repos/{owner}/{name}/git/refs/heads/{branch}",
                     headers=headers,

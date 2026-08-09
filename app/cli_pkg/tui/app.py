@@ -56,7 +56,7 @@ TABS: list[tuple[str, str]] = [
     ("live", "Live  v"),
 ]
 
-# Owner-only chrome — members never see these tabs.
+# Owner-only chrome - members never see these tabs.
 OWNER_ONLY_TABS = frozenset({"people", "dashboard", "live"})
 
 # Letter shortcuts work whenever you are not typing a message; the ctrl+ pair
@@ -77,7 +77,7 @@ Header { background: $panel; }
 #tabs { background: $panel; }
 #status-line { height: 1; padding: 0 1; color: $text-muted; background: $panel; }
 
-/* Tour: fade siblings — never opacity on #body (that dims the spotlight too) */
+/* Tour: fade siblings - never opacity on #body (that dims the spotlight too) */
 .tour-faded {
     opacity: 0.28;
 }
@@ -117,7 +117,7 @@ Header { background: $panel; }
     background: #ffffff 18%;
     border-left: tall #d0d0d0;
 }
-/* Compact chrome (height:1): soft wash like Invite — no double box (collapses label) */
+/* Compact chrome (height:1): soft wash like Invite - no double box (collapses label) */
 #logout-btn.tour-spotlight,
 #tour-btn.tour-spotlight,
 #mentions-btn.tour-spotlight,
@@ -150,7 +150,7 @@ Header { background: $panel; }
     background: #ffffff 18%;
     color: #f0f0f0;
 }
-/* Tiny + / mic: soft wash only — border/padding collapses content (Textual crash) */
+/* Tiny + / mic: soft wash only - border/padding collapses content (Textual crash) */
 #chat-attach.tour-spotlight,
 #chat-mic.tour-spotlight {
     border: none;
@@ -433,7 +433,7 @@ MessageLine .msg-chart { height: 18; width: 100%; }
     border: round #22d3ee; background: $surface;
 }
 #picker ListItem { padding: 0 1; height: 1; }
-/* Picker keeps focus on composer — still paint the highlighted row */
+/* Picker keeps focus on composer - still paint the highlighted row */
 #picker ListItem.-highlight {
     background: #22d3ee 45%;
     border-left: tall #22d3ee;
@@ -485,7 +485,7 @@ ListItem.board-card {
     height: auto;
     background: $surface;
 }
-/* Only the focused column shows a selection — otherwise every column
+/* Only the focused column shows a selection - otherwise every column
    lights up its ListView cursor and the board looks multi-selected. */
 ListItem.board-card.-highlight {
     border: round $panel-lighten-2;
@@ -687,7 +687,7 @@ class AioApp(App[None]):
         ("question_mark", "help", "help"),
         ("r", "refresh_all", ""),
         ("q", "quit", ""),
-        # Mentions: ctrl+n — bare @ must stay free for the chat picker.
+        # Mentions: ctrl+n - bare @ must stay free for the chat picker.
         ("ctrl+t", "tab_chat", ""),
         ("ctrl+b", "tab_board", ""),
         ("ctrl+g", "tab_agents", ""),
@@ -700,7 +700,7 @@ class AioApp(App[None]):
         ("4", "tab_people", ""),
         ("5", "tab_dashboard", ""),
         ("6", "tab_live", ""),
-        # board — only `a` is non-obvious enough for the Footer
+        # board - only `a` is non-obvious enough for the Footer
         ("j", "board_down", ""),
         ("k", "board_up", ""),
         ("h", "board_left", ""),
@@ -881,7 +881,7 @@ class AioApp(App[None]):
         self._maybe_offer_tour()
 
     def apply_presence(self, users: list[dict[str, Any]]) -> None:
-        """Fast presence poll callback — keep People + status in sync."""
+        """Fast presence poll callback - keep People + status in sync."""
         self.ws.presence = users
         self.people_view.set_members(self.ws.members, self.ws.me, presence=users)
         self._paint_status()

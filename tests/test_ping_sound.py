@@ -24,7 +24,7 @@ def test_play_ping_sound_calls_windows(monkeypatch):
 
     monkeypatch.setattr(ping_sound.sys, "platform", "win32")
     monkeypatch.setattr(ping_sound, "_ping_windows", win)
-    # play_ping_sound starts a thread — run the sync path directly for the unit test
+    # play_ping_sound starts a thread - run the sync path directly for the unit test
     ping_sound._play_ping_sound_sync()
     assert seen["n"] == 1
 

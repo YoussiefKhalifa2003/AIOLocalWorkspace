@@ -242,7 +242,7 @@ def outlook_login() -> None:
     from app.services.outlook_invite import interactive_outlook_login, outlook_storage_path
 
     typer.echo("Opening Outlook in Chromium…")
-    typer.echo("(Ignore Homebrew playwright — AIO uses .venv/bin/python -m playwright)")
+    typer.echo("(Ignore Homebrew playwright - AIO uses .venv/bin/python -m playwright)")
     try:
         path = interactive_outlook_login(headed=True)
     except Exception as exc:  # noqa: BLE001
@@ -304,7 +304,7 @@ def invite_email_cmd(
         typer.secho(f"Sent to {to}", fg=typer.colors.GREEN)
     else:
         typer.secho(f"Email failed: {result.get('reason')}", fg=typer.colors.RED)
-        typer.echo("Link is still valid — share it manually if needed.")
+        typer.echo("Link is still valid - share it manually if needed.")
         raise typer.Exit(1)
 
 

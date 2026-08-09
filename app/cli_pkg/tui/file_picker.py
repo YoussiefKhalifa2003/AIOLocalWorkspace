@@ -120,13 +120,13 @@ def _pick_zenity(*, title: str, max_files: int) -> list[Path]:
 
 
 def _pick_tk(*, title: str, max_files: int) -> list[Path]:
-    """Tk filedialog — fine on Windows; last-resort on macOS/Linux."""
+    """Tk filedialog - fine on Windows; last-resort on macOS/Linux."""
     try:
         import tkinter as tk
         from tkinter import filedialog
     except ImportError as exc:
         raise RuntimeError(
-            "file picker unavailable — install a Python build with tkinter"
+            "file picker unavailable - install a Python build with tkinter"
         ) from exc
 
     root = tk.Tk()
@@ -160,7 +160,7 @@ def _pick_tk(*, title: str, max_files: int) -> list[Path]:
 def pick_attachment_files(*, title: str = "Attach file", max_files: int = 1) -> list[Path]:
     """Open a native file chooser on macOS, Windows, or Linux. Returns [] if cancelled.
 
-    Blocks the calling thread until the dialog closes — call from a worker thread
+    Blocks the calling thread until the dialog closes - call from a worker thread
     so the Textual UI stays responsive.
     """
     if max_files < 1:
@@ -193,5 +193,5 @@ def pick_attachment_files(*, title: str = "Attach file", max_files: int = 1) -> 
 
 
 def pick_audio_files(*, title: str = "Choose audio for transcription") -> list[Path]:
-    """Fallback when mic recording is unavailable — pick a wav/mp3/m4a/ogg file."""
+    """Fallback when mic recording is unavailable - pick a wav/mp3/m4a/ogg file."""
     return pick_attachment_files(title=title, max_files=1)

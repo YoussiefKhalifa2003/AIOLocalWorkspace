@@ -115,7 +115,7 @@ def schedule_agent_backlog_followup(objective_id: int, job_ids: list[int]) -> No
 def kick_stale_agent_backlog(db: Session, *, project_id: int) -> int:
     """Re-schedule finish for agent_backlog cards whose follow-up died mid-flight.
 
-    Safe to call from board polls — deduped by in-flight set.
+    Safe to call from board polls - deduped by in-flight set.
     """
     objs = (
         db.query(Objective)
@@ -205,7 +205,7 @@ def _post_backlog_failure(db: Session, *, objective_id: int) -> None:
         project_id=obj.project_id,
         body=(
             f"Agent run failed for objective #{obj.id} "
-            f"({obj.title}). Card moved to doing — check server logs / try again."
+            f"({obj.title}). Card moved to doing - check server logs / try again."
         ),
         agent_slug="coding",
     )

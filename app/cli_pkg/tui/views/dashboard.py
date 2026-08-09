@@ -1,4 +1,4 @@
-"""Dashboard tab: owner-only analytics — people, models, open work."""
+"""Dashboard tab: owner-only analytics - people, models, open work."""
 
 from __future__ import annotations
 
@@ -164,7 +164,7 @@ class DashboardView(VerticalScroll):
                 str(t.get("assignee_email") or "-"),
             )
 
-        # Textual Select options are (display label, internal value) — label first.
+        # Textual Select options are (display label, internal value) - label first.
         obj_opts: list[tuple[str, str]] = []
         for t in self._open_tasks:
             if t.get("id") is None:

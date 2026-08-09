@@ -21,7 +21,7 @@ class MemberItem(ListItem):
         role = str(member.get("role") or "member")
         badge = "[yellow]★ owner[/yellow]" if role == "owner" else "[dim]member[/dim]"
         you = "  [#7dd3fc](you)[/#7dd3fc]" if is_me else ""
-        name = escape(str(member.get("name") or "").strip() or "—")
+        name = escape(str(member.get("name") or "").strip() or "-")
         email = escape(str(member.get("email") or ""))
         pres = presence or {}
         online = bool(pres.get("online"))

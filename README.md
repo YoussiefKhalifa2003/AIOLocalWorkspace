@@ -94,7 +94,7 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 cp .env.example .env
-# Add LLM keys — see Configuration
+# Add LLM keys - see Configuration
 
 ./aio seed
 uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -108,7 +108,7 @@ Second terminal:
 ```
 
 After Sign in, credentials are saved (`~/.aio/credentials.json`).  
-On Sign in you can set **Server** (API base URL) — required for teammates joining via a public tunnel.
+On Sign in you can set **Server** (API base URL) - required for teammates joining via a public tunnel.
 
 ```bash
 rm -f aio.db && ./aio seed          # reset demo data
@@ -139,8 +139,8 @@ Footer stays minimal (`help` · `quit` · `a agent`). Most shortcuts live in Hel
 
 | Prefix | Role |
 |--------|------|
-| `/` | AI skills — `/ask` `/deepresearch` `/code` `/write` `/review` `/checklist` `/status` `/clear` |
-| `!` | Board / ops — **whispers** in public channels |
+| `/` | AI skills - `/ask` `/deepresearch` `/code` `/write` `/review` `/checklist` `/status` `/clear` |
+| `!` | Board / ops - **whispers** in public channels |
 | `@` | Ping people |
 
 Also: **`+` attach** · **mic** · hover **edit / delete** · speaker blocks · **online** · **typing**.
@@ -329,15 +329,15 @@ Password: **`demo`**
 
 | Email | Role |
 |-------|------|
-| `a@local.test` | **Owner** — full board, People, Dash, Live, merge, wipe |
-| `omar@local.test` | **Member** — own cards, Chat / Board / Agents |
-| `sara@local.test` | **Member** — same |
+| `a@local.test` | **Owner** - full board, People, Dash, Live, merge, wipe |
+| `omar@local.test` | **Member** - own cards, Chat / Board / Agents |
+| `sara@local.test` | **Member** - same |
 
 ### Two-minute demo
 
 ```bash
 ./aio
-# Tour (F1) — member vs owner paths
+# Tour (F1) - member vs owner paths
 # @ping between two logins → @N next to Tour → jump
 # Board: card → a → codex (or claude_code)
 # Chat: !claude / !codex open real CLIs
@@ -379,7 +379,7 @@ python scripts/tui_pty_check.py
 
 ## Related repo
 
-Agent PRs land on **[YoussiefKhalifa2003/AIOPlayground](https://github.com/YoussiefKhalifa2003/AIOPlayground)** — a sandbox repo (keep `README.md`; demo branches/PRs are disposable). Set `GITHUB_REPO=YoussiefKhalifa2003/AIOPlayground` in `.env`.
+Agent PRs land on **[YoussiefKhalifa2003/AIOPlayground](https://github.com/YoussiefKhalifa2003/AIOPlayground)** - a sandbox repo (keep `README.md`; demo branches/PRs are disposable). Set `GITHUB_REPO=YoussiefKhalifa2003/AIOPlayground` in `.env`.
 
 ---
 
@@ -399,5 +399,5 @@ Agent PRs land on **[YoussiefKhalifa2003/AIOPlayground](https://github.com/Youss
 ---
 
 <p align="center">
-  <sub>AIO — public for the team · private for you · ! for work · / for agents · a for Codex & Claude.</sub>
+  <sub>AIO - public for the team · private for you · ! for work · / for agents · a for Codex & Claude.</sub>
 </p>
