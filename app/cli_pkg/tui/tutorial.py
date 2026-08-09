@@ -27,7 +27,7 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="tabs",
         title="Tabs",
-        body="Chat · Board · Agents · People. Owners also get Dash and Live. Tour + Log out sit on the right.",
+        body="Chat · Board · Agents. Owners also get People · Dash · Live. @N · Tour · Log out sit on the right.",
         tab="chat",
         spotlight="#tabs-row",
     ),
@@ -41,28 +41,28 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="new-channel",
         title="+ channel",
-        body="Create a room with + channel (or ctrl+shift+n). !newchat still works.",
+        body="Create a room with + channel (or ctrl+shift+n).",
         tab="chat",
         spotlight="#chat-new",
     ),
     TourStep(
         id="type",
         title="Type here",
-        body="Type in this box: / for AI · ! for commands · @ to ping.",
+        body="/ AI skills · ! commands · @ ping. Try !claude or !codex to open those apps.",
         tab="chat",
         spotlight="#composer-row",
     ),
     TourStep(
         id="attach",
         title="Attach",
-        body="Plus (+) on the left picks a file for your next message (ctrl+f works too).",
+        body="Plus (+) on the left picks a file for your next message.",
         tab="chat",
         spotlight="#chat-attach",
     ),
     TourStep(
         id="voice",
         title="Mic",
-        body="Mic on the right (or ctrl+m) records or picks audio into the box.",
+        body="Mic on the right records or picks audio into the box.",
         tab="chat",
         spotlight="#chat-mic",
     ),
@@ -75,17 +75,24 @@ MEMBER_STEPS: list[TourStep] = [
     ),
     TourStep(
         id="pings",
-        title="Pings",
-        body="When someone @mentions you: sound + @N on this bar. Then press ctrl+n.",
+        title="Mentions",
+        body="When someone @pings you: sound + @N up here. Click it → jump to the message.",
         tab="chat",
-        spotlight="#status-line",
+        spotlight="#mentions-btn",
     ),
     TourStep(
         id="board",
         title="Board",
-        body="Cards are work. [ ] shifts columns; s jumps to any status.",
+        body="You only see your cards. Select one → press a → pick Codex, Claude, or llm.",
         tab="board",
         spotlight="#columns",
+    ),
+    TourStep(
+        id="agents",
+        title="Agents",
+        body="Choose which model backs /ask /code and friends, then Save.",
+        tab="agents",
+        spotlight="#agents",
     ),
     TourStep(
         id="my-room",
@@ -98,7 +105,7 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="logout",
         title="Log out",
-        body="Log out clears saved sign-in on this machine (or ctrl+shift+l).",
+        body="Log out clears saved sign-in on this machine.",
         tab="chat",
         spotlight="#logout-btn",
     ),
@@ -131,10 +138,18 @@ OWNER_EXTRA_STEPS: list[TourStep] = [
     ),
     TourStep(
         id="invite-cmd",
-        title="Invite cmd",
-        body="!invite mints a join link. Email when configured.",
+        title="Invite",
+        body="!invite mints a join link (use a public tunnel URL for off-LAN).",
         tab="chat",
         spotlight="#composer-row",
+        owner_only=True,
+    ),
+    TourStep(
+        id="owner-board",
+        title="Owner board",
+        body="You see everyone’s cards. Merge PRs with m when a card is mergeable.",
+        tab="board",
+        spotlight="#columns",
         owner_only=True,
     ),
 ]
@@ -186,6 +201,7 @@ class TutorialCoach(Vertical):
             "#tabs-row",
             "#tour-btn",
             "#logout-btn",
+            "#mentions-btn",
             "#status-line",
             "#composer-row",
             "#composer",
@@ -205,6 +221,7 @@ class TutorialCoach(Vertical):
         self._on_finished: Callable[[bool], None] | None = None
         self._glow_on = False
         self._glow_timer: Timer | None = None
+        self._forced_mentions_btn = False
         self._head = Static("", id="tour-head", markup=True)
         self._body = Static("", id="tour-body", markup=True)
         self._hint = Static("", id="tour-hint", markup=True)
@@ -273,6 +290,7 @@ class TutorialCoach(Vertical):
         "#tabs-row",
         "#tour-btn",
         "#logout-btn",
+        "#mentions-btn",
         "#chat-sidebar",
         "#transcript",
         "#picker",
@@ -324,9 +342,29 @@ class TutorialCoach(Vertical):
             except Exception:
                 pass
 
+    def _restore_mentions_btn(self) -> None:
+        if not self._forced_mentions_btn:
+            return
+        self._forced_mentions_btn = False
+        app = self.app
+        if hasattr(app, "_paint_mentions_btn"):
+            try:
+                app._paint_mentions_btn()  # type: ignore[attr-defined]
+                return
+            except Exception:
+                pass
+        try:
+            btn = app.query_one("#mentions-btn", Button)
+            btn.display = False
+            btn.set_class(False, "has-unread")
+            btn.label = "@"
+        except Exception:
+            pass
+
     def _clear_spotlight(self) -> None:
         self._stop_glow()
         self._clear_faded()
+        self._restore_mentions_btn()
         node = self._spotlight_node
         self._spotlight_node = None
         if node is not None:
@@ -362,26 +400,34 @@ class TutorialCoach(Vertical):
         # Extra key hint for steps that need a shortcut callout
         if step.id == "pings":
             self._hint.update(
-                "[b white]→[/] watch [b]@N[/] on the status bar  ·  then [b]ctrl+n[/]"
+                "[b white]→[/] glowing [b]@N[/] · click to open mentions"
             )
             self._hint.add_class("-show")
         elif step.id == "type":
-            self._hint.update("[b white]→[/] the glowing shell is where you type")
+            self._hint.update(
+                "[b white]→[/] [b]/[/] AI · [b]![/] commands · [b]!claude[/] / [b]!codex[/]"
+            )
             self._hint.add_class("-show")
         elif step.id == "attach":
             self._hint.update("[b white]→[/] glowing [b]+[/] attaches a file")
             self._hint.add_class("-show")
         elif step.id == "voice":
-            self._hint.update("[b white]→[/] glowing [b]mic[/] · or [b]ctrl+m[/]")
+            self._hint.update("[b white]→[/] glowing [b]mic[/]")
             self._hint.add_class("-show")
         elif step.id == "edit":
             self._hint.update("[b white]→[/] hover your own lines for [b]edit[/] / [b]delete[/]")
             self._hint.add_class("-show")
+        elif step.id == "board":
+            self._hint.update("[b white]→[/] select a card · press [b]a[/] · pick a runner")
+            self._hint.add_class("-show")
+        elif step.id == "owner-board":
+            self._hint.update("[b white]→[/] [b]m[/] merges when a card says mergeable")
+            self._hint.add_class("-show")
         elif step.id == "logout":
-            self._hint.update("[b white]→[/] [b]Log out[/] or [b]ctrl+shift+l[/]")
+            self._hint.update("[b white]→[/] [b]Log out[/] (top right)")
             self._hint.add_class("-show")
         elif step.id == "new-channel":
-            self._hint.update("[b white]→[/] [b]+ channel[/] or [b]ctrl+shift+n[/]")
+            self._hint.update("[b white]→[/] [b]+ channel[/]")
             self._hint.add_class("-show")
         else:
             self._hint.remove_class("-show")
@@ -401,10 +447,23 @@ class TutorialCoach(Vertical):
 
         self.call_after_refresh(self._apply_spotlight, step.spotlight)
 
+    def _ensure_mentions_btn_visible(self) -> None:
+        """@N is hidden with zero unread — show a demo badge for the tour step."""
+        try:
+            btn = self.app.query_one("#mentions-btn", Button)
+        except Exception:
+            return
+        btn.display = True
+        btn.label = "@1"
+        btn.set_class(True, "has-unread")
+        self._forced_mentions_btn = True
+
     def _apply_spotlight(self, selector: str | None) -> None:
         self._clear_spotlight()
         if not selector:
             return
+        if selector == "#mentions-btn":
+            self._ensure_mentions_btn_visible()
         try:
             node = self.app.query_one(selector)
         except Exception:

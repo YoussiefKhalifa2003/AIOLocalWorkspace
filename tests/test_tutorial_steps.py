@@ -11,8 +11,9 @@ def test_member_tour_excludes_owner_steps():
     assert all(not s.owner_only for s in steps)
     ids = {s.id for s in steps}
     assert "dash" not in ids and "live" not in ids and "people" not in ids
-    # New chrome covered for every member
-    assert {"attach", "voice", "edit", "logout", "new-channel"} <= ids
+    assert "owner-board" not in ids
+    # Chrome covered for every member
+    assert {"attach", "voice", "edit", "logout", "new-channel", "pings", "agents", "board"} <= ids
 
 
 def test_owner_tour_appends_extras():
@@ -23,6 +24,7 @@ def test_owner_tour_appends_extras():
     assert any(s.id == "dash" for s in steps)
     assert any(s.id == "live" for s in steps)
     assert any(s.id == "people" for s in steps)
+    assert any(s.id == "owner-board" for s in steps)
     assert all(s.owner_only for s in OWNER_EXTRA_STEPS)
 
 
@@ -38,9 +40,14 @@ def test_tour_steps_have_spotlights():
     assert by_id["attach"].spotlight == "#chat-attach"
     assert by_id["voice"].spotlight == "#chat-mic"
     assert by_id["edit"].spotlight == "#transcript"
+    assert by_id["pings"].spotlight == "#mentions-btn"
+    assert by_id["board"].spotlight == "#columns"
+    assert by_id["agents"].spotlight == "#agents"
     assert by_id["logout"].spotlight == "#logout-btn"
     assert by_id["new-channel"].spotlight == "#chat-new"
-    assert "[ ]" in by_id["board"].body
+    assert "press a" in by_id["board"].body.lower() or " a " in f" {by_id['board'].body} "
+    assert "codex" in by_id["board"].body.lower()
+    assert "!claude" in by_id["type"].body.lower()
 
 
 def test_tour_spotlight_targets_exist_in_app():
@@ -67,6 +74,9 @@ def test_tour_spotlight_targets_exist_in_app():
                 if step.tab:
                     app.show_tab(step.tab)
                     await pilot.pause()
+                if step.spotlight == "#mentions-btn":
+                    app.mentions_btn.display = True
+                    app.mentions_btn.label = "@1"
                 node = app.query_one(step.spotlight)
                 assert node is not None, step.spotlight
 

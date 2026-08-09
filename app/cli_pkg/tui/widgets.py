@@ -664,75 +664,70 @@ class MessageEditModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
-  c  Chat        b  Board        g  Agents
-  p  People      d  Dashboard    v  Live
-  (1-6 work too)
+HELP_TEXT = """[b]Move around[/b]
 
-  While you are typing a message, letters are just letters. Use
-  ctrl+t chat · ctrl+b board · ctrl+g agents · ctrl+e people ·
-  ctrl+d dash · ctrl+v live, or press [b]esc[/b] then the letter.
+  c   Chat          b   Board         g   Agents
+  p   People        d   Dash          v   Live
+  ?   Help          q   Quit          F1  Tour
 
-[b]Anywhere[/b]
-  ?  help (or ctrl+w)   F1 Tour   Log out button (top right)
-  r  refresh (ctrl+r)   q  quit (ctrl+q)
-  [b]@N[/b] button (tabs row) opens unread mentions — who · time · chat · snippet.
-  Click a row (or press enter) to jump to that message (highlighted).
-  ctrl+n also opens mentions.  !claude / !codex open those CLIs in a new terminal.
 
 [b]Chat[/b]
-  Type [b]/[/b] [b]![/b] or [b]@[/b] — a dropdown opens (just like the website).
-  up/down to choose, enter or tab to pick, esc to close.
-  Ghost line above the box shows the selected completion or next arg.
-  /ask /deepresearch /code /write /review /checklist /status /clear
-  !add !list !set !done !claim !issue !invite !attach !attach-clear !claude !codex !help
-  @name pings a person · @team pings everyone
-  Click [b]+[/b] on the left of the composer (or [b]ctrl+f[/b] / [b]!attach[/b]) —
-  same shell on Mac, Windows, and Linux — opens a native file dialog
-  (code, pdf, docx, images…). Then send your message / skill.
-  [b]mic[/b] on the right of the composer (or [b]ctrl+m[/b]) records / picks audio.
-  Non-image attachments: focus the 📎 row, [b]enter[/b] or [b]o[/b] to open
-  in your default app.
-  Messages group by speaker (~4 min): one name + colored rail per turn.
-  Own messages: hover a line — [b]edit[/b] / [b]delete[/b] appear on the
-  right. Edited lines show a dim [b]· edited[/b] tag. Keys e / delete still
-  work when the line is focused. Editing never deletes later user messages;
-  only following AI replies to that line are cleared/re-run.
-  [b]+ channel[/b] or [b]ctrl+shift+n[/b] creates a room (!newchat still works).
-  [b]ctrl+m[/b] voice → mic (or audio file) → fills the composer via STT.
-  Owner: [b]kick[/b] next to a name under MEMBERS removes them from the workspace.
-  When someone [@]pings you: a sound plays and [b]@N[/b] appears in the tabs row.
-  Open it to see who · time · chat · snippet, then jump to the highlighted message.
+
+  /ask  /code  …      AI skills
+  !add  !set   …      board commands
+  @name               ping someone
+  +  ·  mic           attach · voice
+  !claude  !codex     open Claude / Codex
+
+
+[b]Mentions[/b]
+
+  @N  (top bar)       open unread pings
+  enter / click       jump to that message
+
 
 [b]Board[/b]
-  Members only see cards they created or are assigned to; owners see all.
-  j k          card up/down     h l    column left/right
-  [ ]          shift card to previous / next column (DnD stand-in)
-  click a card to update detail · i hide/show detail
-  e            edit description & subtasks (your cards; owners: any)
-  [b]a[/b]     send card to agent — pick [b]codex[/b] / [b]claude_code[/b] / [b]llm[/b]
-  Owner only:  n new · s move · m merge · [ ] column-shift
-  Anyone:      g open repo · o open PR · y copy PR
-  After n / !add a setup popup asks for description + subtasks.
 
-[b]People[/b]  owners: email invite (@domain only via Outlook), roles, remove.
-[b]Agents[/b]  pick the model behind each /skill, then Save.
-[b]Dashboard[/b]  owner-only tables: people, models, tokens, open work.
-  Assign strip: pick open task + teammate → Assign.
-[b]Live[/b]  owner-only charts: gauges, sparklines, WIP bars (polls every 2s).
+  a                   send to Codex / Claude / llm
+  j k · h l           move between cards / columns
+  e                   edit your card
+  n  s  m             new · status · merge  (owner)
 
-[b]Mac smoke[/b]  Terminal/iTerm may ask for mic (ctrl+m); file STT always works.
-  Open PDF/code attachments with enter/o. Board [ ] needs owner. Tour: F1.
+
+[b]Who sees what[/b]
+
+  Member              only your cards
+  Owner               everyone’s board
 """
 
 
 class HelpModal(ModalScreen[None]):
     BINDINGS = [("escape", "dismiss_none", "Close"), ("question_mark", "dismiss_none", "Close")]
 
+    DEFAULT_CSS = """
+    HelpModal { align: center middle; }
+    HelpModal #help-box {
+        width: 56;
+        height: auto;
+        max-height: 90%;
+        padding: 1 2 1 2;
+        background: $surface;
+        border: round $accent;
+    }
+    HelpModal #help-scroll {
+        height: auto;
+        max-height: 28;
+        padding: 1 0;
+    }
+    HelpModal #help-close {
+        margin-top: 1;
+    }
+    """
+
     def compose(self) -> ComposeResult:
         with Vertical(id="help-box"):
-            yield Label("AIO — keys and commands", id="confirm-title")
-            yield VerticalScroll(Static(HELP_TEXT, markup=True))
+            yield Label("Help", id="confirm-title")
+            yield VerticalScroll(Static(HELP_TEXT, markup=True), id="help-scroll")
             yield Button("Close", id="help-close")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -783,14 +778,26 @@ class MentionsModal(ModalScreen[dict[str, Any] | None]):
         height: auto;
         max-height: 18;
         margin: 1 0;
+        background: transparent;
     }
     MentionsModal #mention-list ListItem {
-        padding: 1 1;
+        padding: 1 1 1 1;
         height: auto;
         margin-bottom: 1;
+        background: #1a1a1a;
+        border-left: tall #3f3f46;
+    }
+    MentionsModal #mention-list ListItem:hover {
+        background: #243044;
+        border-left: tall #38bdf8;
     }
     MentionsModal #mention-list ListItem.-highlight {
-        background: $accent 25%;
+        background: #1e3a5f;
+        border-left: tall #fbbf24;
+        text-style: bold;
+    }
+    MentionsModal #mention-list ListItem.-highlight .mention-open-hint {
+        color: #fbbf24;
     }
     """
 
@@ -801,10 +808,7 @@ class MentionsModal(ModalScreen[dict[str, Any] | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
             yield Label(f"Mentions ({len(self._mentions)})", id="confirm-title")
-            yield Static(
-                "[dim]who · time · chat · message — enter/click to jump[/dim]",
-                markup=True,
-            )
+            yield Static("[dim]↑↓ move · enter open[/dim]", markup=True)
             if not self._mentions:
                 yield Static("[dim]nothing unread[/dim]", markup=True)
                 yield Button("Close", id="mentions-close")
@@ -816,11 +820,11 @@ class MentionsModal(ModalScreen[dict[str, Any] | None]):
                 when = escape(_mention_time_label(m.get("created_at")))
                 meta = f"{when} · #{where}" if when else f"#{where}"
                 snippet = escape(str(m.get("snippet") or "").replace("\n", " ")[:90])
-                items.append(
-                    ListItem(
-                        Static(f"[b]{who}[/b]  [dim]{meta}[/dim]\n{snippet}", markup=True)
-                    )
+                body = (
+                    f"[yellow]›[/yellow]  [b]{who}[/b]  [dim]{meta}[/dim]\n"
+                    f"   {snippet}"
                 )
+                items.append(ListItem(Static(body, markup=True, classes="mention-row")))
             yield ListView(*items, id="mention-list")
             yield Button("Mark all read", id="mentions-read")
 
