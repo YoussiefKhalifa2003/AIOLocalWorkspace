@@ -768,7 +768,7 @@ class MessageLine(Vertical):
         self._del_btn = MsgTool("delete", "delete")
         self._body_static = Static("", classes="msg-body", markup=True)
         self._body_md = Markdown("", classes="msg-body")
-        self._edited_flag = Static("[dim]· edited[/dim]", classes="msg-edited-flag", markup=True)
+        self._edited_flag = Static("[dim]| edited[/dim]", classes="msg-edited-flag", markup=True)
         self._chart_ids: tuple[int, ...] = ()
         self._tools_ready = False
 
@@ -1108,7 +1108,7 @@ class SpeakerBlock(Vertical):
             meta.append("edited")
         if message.get("visibility") == "whisper":
             meta.append("only you")
-        self._head.update(f"{who}  [dim]{escape(' · '.join(x for x in meta if x))}[/dim]")
+        self._head.update(f"{who}  [dim]{escape(' | '.join(x for x in meta if x))}[/dim]")
 
 
 class ChatView(Vertical):
@@ -1445,7 +1445,7 @@ class ChatView(Vertical):
         chat = self.current_chat
         if chat.get("kind") == "private":
             mode = chat_mode_of(chat)
-            tip = "/skills · only you" if mode == "llm" else "! commands · only you"
+            tip = "/skills | only you" if mode == "llm" else "! commands | only you"
             raw_name = str(chat.get("name") or "my room")
             name = escape(
                 "my room" if raw_name.lower().startswith("private -") else raw_name
@@ -1454,7 +1454,7 @@ class ChatView(Vertical):
         else:
             name = escape(str(chat.get("name") or ""))
             mode = chat_mode_of(chat)
-            tip = "@people · /skills (whisper)" if mode == "llm" else "@people · !commands"
+            tip = "@people | /skills (whisper)" if mode == "llm" else "@people | !commands"
             self.title_bar.update(f"[b]#{name}[/b]  [dim]{tip}[/dim]")
         self._sync_llm_ui()
         self.poll_messages()
@@ -1512,7 +1512,7 @@ class ChatView(Vertical):
         self.attach_pending.display = True
         self.attach_pending.update(
             f"[b]attached[/b] {names}  "
-            f"[dim]({len(rows)}/5) · + add · esc clear last · !attach-clear[/dim]"
+            f"[dim]({len(rows)}/5) | + add | esc clear last | !attach-clear[/dim]"
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

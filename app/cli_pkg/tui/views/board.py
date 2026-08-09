@@ -86,7 +86,7 @@ class BoardView(Horizontal):
     def toggle_detail(self) -> None:
         self._detail_open = not self._detail_open
         self.detail.display = self._detail_open
-        self.app.set_status("detail shown" if self._detail_open else "detail hidden · press i to show")
+        self.app.set_status("detail shown" if self._detail_open else "detail hidden | press i to show")
 
     def _sync_column_from_list(self, list_view: ListView) -> bool:
         """When the user clicks a card, track which column it belongs to."""
@@ -358,8 +358,8 @@ class BoardView(Horizontal):
             return
         detail = (
             f"#{card['id']} {escape(str(card.get('title') or ''))}\n"
-            f"PR #{card.get('pr_number')} · {card.get('pr_url')}\n"
-            f"branch {card.get('github_branch') or '-'} · method {get_settings().merge_method}"
+            f"PR #{card.get('pr_number')} | {card.get('pr_url')}\n"
+            f"branch {card.get('github_branch') or '-'} | method {get_settings().merge_method}"
         )
 
         def done(confirmed: bool | None) -> None:
@@ -378,7 +378,7 @@ class BoardView(Horizontal):
         try:
             data = self.client.merge(objective_id)
             sha = str(data.get("sha") or "")[:8]
-            msg = f"#{objective_id} merged into {data.get('base')} ({sha}) · card is done"
+            msg = f"#{objective_id} merged into {data.get('base')} ({sha}) | card is done"
         except ApiError as exc:
             msg = f"[red]{escape(str(exc))}[/red]"
         self.app.call_from_thread(self.app.after_mutation, msg)

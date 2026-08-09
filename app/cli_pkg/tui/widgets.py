@@ -37,7 +37,7 @@ class CardItem(ListItem):
         closed = int(card.get("checklist_closed") or 0)
         total = int(card.get("checklist_total") or 0)
         badge = card_badges(card)
-        meta = f"[dim]{owner} · {pct}%[/dim]"
+        meta = f"[dim]{owner} | {pct}%[/dim]"
         if total:
             meta += f"  [dim]{closed}/{total} tasks[/dim]"
         body = f"[b]#{card['id']}[/b]  {title}\n{meta}"
@@ -65,7 +65,7 @@ class BoardColumn(VerticalScroll):
         for card in cards:
             self.list_view.append(CardItem(card))
         label = self.status.replace("_", " ")
-        self.border_title = f"{label} · {len(cards)}"
+        self.border_title = f"{label} | {len(cards)}"
         if cards:
             self.list_view.index = min(index, len(cards) - 1)
 
@@ -167,7 +167,7 @@ class DetailPane(VerticalScroll):
 
         if not card:
             self.border_title = "detail"
-            self.header.update("[dim]Click a card, or use j/k · h/l.[/dim]")
+            self.header.update("[dim]Click a card, or use j/k | h/l.[/dim]")
             self.meta.update("")
             self.progress.update("")
             self.desc.update("")
@@ -528,7 +528,7 @@ class CreateChatModal(ModalScreen[dict[str, Any] | None]):
             yield Label("New chat", id="confirm-title")
             if self._is_owner:
                 yield Static(
-                    "[dim]Public = whole team · Private = only you[/dim]",
+                    "[dim]Public = whole team | Private = only you[/dim]",
                     markup=True,
                 )
             else:
@@ -568,10 +568,10 @@ class CreateChatModal(ModalScreen[dict[str, Any] | None]):
             btn.label = "Private (only you)"
             return
         if self._kind == "channel":
-            btn.label = "Public · everyone"
+            btn.label = "Public | everyone"
             btn.variant = "primary"
         else:
-            btn.label = "Private · only you"
+            btn.label = "Private | only you"
             btn.variant = "default"
 
     def _paint_mode(self) -> None:
@@ -590,7 +590,7 @@ class CreateChatModal(ModalScreen[dict[str, Any] | None]):
             purpose = "[b]/ AI skills[/b] (and ! commands)"
         else:
             purpose = "[b]! commands only[/b] (no /ask)"
-        self._summary.update(f"[dim]Creating[/dim] {vis} · {purpose}")
+        self._summary.update(f"[dim]Creating[/dim] {vis} | {purpose}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id or ""
@@ -676,7 +676,7 @@ HELP_TEXT = """[b]Move around[/b]
   /ask  /code  …      AI skills
   !add  !set   …      board commands
   @name               ping someone
-  +  ·  mic           attach · voice
+  +  |  mic           attach | voice
   !claude  !codex     open Claude / Codex
 
 
@@ -689,9 +689,9 @@ HELP_TEXT = """[b]Move around[/b]
 [b]Board[/b]
 
   a                   send to Codex / Claude / llm
-  j k · h l           move between cards / columns
+  j k | h l           move between cards / columns
   e                   edit your card
-  n  s  m             new · status · merge  (owner)
+  n  s  m             new | status | merge  (owner)
 
 
 [b]Who sees what[/b]
@@ -808,7 +808,7 @@ class MentionsModal(ModalScreen[dict[str, Any] | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
             yield Label(f"Mentions ({len(self._mentions)})", id="confirm-title")
-            yield Static("[dim]↑↓ move · enter open[/dim]", markup=True)
+            yield Static("[dim]↑↓ move | enter open[/dim]", markup=True)
             if not self._mentions:
                 yield Static("[dim]nothing unread[/dim]", markup=True)
                 yield Button("Close", id="mentions-close")
@@ -818,7 +818,7 @@ class MentionsModal(ModalScreen[dict[str, Any] | None]):
                 who = escape(str(m.get("from") or "?"))
                 where = escape(str(m.get("chat_name") or ""))
                 when = escape(_mention_time_label(m.get("created_at")))
-                meta = f"{when} · #{where}" if when else f"#{where}"
+                meta = f"{when} | #{where}" if when else f"#{where}"
                 snippet = escape(str(m.get("snippet") or "").replace("\n", " ")[:90])
                 body = (
                     f"[yellow]›[/yellow]  [b]{who}[/b]  [dim]{meta}[/dim]\n"

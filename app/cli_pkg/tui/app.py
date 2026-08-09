@@ -774,7 +774,7 @@ class AioApp(App[None]):
     def _set_header(self, detail: str) -> None:
         """Title + detail without Textual Header's default em dash separator."""
         detail = (detail or "").strip()
-        self.title = f"AIO · {detail}" if detail else "AIO"
+        self.title = f"AIO | {detail}" if detail else "AIO"
         self.sub_title = ""
 
     # tabs ----------------------------------------------------------------
@@ -871,7 +871,7 @@ class AioApp(App[None]):
                 self._message = f"[yellow]{escape(flash)}[/yellow]"
         self._prev_unread = unread
         self.ws = ws
-        self._set_header(f"{ws.me.get('email', '')} · project {self.client.project_id}")
+        self._set_header(f"{ws.me.get('email', '')} | project {self.client.project_id}")
         self.chat_view.set_workspace(ws.chats, ws.members, str(ws.me.get("email") or ""))
         if ws.presence:
             self.chat_view.set_presence(ws.presence)
@@ -1059,7 +1059,7 @@ class AioApp(App[None]):
         ]
         if self._board_error:
             parts.append(f"[red]{escape(self._board_error)}[/red]")
-        line = "  ·  ".join(parts)
+        line = "  |  ".join(parts)
         if self._message:
             line = f"{line}   {self._message}"
         self.status_line.update(line)

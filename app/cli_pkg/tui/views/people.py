@@ -31,7 +31,7 @@ class MemberItem(ListItem):
             status = "[dim]● offline[/dim]"
         super().__init__(
             Static(
-                f"[b]{name}[/b]{you}\n[dim]{email}[/dim]  ·  {badge}  ·  {status}",
+                f"[b]{name}[/b]{you}\n[dim]{email}[/dim]  |  {badge}  |  {status}",
                 markup=True,
             )
         )
@@ -115,9 +115,9 @@ class PeopleView(VerticalScroll):
         owners = sum(1 for m in members if m.get("role") == "owner")
         online_n = sum(1 for u in self.presence if u.get("online"))
         self.note.update(
-            f"[dim]{len(members)} member(s) · {owners} owner(s) · online {online_n} · pick someone, then use the buttons[/dim]"
+            f"[dim]{len(members)} member(s) | {owners} owner(s) | online {online_n} | pick someone, then use the buttons[/dim]"
             if self.is_owner
-            else f"[dim]online {online_n}/{len(members)} · Only owners can invite, change roles, or remove people.[/dim]"
+            else f"[dim]online {online_n}/{len(members)} | Only owners can invite, change roles, or remove people.[/dim]"
         )
         self._sync_buttons()
 

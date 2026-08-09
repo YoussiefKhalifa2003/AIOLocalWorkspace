@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  Team chat · private AI rooms · objectives board · Codex / Claude Code · live presence<br/>
-  <em>Native terminal app · shared FastAPI backend · no browser required</em>
+  Team chat / private AI rooms / objectives board / Codex / Claude Code / live presence<br/>
+  <em>Native terminal app / shared FastAPI backend / no browser required</em>
 </p>
 
 <p align="center">
@@ -25,16 +25,16 @@
 </p>
 
 <p align="center">
-  <code>aio</code> terminal &nbsp;·&nbsp; HTTP API &nbsp;·&nbsp; legacy web at <code>/app</code>
+  <code>aio</code> terminal &nbsp;/&nbsp; HTTP API &nbsp;/&nbsp; legacy web at <code>/app</code>
 </p>
 
 <p align="center">
   <a href="#quick-start"><strong>Quick start</strong></a>
-  &nbsp;·&nbsp;
+  &nbsp;/&nbsp;
   <a href="#living-in-the-app">Living in the app</a>
-  &nbsp;·&nbsp;
+  &nbsp;/&nbsp;
   <a href="#board--coding-runners">Board &amp; runners</a>
-  &nbsp;·&nbsp;
+  &nbsp;/&nbsp;
   <a href="#invites-off-lan">Invites off-LAN</a>
 </p>
 
@@ -51,9 +51,9 @@ aio                                              # terminal 2
 |--------|----------------|
 | Agents clutter shared chat | **`/` skills** in AI chats; public `!` traffic is **whisper-only** |
 | Slack + Linear + Cursor = tab hell | **One terminal** for people, work, and coding agents |
-| “Who’s here?” missing in CLI tools | **Online dots** + **typing** indicators |
-| Who can create / see what? | **Members:** private chats + **own board cards** · **Owners:** full board + People / Dash / Live |
-| Need real Codex / Claude | Board **`a`** → pick runner · or **`!claude` / `!codex`** open the real CLIs |
+| "Who's here?" missing in CLI tools | **Online dots** + **typing** indicators |
+| Who can create / see what? | **Members:** private chats + **own board cards**. **Owners:** full board + People / Dash / Live |
+| Need real Codex / Claude | Board **`a`** -> pick runner, or **`!claude` / `!codex`** open the real CLIs |
 | Off-LAN join | Tunnel + **Server** URL on Sign in |
 
 Built for small teams who want serious agent workflows without leaving the shell.
@@ -94,7 +94,7 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 cp .env.example .env
-# Add LLM keys - see Configuration
+# Add LLM keys: see Configuration
 
 ./aio seed
 uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -103,12 +103,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Second terminal:
 
 ```bash
-./aio doctor    # API · git · invite URL · Codex/Claude CLIs · keys
+./aio doctor    # API, git, invite URL, Codex/Claude CLIs, keys
 ./aio           # always opens Sign in, then the workspace
 ```
 
 After Sign in, credentials are saved (`~/.aio/credentials.json`).  
-On Sign in you can set **Server** (API base URL) - required for teammates joining via a public tunnel.
+On Sign in you can set **Server** (API base URL): required for teammates joining via a public tunnel.
 
 ```bash
 rm -f aio.db && ./aio seed          # reset demo data
@@ -125,25 +125,25 @@ rm -f aio.db && ./aio seed          # reset demo data
 
 | Keys / control | Opens |
 |----------------|--------|
-| `c` `b` `g` · `1`-`3` | **Chat** · **Board** · **Agents** *(everyone)* |
-| `p` `d` `v` · `4`-`6` | **People** · **Dash** · **Live** *(owner only)* |
+| `c` `b` `g` / `1`-`3` | **Chat** / **Board** / **Agents** *(everyone)* |
+| `p` `d` `v` / `4`-`6` | **People** / **Dash** / **Live** *(owner only)* |
 | `?` | Short Help |
-| `@N` (tabs row) · `ctrl+n` | Unread mentions → jump to message |
+| `@N` (tabs row) / `ctrl+n` | Unread mentions -> jump to message |
 | `Tour` / `F1` | Spotlight walkthrough (member vs owner paths) |
 | `Log out` | Sign out (marks you offline) |
 | `q` | Quit |
 
-Footer stays minimal (`help` · `quit` · `a agent`). Most shortcuts live in Help / Tour.
+Footer stays minimal (`help` / `quit` / `a agent`). Most shortcuts live in Help / Tour.
 
 ### Chat
 
 | Prefix | Role |
 |--------|------|
-| `/` | AI skills - `/ask` `/deepresearch` `/code` `/write` `/review` `/checklist` `/status` `/clear` |
-| `!` | Board / ops - **whispers** in public channels |
+| `/` | AI skills: `/ask` `/deepresearch` `/code` `/write` `/review` `/checklist` `/status` `/clear` |
+| `!` | Board / ops: **whispers** in public channels |
 | `@` | Ping people |
 
-Also: **`+` attach** · **mic** · hover **edit / delete** · speaker blocks · **online** · **typing**.
+Also: **`+` attach**, **mic**, hover **edit / delete**, speaker blocks, **online**, **typing**.
 
 Local bangs (do **not** hit the LLM):
 
@@ -165,12 +165,12 @@ Press **`+ channel`** (or `ctrl+shift+n`).
 | Visibility | **Private only** | **Public** or **Private** |
 | Purpose | **`!` commands** or **`/` AI** | Same |
 
-Sidebar: `#` public · `◆` private · trailing `!` or `/` = purpose.
+Sidebar: `#` public, `◆` private, trailing `!` or `/` = purpose.
 
 | Mode | What works |
 |------|------------|
-| **`!` commands** | Board/ops bangs · human chat in public rooms |
-| **`/` AI skills** | Full skill set (public AI rooms → skill traffic is **whisper-only**) |
+| **`!` commands** | Board/ops bangs, human chat in public rooms |
+| **`/` AI skills** | Full skill set (public AI rooms -> skill traffic is **whisper-only**) |
 
 Seeded defaults: **◆ my room** = private AI (`/`). **#general** = team ops (`!`).
 
@@ -178,10 +178,10 @@ Seeded defaults: **◆ my room** = private AI (`/`). **#general** = team ops (`!
 
 ## Mentions
 
-1. Someone `@you` in a chat → soft ping sound (poll ~1.5s).
+1. Someone `@you` in a chat -> soft ping sound (poll ~1.5s).
 2. **`@N`** appears in the tabs row (next to **Tour**).
-3. Click **`@N`** (or `ctrl+n`) → list of **who · time · chat · snippet**.
-4. Select a row → opens that chat and **highlights** the message.
+3. Click **`@N`** (or `ctrl+n`) -> list of who / time / chat / snippet.
+4. Select a row -> opens that chat and **highlights** the message.
 
 ---
 
@@ -197,8 +197,8 @@ Seeded defaults: **◆ my room** = private AI (`/`). **#general** = team ops (`!
 ### Structured coding (proves Codex / Claude)
 
 1. Create / select a card on **Board**.
-2. Press **`a`** → pick **`codex`** · **`claude_code`** · **`llm`**.
-3. Card moves to **agent_backlog** → workspace under `data/workspaces/obj-*` → optional PR on [AIOPlayground](https://github.com/YoussiefKhalifa2003/AIOPlayground).
+2. Press **`a`** -> pick **`codex`**, **`claude_code`**, or **`llm`**.
+3. Card moves to **agent_backlog** -> workspace under `data/workspaces/obj-*` -> optional PR on [AIOPlayground](https://github.com/YoussiefKhalifa2003/AIOPlayground).
 
 Chat **`/ask`** etc. stay on OpenRouter / Gemini. Keep `CODING_BACKEND=llm` so chat `/code` does not unexpectedly spawn Codex.
 
@@ -218,7 +218,7 @@ Full CLI apps (not embedded in chat):
 !codex
 ```
 
-Requires the CLIs on PATH (`npm i -g @anthropic-ai/claude-code` · `@openai/codex`). Claude needs login or `ANTHROPIC_API_KEY`; Codex needs login or `CODEX_API_KEY`.
+Requires the CLIs on PATH (`npm i -g @anthropic-ai/claude-code`, `@openai/codex`). Claude needs login or `ANTHROPIC_API_KEY`; Codex needs login or `CODEX_API_KEY`.
 
 ---
 
@@ -231,13 +231,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 cloudflared tunnel --url http://127.0.0.1:8000
 # .env: INVITE_APP_URL=https://xxxx.trycloudflare.com
 # keep API_BASE_URL=http://127.0.0.1:8000 on the owner machine
-# restart uvicorn · remint !invite (discard old 10.x links)
+# restart uvicorn, remint !invite (discard old 10.x links)
 ```
 
 New teammate:
 
-1. Open the join link → create account → **Done** page shows **Server**.
-2. Run `aio` → Sign in → paste **Server** + email/password.
+1. Open the join link -> create account -> **Done** page shows **Server**.
+2. Run `aio` -> Sign in -> paste **Server** + email/password.
 3. Workspace loads (`#general` + private room).
 
 ---
@@ -246,8 +246,8 @@ New teammate:
 
 ### Team chat
 - Public + private rooms (create flow above)
-- @mentions · `@N` panel · sound
-- Attachments → agent context
+- @mentions, `@N` panel, sound
+- Attachments -> agent context
 - Presence + typing
 - Optional mic (Whisper) / TTS when Groq is set
 
@@ -257,19 +257,19 @@ New teammate:
 |-------|---------|
 | `/ask` | Q&A (+ attachments) |
 | `/deepresearch` | Sourced briefing (Tavily) |
-| `/code` · `/write` · `/review` · `/checklist` | Build, draft, check, break down |
+| `/code`, `/write`, `/review`, `/checklist` | Build, draft, check, break down |
 | `/status <name>` | AI catch-up (owner) |
 
 ### Board & GitHub
-- Columns through `agent_backlog` → `in_review` → `done`
-- Per-card runners: **Codex** · **Claude Code** · **llm**
-- Repo / PR / branch badges · owner **merge**
+- Columns through `agent_backlog` -> `in_review` -> `done`
+- Per-card runners: **Codex**, **Claude Code**, **llm**
+- Repo / PR / branch badges, owner **merge**
 - `aio board-wipe --yes` for clean demos
 
 ### Onboarding & ops
 - Spotlight **Tour** (member path + owner extras)
-- Invite links · Outlook / Teams copy for off-LAN
-- Scriptable CLI · legacy web at `/app`
+- Invite links, Outlook / Teams copy for off-LAN
+- Scriptable CLI, legacy web at `/app`
 
 ### Commands (`!`)
 
@@ -277,10 +277,10 @@ Type `!help`. In public channels, command traffic is **whisper-only**.
 
 | Area | Examples |
 |------|----------|
-| Work | `!add` · `!list` · `!set` · `!done` · `!assign` |
-| Links | `!link <id> branch` · `!link <id> pr` |
-| Issues | `!issue` · `!issues` · `!resolve` |
-| Room | `!invite` · `!clear` · `!claude` · `!codex` · `!help` |
+| Work | `!add`, `!list`, `!set`, `!done`, `!assign` |
+| Links | `!link <id> branch`, `!link <id> pr` |
+| Issues | `!issue`, `!issues`, `!resolve` |
+| Room | `!invite`, `!clear`, `!claude`, `!codex`, `!help` |
 
 ---
 
@@ -289,11 +289,11 @@ Type `!help`. In public channels, command traffic is **whisper-only**.
 | Command | Purpose |
 |---------|---------|
 | `aio` | Open the app (Sign in first) |
-| `aio login` · `logout` · `whoami` | Credentials |
+| `aio login`, `logout`, `whoami` | Credentials |
 | `aio doctor` | Preflight (API, invite URL, CLIs, keys) |
-| `aio board` · `aio card` · `aio set` · `aio merge` | Board loop |
+| `aio board`, `aio card`, `aio set`, `aio merge` | Board loop |
 | `aio board-wipe --yes` | Owner: wipe all cards + workspaces |
-| `aio chat` · `aio say` | Script chat |
+| `aio chat`, `aio say` | Script chat |
 | `aio seed` | Demo tenant + users |
 
 ```bash
@@ -306,7 +306,7 @@ Type `!help`. In public channels, command traffic is **whisper-only**.
 
 ## Configuration
 
-Copy `.env.example` → `.env`.
+Copy `.env.example` -> `.env`.
 
 | Variable | Purpose |
 |----------|---------|
@@ -318,7 +318,7 @@ Copy `.env.example` → `.env`.
 | `CODING_BACKEND` | Keep `llm` for chat; use board runners for CLIs |
 | `CODEX_API_KEY` / `ANTHROPIC_API_KEY` | Headless board runners (optional if CLI already logged in) |
 | `DATABASE_URL` | Default `sqlite:///./aio.db` |
-| `API_BASE_URL` | Owner local CLI → API (`http://127.0.0.1:8000`) |
+| `API_BASE_URL` | Owner local CLI -> API (`http://127.0.0.1:8000`) |
 | `INVITE_APP_URL` | Public join-link origin (tunnel HTTPS for off-LAN) |
 
 ---
@@ -329,17 +329,17 @@ Password: **`demo`**
 
 | Email | Role |
 |-------|------|
-| `a@local.test` | **Owner** - full board, People, Dash, Live, merge, wipe |
-| `omar@local.test` | **Member** - own cards, Chat / Board / Agents |
-| `sara@local.test` | **Member** - same |
+| `a@local.test` | **Owner**: full board, People, Dash, Live, merge, wipe |
+| `omar@local.test` | **Member**: own cards, Chat / Board / Agents |
+| `sara@local.test` | **Member**: same |
 
 ### Two-minute demo
 
 ```bash
 ./aio
-# Tour (F1) - member vs owner paths
-# @ping between two logins → @N next to Tour → jump
-# Board: card → a → codex (or claude_code)
+# Tour (F1): member vs owner paths
+# @ping between two logins -> @N next to Tour -> jump
+# Board: card -> a -> codex (or claude_code)
 # Chat: !claude / !codex open real CLIs
 # Owner: !invite after setting INVITE_APP_URL tunnel
 ```
@@ -368,10 +368,10 @@ python scripts/tui_pty_check.py
 | Layer | Choice |
 |-------|--------|
 | API | FastAPI + Uvicorn |
-| Data | SQLite (WAL) · SQLAlchemy · Postgres via `DATABASE_URL` |
+| Data | SQLite (WAL), SQLAlchemy, Postgres via `DATABASE_URL` |
 | Terminal | Textual + Typer + Rich |
 | Web | Vanilla JS `/app` |
-| Agents | Gemini · OpenRouter · **Codex** / **Claude Code** CLIs |
+| Agents | Gemini, OpenRouter, **Codex** / **Claude Code** CLIs |
 | Research | Tavily |
 | Presence | HTTP poll |
 
@@ -379,16 +379,16 @@ python scripts/tui_pty_check.py
 
 ## Related repo
 
-Agent PRs land on **[YoussiefKhalifa2003/AIOPlayground](https://github.com/YoussiefKhalifa2003/AIOPlayground)** - a sandbox repo (keep `README.md`; demo branches/PRs are disposable). Set `GITHUB_REPO=YoussiefKhalifa2003/AIOPlayground` in `.env`.
+Agent PRs land on **[YoussiefKhalifa2003/AIOPlayground](https://github.com/YoussiefKhalifa2003/AIOPlayground)**: a sandbox repo (keep `README.md`; demo branches/PRs are disposable). Set `GITHUB_REPO=YoussiefKhalifa2003/AIOPlayground` in `.env`.
 
 ---
 
 ## Non-goals (v1)
 
 - Embedding interactive Claude/Codex TUIs inside chat (use `!claude` / `!codex` windows instead)
-- Lead reading another user’s private prompts  
-- Public SaaS · mobile · WebSockets-first transport  
-- Auto-merge from chat · per-user GitHub OAuth  
+- Lead reading another user's private prompts  
+- Public SaaS, mobile, WebSockets-first transport  
+- Auto-merge from chat, per-user GitHub OAuth  
 
 ---
 
@@ -399,5 +399,5 @@ Agent PRs land on **[YoussiefKhalifa2003/AIOPlayground](https://github.com/Youss
 ---
 
 <p align="center">
-  <sub>AIO - public for the team · private for you · ! for work · / for agents · a for Codex & Claude.</sub>
+  <sub>AIO: public for the team / private for you / ! for work / / for agents / a for Codex and Claude.</sub>
 </p>

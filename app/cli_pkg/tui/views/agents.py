@@ -67,7 +67,7 @@ class AgentsView(VerticalScroll):
             for name in ("gemini", "openrouter", "opencode", "github")
         ]
         self.info.update(
-            " · ".join(providers) + f"  ·  [dim]backend {data.get('backend', '?')}[/dim]"
+            " | ".join(providers) + f"  |  [dim]backend {data.get('backend', '?')}[/dim]"
         )
 
         options = [(str(m.get("label") or m.get("id")), str(m["id"])) for m in data.get("models", [])]

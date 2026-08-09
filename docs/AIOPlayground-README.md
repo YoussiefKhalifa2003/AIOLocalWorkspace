@@ -35,7 +35,7 @@ Then in AIO:
 
 1. `aio doctor` - confirm GitHub token + repo  
 2. Board: create a card → **`a`** → **codex** or **claude_code**  
-3. Watch **agent_backlog** → **in_review** · open the PR badge  
+3. Watch **agent_backlog** → **in_review** | open the PR badge  
 4. Owner: **`m`** (or `aio merge <id> --yes`) when mergeable  
 
 Interactive CLIs (separate from PRs): in AIO chat type `!claude` or `!codex` to open those apps in a new terminal.

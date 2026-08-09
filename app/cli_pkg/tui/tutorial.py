@@ -27,7 +27,7 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="tabs",
         title="Tabs",
-        body="Chat · Board · Agents. Owners also get People · Dash · Live. @N · Tour · Log out sit on the right.",
+        body="Chat | Board | Agents. Owners also get People | Dash | Live. @N | Tour | Log out sit on the right.",
         tab="chat",
         spotlight="#tabs-row",
     ),
@@ -48,7 +48,7 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="type",
         title="Type here",
-        body="/ AI skills · ! commands · @ ping. Try !claude or !codex to open those apps.",
+        body="/ AI skills | ! commands | @ ping. Try !claude or !codex to open those apps.",
         tab="chat",
         spotlight="#composer-row",
     ),
@@ -68,8 +68,8 @@ MEMBER_STEPS: list[TourStep] = [
     ),
     TourStep(
         id="edit",
-        title="Edit · delete",
-        body="Hover your own line for edit · delete. Edits keep later messages.",
+        title="Edit | delete",
+        body="Hover your own line for edit | delete. Edits keep later messages.",
         tab="chat",
         spotlight="#transcript",
     ),
@@ -381,7 +381,7 @@ class TutorialCoach(Vertical):
         step = self._steps[self._index]
         n = len(self._steps)
         self._head.update(
-            f"Tour  {self._index + 1}/{n}  ·  {escape(step.title)}"
+            f"Tour  {self._index + 1}/{n}  |  {escape(step.title)}"
         )
         self._body.update(escape(step.body))
         last = self._index >= len(self._steps) - 1
@@ -405,7 +405,7 @@ class TutorialCoach(Vertical):
             self._hint.add_class("-show")
         elif step.id == "type":
             self._hint.update(
-                "[b white]→[/] [b]/[/] AI · [b]![/] commands · [b]!claude[/] / [b]!codex[/]"
+                "[b white]→[/] [b]/[/] AI | [b]![/] commands | [b]!claude[/] / [b]!codex[/]"
             )
             self._hint.add_class("-show")
         elif step.id == "attach":
@@ -418,7 +418,7 @@ class TutorialCoach(Vertical):
             self._hint.update("[b white]→[/] hover your own lines for [b]edit[/] / [b]delete[/]")
             self._hint.add_class("-show")
         elif step.id == "board":
-            self._hint.update("[b white]→[/] select a card · press [b]a[/] · pick a runner")
+            self._hint.update("[b white]→[/] select a card | press [b]a[/] | pick a runner")
             self._hint.add_class("-show")
         elif step.id == "owner-board":
             self._hint.update("[b white]→[/] [b]m[/] merges when a card says mergeable")

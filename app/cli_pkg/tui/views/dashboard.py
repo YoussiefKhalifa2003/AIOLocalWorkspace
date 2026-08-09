@@ -171,7 +171,7 @@ class DashboardView(VerticalScroll):
                 continue
             title = str(t.get("title") or "").strip() or f"task #{t['id']}"
             status = str(t.get("status") or "").replace("_", " ")
-            label = title if not status else f"{title}  ·  {status}"
+            label = title if not status else f"{title}  |  {status}"
             if len(label) > 56:
                 label = label[:55] + "…"
             obj_opts.append((label, str(t["id"])))
@@ -193,7 +193,7 @@ class DashboardView(VerticalScroll):
             email = str(m.get("email") or "").strip()
             # Prefer display name; fall back to email local-part, never bare id.
             if name and email and name.lower() != email.lower():
-                label = f"{name}  ·  {email}"
+                label = f"{name}  |  {email}"
             else:
                 label = name or email or f"user {uid}"
             if len(label) > 48:

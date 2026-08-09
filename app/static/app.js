@@ -378,7 +378,7 @@
       const backlogCards =
         ((board.columns || []).find((c) => c.id === "agent_backlog") || {}).cards || [];
       const workingNote = backlogCards.length
-        ? ` · agent working on ${backlogCards.length} card${backlogCards.length === 1 ? "" : "s"}`
+        ? ` | agent working on ${backlogCards.length} card${backlogCards.length === 1 ? "" : "s"}`
         : "";
       $("boardFooter").textContent = `${jobsToday}${workingNote}`;
 
@@ -1427,7 +1427,7 @@
       `<div class="meta"><span class="who"></span>${whisperTag}` +
       `<span class="msg-time"></span>` +
       `<span class="msg-edited"></span>` +
-      `<span class="msg-id"> · #${m.id}</span></div>` +
+      `<span class="msg-id"> | #${m.id}</span></div>` +
       `<div class="body"></div>`;
 
     const whoEl = div.querySelector(".who");
@@ -1435,12 +1435,12 @@
     whoEl.style.color = color;
     const timeEl = div.querySelector(".msg-time");
     if (timeText) {
-      timeEl.textContent = ` · ${timeText}`;
+      timeEl.textContent = ` | ${timeText}`;
       timeEl.title = when.toLocaleString("en-GB", { timeZone: CHAT_TZ });
     }
     const editedEl = div.querySelector(".msg-edited");
     if (edited) {
-      editedEl.textContent = " · edited";
+      editedEl.textContent = " | edited";
       editedEl.title = parseMsgDate(m.edited_at)
         ? parseMsgDate(m.edited_at).toLocaleString("en-GB", { timeZone: CHAT_TZ })
         : "edited";
@@ -2534,7 +2534,7 @@
     });
     const foot = document.createElement("li");
     foot.className = "picker-footer";
-    foot.textContent = "↑↓ navigate · Tab/Enter select · Esc close";
+    foot.textContent = "↑↓ navigate | Tab/Enter select | Esc close";
     box.appendChild(foot);
     box.classList.remove("hidden");
   }
@@ -2580,7 +2580,7 @@
       .slice(0, 12)
       .map((c) => ({
         label: `#${c.id}`,
-        blurb: `${c.status || ""} · ${c.title || ""}`.trim(),
+        blurb: `${c.status || ""} | ${c.title || ""}`.trim(),
         insert: `${c.id} `,
       }));
   }

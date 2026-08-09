@@ -123,7 +123,7 @@ class LiveView(VerticalScroll):
     def compose(self) -> ComposeResult:
         yield Label("LIVE", classes="view-head")
         yield Static(
-            "Real-time gauges and charts · polls every 2s · owner only",
+            "Real-time gauges and charts | polls every 2s | owner only",
             classes="view-sub",
         )
         yield self.note
@@ -256,7 +256,7 @@ class LiveView(VerticalScroll):
                 (
                     str(m.get("model") or "-"),
                     float(ok + fail),
-                    f"ok {ok} · fail {fail}",
+                    f"ok {ok} | fail {fail}",
                 )
             )
         self.model_bars.set_rows(model_rows)

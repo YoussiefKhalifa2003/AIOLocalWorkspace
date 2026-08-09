@@ -6,7 +6,7 @@
 # --- THE APP: this is the main thing ---
 ./aio                           # opens the whole workspace in your terminal
                                 # (first run asks you to sign in)
-# tabs: 1 Chat  2 Board  3 Agents  4 Dashboard   ·   ? help   ctrl+q quit
+# tabs: 1 Chat  2 Board  3 Agents  4 Dashboard   |   ? help   ctrl+q quit
 
 # --- CLI: sign in and look around ---
 ./aio login --email a@local.test --password demo
@@ -34,15 +34,15 @@
 ./aio say 1 "standup in 5"
 
 # App keys (no F-keys)
-#   tabs      c Chat · b Board · g Agents · p People · d Dashboard · v Live
+#   tabs      c Chat | b Board | g Agents | p People | d Dashboard | v Live
 #             while typing: ctrl+t/b/g/e/d/v   or press esc then the letter
-#   anywhere  ? help · q quit · a agent (on Board)
-#             @N button (tabs row) = mentions · Tour · Log out
+#   anywhere  ? help | q quit | a agent (on Board)
+#             @N button (tabs row) = mentions | Tour | Log out
 #   chat      type / or ! or @ → dropdown menu (up/down, enter/tab to pick)
 #             !claude / !codex open interactive CLIs in a new terminal
-#   board     j/k card · h/l column · n new · s status · a agent (pick runner) · m merge
+#   board     j/k card | h/l column | n new | s status | a agent (pick runner) | m merge
 #             members only see their own/assigned cards; owners see all
-#   people    (owner) Invite · Make owner · Make member · Remove
+#   people    (owner) Invite | Make owner | Make member | Remove
 #   live      (owner) gauges + sparklines + WIP bars, auto-refresh 2s
 
 # #general - chat + @people + !commands (whispers)
