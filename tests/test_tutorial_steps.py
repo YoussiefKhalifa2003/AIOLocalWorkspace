@@ -33,14 +33,19 @@ def test_tour_steps_have_spotlights():
         assert s.title
         assert s.body
         assert len(s.body) <= 120
-        assert s.spotlight  # every planned step has a target
+        # Mentions step explains @N next to Tour — no spotlight on purpose
+        if s.id == "pings":
+            assert s.spotlight is None
+            assert "tour" in s.body.lower()
+            continue
+        assert s.spotlight  # every other planned step has a target
     by_id = {s.id: s for s in MEMBER_STEPS}
     assert by_id["tabs"].spotlight == "#tabs-row"
     assert by_id["type"].spotlight == "#composer-row"
     assert by_id["attach"].spotlight == "#chat-attach"
     assert by_id["voice"].spotlight == "#chat-mic"
     assert by_id["edit"].spotlight == "#transcript"
-    assert by_id["pings"].spotlight == "#mentions-btn"
+    assert by_id["pings"].spotlight is None
     assert by_id["board"].spotlight == "#columns"
     assert by_id["agents"].spotlight == "#agents"
     assert by_id["logout"].spotlight == "#logout-btn"
@@ -69,14 +74,12 @@ def test_tour_spotlight_targets_exist_in_app():
             await pilot.pause()
             await pilot.pause()
             for step in build_tour_steps(is_owner=True):
-                assert step.spotlight
+                if not step.spotlight:
+                    continue
                 # Owner-only tabs must be reachable before query
                 if step.tab:
                     app.show_tab(step.tab)
                     await pilot.pause()
-                if step.spotlight == "#mentions-btn":
-                    app.mentions_btn.display = True
-                    app.mentions_btn.label = "@1"
                 node = app.query_one(step.spotlight)
                 assert node is not None, step.spotlight
 

@@ -76,9 +76,9 @@ MEMBER_STEPS: list[TourStep] = [
     TourStep(
         id="pings",
         title="Mentions",
-        body="When someone @pings you: sound + @N up here. Click it → jump to the message.",
+        body="When someone @pings you: a sound plays and @N appears next to Tour. Click it to jump.",
         tab="chat",
-        spotlight="#mentions-btn",
+        spotlight=None,
     ),
     TourStep(
         id="board",
@@ -400,7 +400,7 @@ class TutorialCoach(Vertical):
         # Extra key hint for steps that need a shortcut callout
         if step.id == "pings":
             self._hint.update(
-                "[b white]→[/] glowing [b]@N[/] · click to open mentions"
+                "[b white]→[/] [b]@N[/] shows next to [b]Tour[/] when you have unread pings"
             )
             self._hint.add_class("-show")
         elif step.id == "type":
