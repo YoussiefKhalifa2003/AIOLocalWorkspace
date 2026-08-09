@@ -546,7 +546,9 @@ def try_nl_command(db: Session, auth: AuthContext, chat: Chat, text: str) -> Int
 
         return IntentResult(
             True,
-            board_text_summary(db, tenant_id=auth.tenant_id, project_id=project_id),
+            board_text_summary(
+                db, tenant_id=auth.tenant_id, project_id=project_id, auth=auth
+            ),
         )
 
     m = re.match(r"assign objective\s+(\d+)\s+to\s+(\S+)$", lower)

@@ -67,7 +67,7 @@ def _join_page(*, token: str, error: str = "") -> HTMLResponse:
 </style></head>
 <body>
   <h1>Join AIO</h1>
-  <p class="sub">Create your account once. After signup you'll use the CLI (<code>aio login</code> then <code>./aio</code>). Your name is how teammates will @ you.</p>
+  <p class="sub">Create your account once. After signup, run <code>aio</code> in a terminal and sign in. If you joined from off the company network, paste the <b>Server</b> URL from the Done page into Sign in. Your name is how teammates will @ you.</p>
   {err}
   <form method="post" action="/join/{token}/register" id="reg">
     <label>Name (required - your @handle)</label>
@@ -80,7 +80,7 @@ def _join_page(*, token: str, error: str = "") -> HTMLResponse:
     <input name="password2" type="password" required minlength="4" autocomplete="new-password" />
     <button type="submit">Create account</button>
   </form>
-  <p class="sub" style="margin-top:1.25rem">Already have an account? Use the CLI: <code>aio login</code></p>
+  <p class="sub" style="margin-top:1.25rem">Already have an account? Run <code>aio</code> in a terminal and sign in.</p>
   <script>
   document.getElementById('reg').addEventListener('submit', function(e) {{
     var p = this.password.value, p2 = this.password2.value;
@@ -99,7 +99,7 @@ def _join_success(result: dict) -> HTMLResponse:
     base = invite_public_base_url()
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Done — AIO</title>
+<title>Done - AIO</title>
 <style>
   body{{font-family:system-ui,sans-serif;max-width:28rem;margin:3rem auto;padding:0 1rem;line-height:1.5;color:#111;background:#f7f7f5}}
   h1{{font-size:1.35rem;color:#0f7b3a;margin:0 0 .5rem}}
@@ -110,11 +110,15 @@ def _join_success(result: dict) -> HTMLResponse:
 <body>
   <h1>Done</h1>
   <p class="sub">Account created for <b>{_escape(name)}</b> ({_escape(email)}).</p>
-  <p class="sub">AIO is CLI-first. On a machine with the project (and network access to the server), run:</p>
-  <pre>aio login --email {_escape(email)}
-./aio</pre>
-  <p class="sub">Server: <code>{_escape(base)}</code></p>
-  <p class="sub">If login asks for a password, use the one you just set. You only needed this signup link once.</p>
+  <p class="sub">AIO is CLI-first. On a machine with the project, run:</p>
+  <pre>aio</pre>
+  <p class="sub">On the Sign in screen:</p>
+  <ul class="sub">
+    <li><b>Server</b> (paste exactly): <code>{_escape(base)}</code></li>
+    <li><b>Email</b>: <code>{_escape(email)}</code></li>
+    <li><b>Password</b>: the one you just set</li>
+  </ul>
+  <p class="sub">You only needed this signup link once. Remint a new invite if the Server URL changes (e.g. a new tunnel).</p>
 </body></html>"""
     return HTMLResponse(html)
 

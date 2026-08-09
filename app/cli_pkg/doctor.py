@@ -29,17 +29,21 @@ def _binary_check(name: str, binary: str, version_args: list[str], hint: str) ->
     if not path:
         return Check(name, False, f"{binary} not on PATH", hint)
     try:
+        # Use resolved path so Windows npm .cmd shims are executable.
         proc = subprocess.run(
-            [binary, *version_args],
+            [path, *version_args],
             capture_output=True,
             text=True,
             timeout=20,
             check=False,
+            shell=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return Check(name, False, f"{binary} failed to run ({exc})", hint)
     out = (proc.stdout or proc.stderr or "").strip().splitlines()
     version = out[0] if out else "installed"
+    if proc.returncode != 0 and not version:
+        return Check(name, False, f"{binary} exited {proc.returncode}", hint)
     return Check(name, True, version[:80])
 
 
@@ -66,7 +70,7 @@ def check_codex() -> Check:
         "Codex CLI",
         settings.codex_bin,
         ["--version"],
-        "npm i -g @openai/codex (optional; falls back to LLM)",
+        "npm i -g @openai/codex (optional; board runner)",
     )
 
 
@@ -76,7 +80,7 @@ def check_claude() -> Check:
         "Claude Code CLI",
         settings.claude_bin,
         ["--version"],
-        "npm i -g @anthropic-ai/claude-code (optional; falls back to LLM)",
+        "npm i -g @anthropic-ai/claude-code (optional; board runner)",
     )
 
 
@@ -124,9 +128,19 @@ def check_coding_backend() -> Check:
             f"use one of: {', '.join(sorted(valid))}",
         )
     if name == "codex" and not shutil.which(settings.codex_bin):
-        return Check("CODING_BACKEND", False, "codex selected but binary missing", "falls back to LLM")
+        return Check(
+            "CODING_BACKEND",
+            False,
+            "codex selected but binary missing",
+            "install Codex or keep CODING_BACKEND=llm (use board runner for Codex)",
+        )
     if name == "claude_code" and not shutil.which(settings.claude_bin):
-        return Check("CODING_BACKEND", False, "claude_code selected but binary missing", "falls back to LLM")
+        return Check(
+            "CODING_BACKEND",
+            False,
+            "claude_code selected but binary missing",
+            "install Claude Code or keep CODING_BACKEND=llm (use board runner for Claude)",
+        )
     return Check("CODING_BACKEND", True, name)
 
 
@@ -157,15 +171,94 @@ def check_outlook_invite() -> Check:
     return Check("Outlook invite", True, f"ready · domain={domain} · {storage}")
 
 
+def check_invite_app_url() -> Check:
+    """Warn when invite links cannot work off-LAN (empty or private host)."""
+    from urllib.parse import urlparse
+
+    from app.services.workspace_invite import invite_public_base_url
+
+    settings = get_settings()
+    configured = (settings.invite_app_url or "").strip()
+    base = invite_public_base_url()
+    host = (urlparse(base).hostname or "").lower()
+
+    if not configured:
+        return Check(
+            "INVITE_APP_URL",
+            False,
+            f"not set (using {base})",
+            "set INVITE_APP_URL to a public tunnel HTTPS origin for off-LAN signup",
+        )
+
+    private = (
+        host in {"localhost", "127.0.0.1", "::1"}
+        or host.startswith("10.")
+        or host.startswith("192.168.")
+        or host.startswith("172.")
+    )
+    if private:
+        return Check(
+            "INVITE_APP_URL",
+            False,
+            f"{base} looks LAN/local-only",
+            "for off-LAN demos use cloudflared tunnel --url http://127.0.0.1:8000 then remint !invite",
+        )
+
+    try:
+        with httpx.Client(timeout=5.0, follow_redirects=True) as client:
+            r = client.get(f"{base.rstrip('/')}/health")
+        if r.status_code >= 400:
+            return Check(
+                "INVITE_APP_URL",
+                False,
+                f"{base} returned {r.status_code}",
+                "start uvicorn + tunnel, then remint invite",
+            )
+        return Check("INVITE_APP_URL", True, base)
+    except httpx.HTTPError as exc:
+        return Check(
+            "INVITE_APP_URL",
+            False,
+            f"{base} unreachable ({exc.__class__.__name__})",
+            "start uvicorn + cloudflared; remint !invite after URL changes",
+        )
+
+
+def check_coding_keys() -> Check:
+    """Warn when CLI runners are installed but API keys are missing."""
+    settings = get_settings()
+    missing: list[str] = []
+    if shutil.which(settings.codex_bin) and not (settings.codex_api_key or "").strip():
+        missing.append("CODEX_API_KEY")
+    if shutil.which(settings.claude_bin) and not (settings.anthropic_api_key or "").strip():
+        missing.append("ANTHROPIC_API_KEY")
+    if not missing:
+        if not shutil.which(settings.codex_bin) and not shutil.which(settings.claude_bin):
+            return Check(
+                "coding keys",
+                True,
+                "no Codex/Claude CLIs on PATH (optional)",
+            )
+        return Check("coding keys", True, "set for installed CLIs")
+    return Check(
+        "coding keys",
+        False,
+        f"missing {', '.join(missing)}",
+        "board runners will fail loudly until keys are set in .env",
+    )
+
+
 def run_checks() -> list[Check]:
     return [
         check_api(),
+        check_invite_app_url(),
         check_git(),
         check_work_root(),
         check_github_token(),
         check_tavily(),
         check_codex(),
         check_claude(),
+        check_coding_keys(),
         check_coding_backend(),
         check_outlook_invite(),
     ]

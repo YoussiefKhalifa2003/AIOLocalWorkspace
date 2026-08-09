@@ -24,8 +24,15 @@ def test_play_ping_sound_calls_windows(monkeypatch):
 
     monkeypatch.setattr(ping_sound.sys, "platform", "win32")
     monkeypatch.setattr(ping_sound, "_ping_windows", win)
-    ping_sound.play_ping_sound()
+    # play_ping_sound starts a thread — run the sync path directly for the unit test
+    ping_sound._play_ping_sound_sync()
     assert seen["n"] == 1
+
+
+def test_soft_ping_wav_bytes_nonempty():
+    data = ping_sound._soft_ping_wav_bytes()
+    assert data[:4] == b"RIFF"
+    assert len(data) > 100
 
 
 def test_unread_rise_flash_only_on_increase():

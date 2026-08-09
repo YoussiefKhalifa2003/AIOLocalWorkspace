@@ -235,6 +235,21 @@ Header { background: $panel; }
     background: transparent;
     color: $text-muted;
 }
+#mentions-btn {
+    width: auto;
+    min-width: 4;
+    max-height: 1;
+    height: 1;
+    padding: 0 1;
+    margin: 0 1 0 0;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+}
+#mentions-btn.has-unread {
+    color: $warning;
+    text-style: bold;
+}
 #logout-btn {
     width: auto;
     min-width: 8;
@@ -247,6 +262,7 @@ Header { background: $panel; }
     color: $text-muted;
 }
 #tour-btn:hover,
+#mentions-btn:hover,
 #logout-btn:hover {
     color: $text;
     text-style: underline;
@@ -555,52 +571,82 @@ ModalScreen { align: center middle; }
 """
 
 
+def _normalize_server_url(raw: str) -> str:
+    """Strip whitespace/trailing slash; require http(s) scheme."""
+    url = (raw or "").strip().rstrip("/")
+    if not url:
+        return ""
+    if "://" not in url:
+        url = f"http://{url}"
+    return url.rstrip("/")
+
+
 class LoginScreen(Screen[Credentials]):
-    """Sign in without leaving the app."""
+    """Sign in gate shown every time the terminal app starts."""
 
     BINDINGS = [("escape", "cancel", "cancel")]
 
     def __init__(self, base_url: str, email: str = "") -> None:
         super().__init__()
-        self.base_url = base_url
+        self.base_url = _normalize_server_url(base_url) or "http://127.0.0.1:8000"
         self._email = email
 
     def compose(self) -> ComposeResult:
         with Vertical(id="login-box"):
-            yield Label("AIO", id="confirm-title")
-            yield Static(f"[dim]{escape(self.base_url)}[/dim]", markup=True)
+            yield Label("Sign in to AIO", id="confirm-title")
+            yield Static(
+                "[dim]New here? Open your invite link first, create an account, "
+                "then sign in here. Paste Server from the Done page if you joined "
+                "off the company network.[/dim]",
+                markup=True,
+            )
+            yield Input(
+                value=self.base_url,
+                placeholder="server (e.g. http://127.0.0.1:8000)",
+                id="login-server",
+            )
             yield Input(value=self._email, placeholder="email", id="login-email")
             yield Input(placeholder="password", password=True, id="login-password")
             yield Button("Sign in", variant="primary", id="login-go")
             yield Static("", id="login-err", markup=True)
 
     def on_mount(self) -> None:
-        self.query_one("#login-email", Input).focus()
+        email = self.query_one("#login-email", Input)
+        if email.value.strip():
+            self.query_one("#login-password", Input).focus()
+        else:
+            email.focus()
 
     def on_input_submitted(self) -> None:
         self._attempt()
 
-    def on_button_pressed(self) -> None:
-        self._attempt()
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "login-go":
+            self._attempt()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
     def _attempt(self) -> None:
+        server = _normalize_server_url(self.query_one("#login-server", Input).value)
         email = self.query_one("#login-email", Input).value.strip()
         password = self.query_one("#login-password", Input).value
+        if not server:
+            self.query_one("#login-err", Static).update("[red]server URL required[/red]")
+            return
         if not email or not password:
             self.query_one("#login-err", Static).update("[red]email and password required[/red]")
             return
+        self.base_url = server
         self.query_one("#login-err", Static).update("[dim]signing in…[/dim]")
-        self._login_worker(email, password)
+        self._login_worker(server, email, password)
 
     @work(thread=True)
-    def _login_worker(self, email: str, password: str) -> None:
+    def _login_worker(self, server: str, email: str, password: str) -> None:
         try:
-            data = login(email, password, self.base_url)
+            data = login(email, password, server)
             creds = Credentials(
-                api_base_url=self.base_url,
+                api_base_url=server,
                 email=str(data.get("email") or email),
                 api_key=str(data.get("api_key") or ""),
                 user_id=int(data.get("user_id") or 0),
@@ -623,24 +669,22 @@ class AioApp(App[None]):
 
     BINDINGS = [
         ("ctrl+q", "quit", "quit"),
-        ("ctrl+r", "refresh_all", "refresh"),
-        ("ctrl+w", "help", "help"),
-        ("ctrl+n", "mentions", "mentions"),
-        ("ctrl+f", "attach_file", "attach"),
-        ("f1", "start_tour", "tour"),
-        ("ctrl+shift+l", "logout", "log out"),
-        # Letters: the fast way around when you are not typing a message.
-        ("c", "tab_chat", "c chat"),
-        ("b", "tab_board", "b board"),
-        ("g", "tab_agents", "g agents"),
-        ("p", "tab_people", "p people"),
-        ("d", "tab_dashboard", "d dash"),
-        ("v", "tab_live", "v live"),
-        ("question_mark", "help", "? help"),
+        ("ctrl+r", "refresh_all", ""),
+        ("ctrl+w", "help", ""),
+        ("ctrl+n", "mentions", ""),
+        ("ctrl+f", "attach_file", ""),
+        ("f1", "start_tour", ""),
+        # Letters: tabs are on-screen; keep keys but hide from Footer.
+        ("c", "tab_chat", ""),
+        ("b", "tab_board", ""),
+        ("g", "tab_agents", ""),
+        ("p", "tab_people", ""),
+        ("d", "tab_dashboard", ""),
+        ("v", "tab_live", ""),
+        ("question_mark", "help", "help"),
         ("r", "refresh_all", ""),
         ("q", "quit", ""),
-        # Mentions: ctrl+n only — bare @ must stay free for the chat picker.
-        # Same tabs while typing, so you never have to leave the message box.
+        # Mentions: ctrl+n — bare @ must stay free for the chat picker.
         ("ctrl+t", "tab_chat", ""),
         ("ctrl+b", "tab_board", ""),
         ("ctrl+g", "tab_agents", ""),
@@ -653,14 +697,14 @@ class AioApp(App[None]):
         ("4", "tab_people", ""),
         ("5", "tab_dashboard", ""),
         ("6", "tab_live", ""),
-        # board
+        # board — only `a` is non-obvious enough for the Footer
         ("j", "board_down", ""),
         ("k", "board_up", ""),
         ("h", "board_left", ""),
         ("l", "board_right", ""),
         ("n", "board_add", ""),
         ("s", "board_status", ""),
-        ("a", "board_agent", ""),
+        ("a", "board_agent", "a agent"),
         ("m", "board_merge", ""),
         ("o", "board_open_pr", ""),
         ("g", "board_open_repo", ""),
@@ -691,6 +735,7 @@ class AioApp(App[None]):
         self.live_view = LiveView(client)
         self.tour_coach = TutorialCoach()
         self.tour_btn = Button("Tour", id="tour-btn", compact=True)
+        self.mentions_btn = Button("@", id="mentions-btn", compact=True)
         self.logout_btn = Button("Log out", id="logout-btn", compact=True)
         self.status_line = Static("", id="status-line", markup=True)
         self.switcher = ContentSwitcher(initial="chat", id="body")
@@ -699,6 +744,7 @@ class AioApp(App[None]):
         yield Header(show_clock=True)
         with Horizontal(id="tabs-row"):
             yield Tabs(*[Tab(label, id=key) for key, label in TABS], id="tabs")
+            yield self.mentions_btn
             yield self.tour_btn
             yield self.logout_btn
         with self.switcher:
@@ -714,9 +760,10 @@ class AioApp(App[None]):
 
     def on_mount(self) -> None:
         self._set_header(f"project {self.client.project_id}")
+        self.mentions_btn.display = False
         self.refresh_workspace()
         self.refresh_board()
-        self.set_interval(6.0, self.refresh_workspace)
+        self.set_interval(1.5, self.refresh_workspace)
         self.set_interval(self.poll_seconds, self.refresh_board)
         self.set_interval(10.0, self._tick_dashboard)
         self.chat_view.composer.focus()
@@ -940,6 +987,9 @@ class AioApp(App[None]):
         if event.button.id == "tour-btn":
             event.stop()
             self.action_start_tour()
+        elif event.button.id == "mentions-btn":
+            event.stop()
+            self.action_mentions()
         elif event.button.id == "logout-btn":
             event.stop()
             self.action_logout()
@@ -994,7 +1044,6 @@ class AioApp(App[None]):
         repo = board.get("github_repo") or "no repo"
         runner = get_settings().coding_backend or "llm"
         working = self.board_view.agent_working
-        mentions = self.ws.unread
         presence = self.ws.presence or self.chat_view.presence
         online_n = sum(1 for u in presence if u.get("online"))
         total_n = len(presence) if presence else len(self.ws.members)
@@ -1003,7 +1052,6 @@ class AioApp(App[None]):
             f"[dim]jobs[/dim] {self.jobs_today}",
             f"[dim]agent working[/dim] {working}",
             f"[dim]runner[/dim] {runner}",
-            f"[dim]@[/dim] {mentions}" if not mentions else f"[yellow]@{mentions}[/yellow]",
             f"[dim]online[/dim] {online_n}/{total_n}",
         ]
         if self._board_error:
@@ -1012,6 +1060,20 @@ class AioApp(App[None]):
         if self._message:
             line = f"{line}   {self._message}"
         self.status_line.update(line)
+        self._paint_mentions_btn()
+
+    def _paint_mentions_btn(self) -> None:
+        n = int(self.ws.unread or 0)
+        btn = self.mentions_btn
+        if n > 0:
+            btn.label = f"@{n}"
+            btn.set_class(True, "has-unread")
+            btn.display = True
+            btn.disabled = False
+        else:
+            btn.label = "@"
+            btn.set_class(False, "has-unread")
+            btn.display = False
 
     # mentions -------------------------------------------------------------
 
@@ -1127,28 +1189,34 @@ def run_app(
     api_key: str = "",
     email: str = "",
 ) -> int:
-    """Sign in if needed, then hand the terminal to the app."""
+    """Always open the sign-in gate, then hand the terminal to the app.
+
+    Pass both ``api_key`` and ``email`` only for scripts/tests that must skip the UI.
+    """
     from app.cli_pkg.session import resolve_base_url, resolve_project_id
 
     creds = load_credentials()
     base_url = resolve_base_url()
-    key = api_key or creds.api_key
-    who = email or creds.email
+    key = (api_key or "").strip()
+    who = (email or "").strip()
 
-    if not key:
-        picked = _prompt_login(base_url, who)
-        if picked is None:
+    # Explicit credentials (CLI flags / automation) skip the login screen.
+    if not (key and who):
+        picked = _prompt_login(base_url, who or (creds.email or "").strip())
+        if picked is None or not (picked.api_key or "").strip():
             return 2
         save_credentials(picked)
         key, who = picked.api_key, picked.email
+        if (picked.api_base_url or "").strip():
+            base_url = picked.api_base_url.strip().rstrip("/")
 
     pid = int(project_id or resolve_project_id() or 1)
-    client = ApiClient(project_id=pid, api_key=key, email=who)
+    client = ApiClient(project_id=pid, api_key=key, email=who, base_url=base_url)
     try:
         client.me()
     except ApiError as exc:
         print(f"cannot start: {exc}")
-        print("try `aio login` (is the API running? `uvicorn app.main:app --port 8000`)")
+        print("try again with `aio` (is the API running? `uvicorn app.main:app --port 8000`)")
         return 2
 
     AioApp(client, poll_seconds=poll_seconds).run()
@@ -1156,10 +1224,11 @@ def run_app(
 
 
 def _prompt_login(base_url: str, email: str) -> Credentials | None:
-    """Tiny standalone login app, shown only when there are no credentials."""
+    """Full-screen sign-in gate (shown on every normal `aio` launch)."""
 
     class LoginApp(App[Credentials]):
         CSS = STYLES
+        TITLE = "AIO"
 
         def on_mount(self) -> None:
             def done(creds: Credentials | None) -> None:

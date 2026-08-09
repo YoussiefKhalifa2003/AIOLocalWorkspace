@@ -179,7 +179,7 @@ class BoardView(Horizontal):
     def _require_owner(self) -> bool:
         if self.is_owner:
             return True
-        self.app.set_status("[yellow]owner only — members can browse the board[/yellow]")
+        self.app.set_status("[yellow]owner only — members see their own cards[/yellow]")
         return False
 
     def edit_card(self) -> None:
@@ -303,15 +303,24 @@ class BoardView(Horizontal):
         self.app.push_screen(ChoiceModal(f"Move #{card['id']} to…", list(BOARD_COLUMNS)), done)
 
     def send_to_agent(self) -> None:
-        if not self._require_owner():
-            return
+        """Any member can send a card they own/are assigned to (Codex, Claude, or llm)."""
         card = self.current_card
         if not card:
+            self.app.set_status("pick a card first")
+            return
+        if not self.can_edit_card(card):
+            self.app.set_status(
+                "[yellow]you can only send your own cards to the agent[/yellow]"
+            )
             return
         from app.cli_pkg.doctor import available_coding_runners
 
         runners = available_coding_runners()
         if len(runners) <= 1:
+            self.app.set_status(
+                "[dim]sending to agent (llm). "
+                "Install Codex/Claude CLIs to choose them (aio doctor).[/dim]"
+            )
             self.apply_status(card, "agent_backlog")
             return
 

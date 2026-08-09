@@ -13,6 +13,7 @@ from app.services.board import (
     can_edit_objective,
     owner_id,
     set_objective_status,
+    wipe_project_board,
 )
 from app.services.file_claims import auto_claim_from_objective, release_claims_for_objective
 from app.services.isolation import IsolationError, get_project_for_tenant
@@ -140,7 +141,10 @@ def list_objectives(
         Objective.tenant_id == auth.tenant_id, Objective.project_id == project_id
     )
     if not (all_users and is_workspace_owner(db, auth)):
-        q = q.filter(Objective.user_id == auth.user_id)
+        q = q.filter(
+            (Objective.user_id == auth.user_id)
+            | (Objective.assignee_user_id == auth.user_id)
+        )
     rows = q.order_by(Objective.sort_order.asc(), Objective.id.asc()).all()
     total = len(rows)
     done = sum(1 for r in rows if r.done)
@@ -207,7 +211,45 @@ def get_board(
     from app.services.agent_backlog import kick_stale_agent_backlog
 
     kick_stale_agent_backlog(db, project_id=project_id)
-    return build_board(db, tenant_id=auth.tenant_id, project_id=project_id)
+    return build_board(db, tenant_id=auth.tenant_id, project_id=project_id, auth=auth)
+
+
+class BoardWipeIn(BaseModel):
+    confirm: bool = False
+
+
+@router.post("/projects/{project_id}/board/wipe")
+def wipe_board(
+    project_id: int,
+    body: BoardWipeIn,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """Owner-only: delete every board card for this project (and workspaces)."""
+    from app.services.chat_access import is_workspace_owner
+
+    try:
+        get_project_for_tenant(db, auth.tenant_id, project_id)
+    except IsolationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not is_workspace_owner(db, auth):
+        raise HTTPException(status_code=403, detail="only the workspace owner can wipe the board")
+    if body.confirm is not True:
+        raise HTTPException(status_code=400, detail="pass confirm=true to wipe the board")
+    result = wipe_project_board(db, tenant_id=auth.tenant_id, project_id=project_id)
+    write_audit(
+        db,
+        tenant_id=auth.tenant_id,
+        project_id=project_id,
+        event_type="board_wiped",
+        message=(
+            f"wiped {result['deleted_objectives']} objectives, "
+            f"{result['deleted_requests']} requests, "
+            f"{result['removed_workspaces']} workspaces"
+        ),
+    )
+    db.commit()
+    return {"status": "wiped", **result}
 
 
 @router.patch("/projects/{project_id}/objectives/{objective_id}", response_model=ObjectiveOut)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 
 import httpx
@@ -36,13 +37,20 @@ def test_credentials_round_trip_and_permissions(tmp_path):
     )
     path = save_credentials(creds)
     assert path == credentials_path()
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     again = load_credentials()
     assert again.api_key == "k-1"
     assert again.email == "a@local.test"
     assert again.user_id == 7
     assert again.project_id == 3
+    assert again.api_base_url == "http://x"
+
+    from app.cli_pkg.session import resolve_base_url
+
+    assert resolve_base_url(again) == "http://x"
+
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     assert clear_credentials() is True
     assert load_credentials().is_empty()
@@ -233,4 +241,4 @@ def test_app_start_fails_cleanly_when_api_is_down(monkeypatch, capsys):
     assert run_app(1, api_key="k", email="a@local.test") == 2
     out = capsys.readouterr().out
     assert "cannot start" in out
-    assert "aio login" in out
+    assert "uvicorn" in out or "API" in out or "aio" in out

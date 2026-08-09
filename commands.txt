@@ -22,6 +22,7 @@
 ./aio set 12 doing
 ./aio set 12 agent_backlog                  # LLM coding path
 ./aio set 12 agent_backlog --runner codex   # or --runner claude_code
+./aio board-wipe --yes                      # owner: empty the board + local workspaces
 ./aio pr 12 --open
 ./aio merge 12                  # asks first, then merges and moves to done
 ./aio merge 12 --yes --method squash
@@ -35,9 +36,12 @@
 # App keys (no F-keys)
 #   tabs      c Chat · b Board · g Agents · p People · d Dashboard · v Live
 #             while typing: ctrl+t/b/g/e/d/v   or press esc then the letter
-#   anywhere  ? help · ctrl+n mentions · r refresh · q quit
+#   anywhere  ? help · q quit · a agent (on Board)
+#             @N button (tabs row) = mentions · Tour · Log out
 #   chat      type / or ! or @ → dropdown menu (up/down, enter/tab to pick)
-#   board     j/k card · h/l column · n new · s status · a agent · m merge
+#             !claude / !codex open interactive CLIs in a new terminal
+#   board     j/k card · h/l column · n new · s status · a agent (pick runner) · m merge
+#             members only see their own/assigned cards; owners see all
 #   people    (owner) Invite · Make owner · Make member · Remove
 #   live      (owner) gauges + sparklines + WIP bars, auto-refresh 2s
 
@@ -51,8 +55,11 @@ hey team, standup in 5
 !invite colleague@tatweermea.com
 !help
 
-# Invite: only @tatweermea.com - no email. They log in with email + password on LAN /app
-# INVITE_APP_URL=http://YOUR_LAN_IP:8000
+# Invite (off-LAN): keep API_BASE_URL=http://127.0.0.1:8000 on the API host
+# cloudflared tunnel --url http://127.0.0.1:8000
+# INVITE_APP_URL=https://xxxx.trycloudflare.com   # then restart uvicorn + remint
+# !invite
+# On Sign in, paste Server from the Done page if joining off the company network
 
 # MY ROOM - /skills for AI, !commands, plain notes stay quiet
 thinking out loud about auth

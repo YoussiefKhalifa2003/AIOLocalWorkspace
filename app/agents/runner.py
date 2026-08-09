@@ -595,30 +595,72 @@ def run_coding(db: Session, job: Job, llm: LLMClient) -> None:
     text = payload.get("text") or payload.get("source_text") or ""
     model, backend = _model_for(db, job, "coding")
     settings = get_settings()
-    runner = (payload.get("coding_runner") or settings.coding_backend or "llm").strip().lower()
+    explicit = (payload.get("coding_runner") or "").strip().lower()
+    runner = (explicit or settings.coding_backend or "llm").strip().lower()
+    # Board/API can force a runner; chat /code usually has no coding_runner.
+    forced_cli = explicit in WORKSPACE_BACKENDS
 
     if runner in WORKSPACE_BACKENDS:
         workspace = _workspace_for_job(payload)
-        coding = get_coding_backend_for(runner)
-        job.model_used = f"{runner}:{model}"
-        try:
-            result = coding.run(prompt=text, model=model, llm=llm, workspace=workspace or None)
-        except LLMError as exc:
-            logger.warning("coding runner %s failed (%s); falling back to LLM", runner, exc)
-            record_metric(db, job=job, backend=runner, model=model, success=False)
-            result = None
-        if result is not None:
-            record_metric(
-                db,
-                job=job,
-                backend=result.backend,
-                model=result.model,
-                success=result.success,
-                duration_ms=result.duration_ms,
+        # Chat /code (or mis-set CODING_BACKEND) without a board workspace:
+        # never spawn Codex/Claude with cwd=None — use the LLM coding path.
+        if not workspace and not forced_cli:
+            logger.info(
+                "coding runner %s skipped (no workspace); using LLM for job %s",
+                runner,
+                job.id,
             )
-            _finish_coding_job(db, job, result.content)
+            runner = "llm"
+        elif not workspace and forced_cli:
+            msg = (
+                f"**{explicit} failed:** no objective workspace ready for this job. "
+                f"Send the card to agent backlog from the Board (key `a`) so a checkout exists."
+            )
+            record_metric(db, job=job, backend=explicit, model=model, success=False)
+            job.model_used = f"{explicit}:no-workspace"
+            _finish_coding_job(db, job, msg)
             return
-        job.model_used = model
+        else:
+            coding = get_coding_backend_for(runner)
+            job.model_used = f"{runner}:{model}"
+            try:
+                result = coding.run(
+                    prompt=text, model=model, llm=llm, workspace=workspace or None
+                )
+            except LLMError as exc:
+                logger.warning("coding runner %s failed (%s)", runner, exc)
+                record_metric(db, job=job, backend=runner, model=model, success=False)
+                if forced_cli:
+                    # Explicit board choice must not silently look like LLM success.
+                    err = (
+                        f"**{runner} failed:** {exc}\n\n"
+                        f"Install the CLI (`aio doctor`), set the API key in `.env`, "
+                        f"restart uvicorn, then retry."
+                    )
+                    job.model_used = f"{runner}:error"
+                    _finish_coding_job(db, job, err)
+                    return
+                # Global CODING_BACKEND=codex with workspace but CLI broken → LLM fallback
+                result = None
+            if result is not None:
+                record_metric(
+                    db,
+                    job=job,
+                    backend=result.backend,
+                    model=result.model,
+                    success=result.success,
+                    duration_ms=result.duration_ms,
+                )
+                if forced_cli and not result.success:
+                    body = (
+                        f"**{runner} exited with an error.**\n\n"
+                        f"{result.content or '(no output)'}"
+                    )
+                    _finish_coding_job(db, job, body)
+                    return
+                _finish_coding_job(db, job, result.content)
+                return
+            job.model_used = model
 
     # Prefer OpenCode/LLM chat path for selected models; legacy shell only if coding_backend=opencode AND gemini
     if runner == "opencode" and backend == "gemini":

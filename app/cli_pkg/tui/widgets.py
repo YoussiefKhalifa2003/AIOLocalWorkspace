@@ -674,17 +674,18 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
   ctrl+d dash · ctrl+v live, or press [b]esc[/b] then the letter.
 
 [b]Anywhere[/b]
-  ?  help (or ctrl+w)   ctrl+n  unread mentions
-  F1 or slim [b]Tour[/b]  spotlight walkthrough
-  [b]Log out[/b] (tabs row) or [b]ctrl+shift+l[/b]
+  ?  help (or ctrl+w)   F1 Tour   Log out button (top right)
   r  refresh (ctrl+r)   q  quit (ctrl+q)
+  [b]@N[/b] button (tabs row) opens unread mentions — who · time · chat · snippet.
+  Click a row (or press enter) to jump to that message (highlighted).
+  ctrl+n also opens mentions.  !claude / !codex open those CLIs in a new terminal.
 
 [b]Chat[/b]
   Type [b]/[/b] [b]![/b] or [b]@[/b] — a dropdown opens (just like the website).
   up/down to choose, enter or tab to pick, esc to close.
   Ghost line above the box shows the selected completion or next arg.
   /ask /deepresearch /code /write /review /checklist /status /clear
-  !add !list !set !done !claim !issue !invite !attach !attach-clear !help
+  !add !list !set !done !claim !issue !invite !attach !attach-clear !claude !codex !help
   @name pings a person · @team pings everyone
   Click [b]+[/b] on the left of the composer (or [b]ctrl+f[/b] / [b]!attach[/b]) —
   same shell on Mac, Windows, and Linux — opens a native file dialog
@@ -700,16 +701,17 @@ HELP_TEXT = """[b]Tabs[/b] — press the letter, or click the tab
   [b]+ channel[/b] or [b]ctrl+shift+n[/b] creates a room (!newchat still works).
   [b]ctrl+m[/b] voice → mic (or audio file) → fills the composer via STT.
   Owner: [b]kick[/b] next to a name under MEMBERS removes them from the workspace.
-  When someone [@]pings you: a sound plays and [@]N appears in the status
-  line. Press [b]ctrl+n[/b] to open the list (who · time · chat · snippet),
-  pick one to jump to that message (highlighted).
+  When someone [@]pings you: a sound plays and [b]@N[/b] appears in the tabs row.
+  Open it to see who · time · chat · snippet, then jump to the highlighted message.
 
 [b]Board[/b]
+  Members only see cards they created or are assigned to; owners see all.
   j k          card up/down     h l    column left/right
   [ ]          shift card to previous / next column (DnD stand-in)
   click a card to update detail · i hide/show detail
   e            edit description & subtasks (your cards; owners: any)
-  Owner only:  n new · s move · a agent · m merge · [ ] column-shift
+  [b]a[/b]     send card to agent — pick [b]codex[/b] / [b]claude_code[/b] / [b]llm[/b]
+  Owner only:  n new · s move · m merge · [ ] column-shift
   Anyone:      g open repo · o open PR · y copy PR
   After n / !add a setup popup asks for description + subtasks.
 
@@ -766,6 +768,32 @@ class MentionsModal(ModalScreen[dict[str, Any] | None]):
 
     BINDINGS = [("escape", "dismiss_none", "Close")]
 
+    DEFAULT_CSS = """
+    MentionsModal { align: center middle; }
+    MentionsModal #confirm-box {
+        width: 72;
+        max-width: 96;
+        height: auto;
+        max-height: 28;
+        padding: 1 2;
+        background: $surface;
+        border: round $accent;
+    }
+    MentionsModal #mention-list {
+        height: auto;
+        max-height: 18;
+        margin: 1 0;
+    }
+    MentionsModal #mention-list ListItem {
+        padding: 1 1;
+        height: auto;
+        margin-bottom: 1;
+    }
+    MentionsModal #mention-list ListItem.-highlight {
+        background: $accent 25%;
+    }
+    """
+
     def __init__(self, mentions: list[dict[str, Any]]) -> None:
         super().__init__()
         self._mentions = mentions
@@ -773,6 +801,10 @@ class MentionsModal(ModalScreen[dict[str, Any] | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
             yield Label(f"Mentions ({len(self._mentions)})", id="confirm-title")
+            yield Static(
+                "[dim]who · time · chat · message — enter/click to jump[/dim]",
+                markup=True,
+            )
             if not self._mentions:
                 yield Static("[dim]nothing unread[/dim]", markup=True)
                 yield Button("Close", id="mentions-close")
@@ -783,12 +815,21 @@ class MentionsModal(ModalScreen[dict[str, Any] | None]):
                 where = escape(str(m.get("chat_name") or ""))
                 when = escape(_mention_time_label(m.get("created_at")))
                 meta = f"{when} · #{where}" if when else f"#{where}"
-                snippet = escape(str(m.get("snippet") or "").replace("\n", " ")[:70])
+                snippet = escape(str(m.get("snippet") or "").replace("\n", " ")[:90])
                 items.append(
-                    ListItem(Static(f"[b]{who}[/b]  [dim]{meta}[/dim]\n{snippet}", markup=True))
+                    ListItem(
+                        Static(f"[b]{who}[/b]  [dim]{meta}[/dim]\n{snippet}", markup=True)
+                    )
                 )
             yield ListView(*items, id="mention-list")
             yield Button("Mark all read", id="mentions-read")
+
+    def on_mount(self) -> None:
+        if self._mentions:
+            try:
+                self.query_one("#mention-list", ListView).focus()
+            except Exception:
+                pass
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index or 0

@@ -85,7 +85,7 @@ def test_invite_link_register_and_login(tmp_path, monkeypatch):
     page = client.get(f"/join/{token}")
     assert page.status_code == 200
     assert "Join AIO" in page.text
-    assert "CLI" in page.text or "aio login" in page.text
+    assert "aio" in page.text.lower()
 
     html_reg = client.post(
         f"/join/{token}/register",
@@ -99,7 +99,7 @@ def test_invite_link_register_and_login(tmp_path, monkeypatch):
     assert html_reg.status_code == 200, html_reg.text
     assert "Done" in html_reg.text
     assert "Account created" in html_reg.text
-    assert "aio login" in html_reg.text
+    assert "aio" in html_reg.text.lower()
     assert "formuser@gmail.com" in html_reg.text
     assert "localStorage" not in html_reg.text
     assert "location.replace" not in html_reg.text

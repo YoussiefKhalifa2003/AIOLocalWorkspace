@@ -61,9 +61,11 @@ def build_invite_email(*, invite_url: str, max_uses: int, workspace: str) -> tup
     subject = f"Join {workspace} workspace"
     body = (
         f"You've been invited to the {workspace} workspace ({seats}).\n\n"
-        f"Open this link on the same network as the server to register:\n"
+        f"Open this link to register (works off-VPN when using a public invite URL):\n"
         f"{invite_url}\n\n"
-        f"After signup, use the CLI: aio login  then  ./aio"
+        f"After signup, run: aio\n"
+        f"On Sign in, paste the Server URL from the Done page if prompted, "
+        f"then use your email and password."
     )
     if domain:
         body += f"\n\nUse your @{domain} email when registering."

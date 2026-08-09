@@ -69,6 +69,8 @@ COMMANDS: tuple[Candidate, ...] = (
     Candidate("!invite ", "!invite", "invite link or email@domain"),
     Candidate("!attach", "!attach", "open file picker"),
     Candidate("!attach-clear", "!attach-clear", "clear staged files"),
+    Candidate("!claude", "!claude", "open Claude Code in a new terminal"),
+    Candidate("!codex", "!codex", "open Codex in a new terminal"),
     Candidate("!clear", "!clear", "clear chat (you only in #general)"),
     Candidate("!help", "!help", "list commands"),
 )
@@ -1118,10 +1120,10 @@ class ChatView(Vertical):
     TYPING_DEBOUNCE_SECONDS = 0.12
     TYPING_IDLE_SECONDS = 1.5
     BINDINGS = [
-        ("ctrl+f", "attach_file", "attach file"),
-        ("ctrl+m", "voice_toggle", "voice"),
-        ("ctrl+shift+n", "new_channel", "new channel"),
-        ("ctrl+shift+x", "delete_chat", "delete chat"),
+        ("ctrl+f", "attach_file", ""),
+        ("ctrl+m", "voice_toggle", ""),
+        ("ctrl+shift+n", "new_channel", ""),
+        ("ctrl+shift+x", "delete_chat", ""),
     ]
 
     def __init__(self, client: ApiClient) -> None:
@@ -1631,6 +1633,31 @@ class ChatView(Vertical):
             self._upload_pending(path)
         return True
 
+    def _try_local_open_cli_command(self, body: str) -> bool:
+        """Handle !claude / !codex — open interactive CLI in a new window."""
+        lower = body.strip().lower()
+        if lower not in ("!claude", "!codex"):
+            return False
+        which = "claude" if lower == "!claude" else "codex"
+        cwd = None
+        board = getattr(self.app, "board_view", None)
+        if board is not None:
+            card = getattr(board, "current_card", None)
+            if isinstance(card, dict) and card.get("id"):
+                from app.services.agent_workspace import is_workspace_ready, workspace_path
+
+                path = workspace_path(int(card["id"]))
+                if is_workspace_ready(path):
+                    cwd = str(path)
+        from app.cli_pkg.tui.external_cli import launch_coding_cli
+
+        ok, msg = launch_coding_cli(which, cwd=cwd)
+        if ok:
+            self.app.set_status(f"[green]{msg}[/green]")
+        else:
+            self.app.set_status(f"[yellow]{msg}[/yellow]")
+        return True
+
     def _active_llm_skill(self) -> str | None:
         if self.chat_id is None:
             return None
@@ -2114,6 +2141,10 @@ class ChatView(Vertical):
             self.app.action_help()
             return
         if body and self._try_local_attach_command(body):
+            self.composer.value = ""
+            self.picker.close()
+            return
+        if body and self._try_local_open_cli_command(body):
             self.composer.value = ""
             self.picker.close()
             return

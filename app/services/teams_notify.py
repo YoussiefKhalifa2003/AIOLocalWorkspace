@@ -31,7 +31,8 @@ def build_invite_payload(*, invite_url: str, max_uses: int, workspace: str = "AI
         "title": f"{workspace} workspace invite",
         "text": (
             f"Join **{workspace}** with this link ({seats}). "
-            f"Open it on the same LAN as the server."
+            f"Open it to register, then run `aio` and paste the Server URL "
+            f"from the Done page if you are off the company network."
         ),
         "potentialAction": [
             {

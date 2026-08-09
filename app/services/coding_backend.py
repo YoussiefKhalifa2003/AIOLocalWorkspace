@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -16,6 +17,11 @@ from app.services.llm import LLMClient, LLMError
 
 # Backends that edit files in the objective workspace instead of emitting a blob.
 WORKSPACE_BACKENDS = ("codex", "claude_code")
+
+
+def _resolve_bin(name: str) -> str:
+    """Resolve CLI on PATH (needed for Windows npm .cmd shims)."""
+    return shutil.which(name) or name
 
 
 @dataclass
@@ -129,18 +135,22 @@ class CodexBackend(CodingBackend):
         settings = get_settings()
         t0 = time.monotonic()
         out_path = Path(tempfile.mkdtemp(prefix="aio-codex-")) / "last-message.txt"
+        sandbox = (settings.codex_sandbox or "workspace-write").strip().lower()
         argv = [
-            settings.codex_bin,
+            _resolve_bin(settings.codex_bin),
             "exec",
-            "--sandbox",
-            settings.codex_sandbox,
-            "--ask-for-approval",
-            "never",
             "--skip-git-repo-check",
             "-o",
             str(out_path),
             prompt,
         ]
+        # Codex CLI: --sandbox cannot combine with --approve-for-me.
+        if sandbox in {"danger-full-access", "danger"}:
+            argv[2:2] = ["--dangerously-bypass-approvals-and-sandbox"]
+        elif sandbox == "workspace-write":
+            argv[2:2] = ["--approve-for-me"]
+        else:
+            argv[2:2] = ["--sandbox", sandbox]
         env = _agent_env(
             {
                 "CODEX_API_KEY": settings.codex_api_key,
@@ -203,7 +213,7 @@ class ClaudeCodeBackend(CodingBackend):
         settings = get_settings()
         t0 = time.monotonic()
         argv = [
-            settings.claude_bin,
+            _resolve_bin(settings.claude_bin),
             "-p",
             prompt,
             "--permission-mode",

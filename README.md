@@ -100,11 +100,11 @@ Second terminal:
 
 ```bash
 ./aio doctor    # API · git · workspaces · GitHub · research · coding runners
-./aio           # full-screen app (signs in on first launch)
+./aio           # always opens the Sign in screen, then the workspace
 ```
 
-Credentials: `~/.aio/credentials.json` (mode `600`).  
-`aio`, `aio tui`, and `aio up` open the same app.
+Credentials are saved after a successful Sign in (`~/.aio/credentials.json`, mode `600`).  
+`aio`, `aio tui`, and `aio up` open the same app (Sign in gate every time).
 
 ```bash
 rm -f aio.db && ./aio seed          # reset demo data
@@ -124,7 +124,7 @@ rm -f aio.db && ./aio seed          # reset demo data
 | `c` `b` `g` · `1`-`3` | **Chat** · **Board** · **Agents** *(everyone)* |
 | `p` `d` `v` · `4`-`6` | **People** · **Dash** · **Live** *(owner only - hidden for members)* |
 | `?` | Keys & commands |
-| `ctrl+n` | Unread @mentions |
+| `@N` button · `ctrl+n` | Unread @mentions (who · time · chat · snippet → jump) |
 | `ctrl+r` · `q` | Refresh · quit |
 | `Tour` / `Log out` | Walkthrough · sign out (marks you offline immediately) |
 
@@ -134,7 +134,7 @@ rm -f aio.db && ./aio seed          # reset demo data
 |--------|------|
 | `/` | AI skills - when the chat’s mode is **AI** (`/ask` `/deepresearch` `/code` …) |
 | `!` | Board / ops - **whispers** in public channels (only you see the exchange) |
-| `@` | Ping people · sound + jump via `ctrl+n` |
+| `@` | Ping people · sound + `@N` button (or `ctrl+n`) to jump |
 
 Also: **`+` attach** · **mic** · hover **edit / delete** · speaker blocks · **online** dots · **typing** in public channels.
 
@@ -249,11 +249,42 @@ Copy `.env.example` → `.env`.
 | `GROQ_API_KEY` | TTS + Whisper |
 | `TAVILY_API_KEY` | `/deepresearch` sources |
 | `GITHUB_TOKEN` / `GITHUB_REPO` | Agent PRs |
-| `CODING_BACKEND` | `llm` · `codex` · `claude_code` · `opencode` |
+| `CODING_BACKEND` | Keep `llm` for chat; use board runners for Codex/Claude |
+| `CODEX_API_KEY` / `ANTHROPIC_API_KEY` | Board coding CLIs |
 | `DATABASE_URL` | Default `sqlite:///./aio.db` |
-| `API_BASE_URL` | CLI → API |
+| `API_BASE_URL` | Owner CLI → local API (`http://127.0.0.1:8000`) |
+| `INVITE_APP_URL` | Public join-link origin (tunnel HTTPS for off-LAN) |
 
----
+### Invites off-LAN
+
+Keep `API_BASE_URL=http://127.0.0.1:8000` on the API host. Expose the API with a tunnel, point invites at it, remint:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+cloudflared tunnel --url http://127.0.0.1:8000
+# set INVITE_APP_URL=https://xxxx.trycloudflare.com  then restart uvicorn
+# !invite   (discard old 10.x links)
+```
+
+New members: open the join link → Done → run `aio` → paste **Server** from the Done page → email/password.
+
+### Coding runners (Codex / Claude Code)
+
+OpenRouter/Gemini power `/ask` and the Agents tab. Codex and Claude Code run when you send a **board** card to agent backlog with that runner (owners: any card; members: cards they created or are assigned to). Members only **see** their own/assigned cards; owners see the full board.
+
+```bash
+aio doctor                                          # CLIs + keys
+# Board: select card → a → pick codex | claude_code | llm
+aio set 12 agent_backlog --runner codex
+aio set 12 agent_backlog --runner claude_code
+aio board-wipe --yes                                # owner: clear all cards + local workspaces
+```
+
+**Interactive Claude / Codex** (full CLI in a new terminal — not an LLM skill):
+
+- Chat bangs: `!claude` · `!codex`
+
+Do not set `CODING_BACKEND=codex` globally unless you intend chat `/code` to prefer that stack; prefer per-card runners.
 
 ## Demo accounts
 

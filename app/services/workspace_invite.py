@@ -14,7 +14,12 @@ MAX_INVITE_USES = 50
 
 
 def invite_public_base_url() -> str:
-    """Public base for join links. Ensures a port (defaults to :8000)."""
+    """Public base for join links.
+
+    HTTP without an explicit port defaults to :8000 (local API).
+    HTTPS without a port keeps the standard origin (no :8000) so Cloudflare
+    quick tunnels and other public hosts work.
+    """
     settings = get_settings()
     raw = (settings.invite_app_url or settings.api_base_url or "http://127.0.0.1:8000").strip()
     if raw.endswith("/"):
@@ -28,8 +33,14 @@ def invite_public_base_url() -> str:
     scheme = parsed.scheme or "http"
     port = parsed.port
     if port is None:
-        port = 8000
-    netloc = f"{host}:{port}"
+        if scheme == "https":
+            netloc = host
+        else:
+            netloc = f"{host}:8000"
+    elif (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
+        netloc = host
+    else:
+        netloc = f"{host}:{port}"
     return urlunparse((scheme, netloc, "", "", "", ""))
 
 

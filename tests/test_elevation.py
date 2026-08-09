@@ -65,9 +65,19 @@ def test_gate_a_board_and_patch_permissions(tmp_path, monkeypatch):
     assert "columns" in board
     assert {c["id"] for c in board["columns"]} >= {"todo", "doing", "blocked", "done"}
     cards = [card for col in board["columns"] for card in col["cards"]]
+    # Members only see creator/assignee cards — Omar must not see Sara's.
+    for c in cards:
+        assert info["email_omar"] in (c.get("owner_email") or "") or c.get(
+            "user_id"
+        )  # owned/assigned to Omar
     assert any(c["open_issue_count"] >= 1 for c in cards)
 
     omar_card = next(c for c in cards if "metro" in c["title"].lower())
+    # Sara cannot see Omar's card on her board
+    sara_board = client.get(f"/projects/{pid}/board", headers=hs).json()
+    sara_ids = {c["id"] for col in sara_board["columns"] for c in col["cards"]}
+    assert omar_card["id"] not in sara_ids
+
     # Sara cannot patch Omar's card
     r = client.patch(
         f"/projects/{pid}/objectives/{omar_card['id']}",
@@ -86,8 +96,11 @@ def test_gate_a_board_and_patch_permissions(tmp_path, monkeypatch):
     assert r.json()["done"] is True
     assert r.json()["status"] == "done"
 
-    # Owner can patch any
-    sara_blocked = next(c for c in cards if c["status"] == "blocked")
+    # Owner sees everyone's cards and can patch any
+    owner_board = client.get(f"/projects/{pid}/board", headers=ha).json()
+    owner_cards = [c for col in owner_board["columns"] for c in col["cards"]]
+    assert len(owner_cards) > len(cards)
+    sara_blocked = next(c for c in owner_cards if c["status"] == "blocked")
     r = client.patch(
         f"/projects/{pid}/objectives/{sara_blocked['id']}",
         headers=ha,

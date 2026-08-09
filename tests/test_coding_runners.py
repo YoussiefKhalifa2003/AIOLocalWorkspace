@@ -56,10 +56,10 @@ def test_codex_builds_expected_argv_and_cwd(monkeypatch, tmp_path):
     )
 
     argv = calls[0]["argv"]
-    assert argv[0] == "codex"
+    assert Path(argv[0]).stem.lower() == "codex"
     assert argv[1] == "exec"
-    assert "--sandbox" in argv and argv[argv.index("--sandbox") + 1] == "workspace-write"
-    assert argv[argv.index("--ask-for-approval") + 1] == "never"
+    assert "--approve-for-me" in argv
+    assert "--sandbox" not in argv
     assert "--skip-git-repo-check" in argv
     assert argv[-1] == "add a helper"
     assert calls[0]["kwargs"]["cwd"] == str(ws)
@@ -96,7 +96,7 @@ def test_claude_builds_argv_and_parses_json_result(monkeypatch, tmp_path):
     )
 
     argv = calls[0]["argv"]
-    assert argv[0] == "claude"
+    assert Path(argv[0]).stem.lower() == "claude"
     assert argv[1] == "-p"
     assert argv[2] == "fix the bug"
     assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
@@ -277,3 +277,140 @@ def test_workspace_edits_survive_into_the_pr(tmp_path, monkeypatch):
     assert refreshed.status == "in_review"
     assert refreshed.github_pr_number == 1
     db.close()
+
+
+def test_run_coding_without_workspace_does_not_spawn_codex(monkeypatch):
+    """Chat /code with CODING_BACKEND=codex must use LLM path, not Codex cwd=None."""
+    monkeypatch.setenv("CODING_BACKEND", "codex")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    from app.agents import runner as runner_mod
+    from app.db.models import Job
+    from app.services.coding_backend import CodingResult
+
+    cli_calls: list[dict] = []
+
+    class FakeCli:
+        def run(self, *, prompt, model, llm, workspace=None):
+            cli_calls.append({"workspace": workspace, "prompt": prompt})
+            return CodingResult(
+                content="cli-ok",
+                backend="codex",
+                model=model,
+                duration_ms=1,
+                success=True,
+            )
+
+    monkeypatch.setattr(
+        "app.services.coding_backend.get_coding_backend_for",
+        lambda name: FakeCli(),
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "_model_for",
+        lambda db, job, agent_type: ("test-model", "openrouter"),
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "_agent_chat",
+        lambda db, job, llm, **kw: "llm-chat-ok",
+    )
+    finished: list[str] = []
+    monkeypatch.setattr(
+        runner_mod,
+        "_finish_coding_job",
+        lambda db, job, content: finished.append(content),
+    )
+    monkeypatch.setattr(runner_mod, "record_metric", lambda *a, **k: None)
+
+    class FakeDB:
+        def flush(self):
+            pass
+
+        def add(self, _obj):
+            pass
+
+    job = Job(
+        tenant_id=1,
+        project_id=1,
+        agent_type="coding",
+        status="queued",
+        payload_json=json.dumps({"text": "fix typo"}),
+    )
+    job.id = 99
+    runner_mod.run_coding(FakeDB(), job, llm=object())  # type: ignore[arg-type]
+    assert cli_calls == []
+    assert finished == ["llm-chat-ok"]
+
+
+def test_explicit_cli_runner_does_not_silent_llm_fallback(monkeypatch, tmp_path):
+    monkeypatch.setenv("CODING_BACKEND", "llm")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    from app.agents import runner as runner_mod
+    from app.db.models import Job
+    from app.services.llm import LLMError
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / ".git").mkdir()
+
+    class Boom:
+        def run(self, *, prompt, model, llm, workspace=None):
+            raise LLMError("codex not authenticated")
+
+    monkeypatch.setattr(
+        "app.services.coding_backend.get_coding_backend_for",
+        lambda name: Boom(),
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "_model_for",
+        lambda db, job, agent_type: ("test-model", "openrouter"),
+    )
+    monkeypatch.setattr(runner_mod, "_workspace_for_job", lambda payload: str(ws))
+    monkeypatch.setattr(
+        runner_mod,
+        "_agent_chat",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("must not fall back to LLM for explicit CLI runner")
+        ),
+    )
+    finished: list[str] = []
+    monkeypatch.setattr(
+        runner_mod,
+        "_finish_coding_job",
+        lambda db, job, content: finished.append(content),
+    )
+    monkeypatch.setattr(runner_mod, "record_metric", lambda *a, **k: None)
+
+    class FakeDB:
+        def flush(self):
+            pass
+
+        def add(self, _obj):
+            pass
+
+    job = Job(
+        tenant_id=1,
+        project_id=1,
+        agent_type="coding",
+        status="queued",
+        payload_json=json.dumps(
+            {
+                "text": "edit file",
+                "coding_runner": "codex",
+                "objective_id": 1,
+            }
+        ),
+    )
+    job.id = 100
+    runner_mod.run_coding(FakeDB(), job, llm=object())  # type: ignore[arg-type]
+    assert len(finished) == 1
+    assert "codex failed" in finished[0].lower() or "**codex failed:**" in finished[0].lower()
+    assert "codex not authenticated" in finished[0]
+    assert job.model_used == "codex:error"

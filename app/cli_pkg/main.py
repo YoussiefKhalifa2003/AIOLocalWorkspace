@@ -440,6 +440,33 @@ def card_show(
         typer.echo(f"    claim: {p}")
 
 
+@app.command("board-wipe")
+def board_wipe(
+    project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
+    yes: bool = typer.Option(False, "--yes", help="Required confirmation"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+) -> None:
+    """Owner-only: delete every board card and local agent workspaces for a project."""
+    if not yes:
+        typer.echo("refusing: pass --yes to wipe the board")
+        raise typer.Exit(2)
+    with _client() as client:
+        r = client.post(
+            f"/projects/{project_id}/board/wipe",
+            headers=_headers(api_key),
+            json={"confirm": True},
+        )
+    if r.status_code >= 400:
+        typer.echo(_detail(r))
+        raise typer.Exit(1)
+    data = r.json()
+    typer.echo(
+        f"wiped objectives={data.get('deleted_objectives')} "
+        f"requests={data.get('deleted_requests')} "
+        f"workspaces={data.get('removed_workspaces')}"
+    )
+
+
 @app.command("set")
 def set_status(
     objective_id: int = typer.Argument(...),

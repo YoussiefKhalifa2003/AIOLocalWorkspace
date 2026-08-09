@@ -50,9 +50,18 @@ def owner_id(obj: Objective) -> int:
 
 
 def can_edit_objective(db: Session, auth: AuthContext, obj: Objective) -> bool:
+    """Owner edits any card; members edit cards they created or are assigned to."""
     if is_workspace_owner(db, auth):
         return True
-    return owner_id(obj) == auth.user_id
+    uid = auth.user_id
+    return obj.user_id == uid or (obj.assignee_user_id or 0) == uid
+
+
+def objective_visible_to(db: Session, auth: AuthContext, obj: Objective) -> bool:
+    if is_workspace_owner(db, auth):
+        return True
+    uid = auth.user_id
+    return obj.user_id == uid or (obj.assignee_user_id or 0) == uid
 
 
 def checklist_stats_for_objective(db: Session, *, objective_id: int) -> tuple[int, int]:
@@ -105,13 +114,26 @@ def open_issue_count(db: Session, *, tenant_id: int, project_id: int, user_id: i
     )
 
 
-def build_board(db: Session, *, tenant_id: int, project_id: int) -> dict:
+def build_board(
+    db: Session,
+    *,
+    tenant_id: int,
+    project_id: int,
+    auth: AuthContext | None = None,
+) -> dict:
     rows = (
         db.query(Objective)
         .filter(Objective.tenant_id == tenant_id, Objective.project_id == project_id)
         .order_by(Objective.sort_order, Objective.id)
         .all()
     )
+    if auth is not None and not is_workspace_owner(db, auth):
+        uid = auth.user_id
+        rows = [
+            o
+            for o in rows
+            if o.user_id == uid or (o.assignee_user_id or 0) == uid
+        ]
     users = {
         u.id: u
         for u in db.query(User).filter(User.tenant_id == tenant_id).all()
@@ -181,8 +203,14 @@ def build_board(db: Session, *, tenant_id: int, project_id: int) -> dict:
     }
 
 
-def board_text_summary(db: Session, *, tenant_id: int, project_id: int) -> str:
-    board = build_board(db, tenant_id=tenant_id, project_id=project_id)
+def board_text_summary(
+    db: Session,
+    *,
+    tenant_id: int,
+    project_id: int,
+    auth: AuthContext | None = None,
+) -> str:
+    board = build_board(db, tenant_id=tenant_id, project_id=project_id, auth=auth)
     lines = ["BOARD"]
     for col in board["columns"]:
         lines.append(f"{col['id']}: {len(col['cards'])}")
@@ -190,3 +218,95 @@ def board_text_summary(db: Session, *, tenant_id: int, project_id: int) -> str:
             badge = f" !{card['open_issue_count']}" if card["open_issue_count"] else ""
             lines.append(f"  #{card['id']} {card['title']} ({card['owner_email']}){badge}")
     return "\n".join(lines)
+
+
+def wipe_project_board(db: Session, *, tenant_id: int, project_id: int) -> dict:
+    """Delete all objectives for a project and clean linked jobs/workspaces."""
+    import shutil
+
+    from app.db.models import (
+        AgentMetric,
+        Artifact,
+        AuditEvent,
+        FileClaim,
+        Job,
+        Objective,
+        RoomMessage,
+        TaskItem,
+        WorkRequest,
+    )
+    from app.services.agent_workspace import workspace_path
+
+    objs = (
+        db.query(Objective)
+        .filter(Objective.tenant_id == tenant_id, Objective.project_id == project_id)
+        .all()
+    )
+    objective_ids = [o.id for o in objs]
+    request_ids = [o.request_id for o in objs if o.request_id]
+    removed_workspaces = 0
+
+    if not objective_ids:
+        return {"deleted_objectives": 0, "deleted_requests": 0, "removed_workspaces": 0}
+
+    db.query(FileClaim).filter(FileClaim.objective_id.in_(objective_ids)).delete(
+        synchronize_session=False
+    )
+    db.query(TaskItem).filter(TaskItem.objective_id.in_(objective_ids)).delete(
+        synchronize_session=False
+    )
+
+    if request_ids:
+        job_ids = [
+            j.id
+            for j in db.query(Job.id).filter(Job.request_id.in_(request_ids)).all()
+        ]
+        if job_ids:
+            db.query(Artifact).filter(Artifact.job_id.in_(job_ids)).delete(
+                synchronize_session=False
+            )
+            db.query(AgentMetric).filter(AgentMetric.job_id.in_(job_ids)).delete(
+                synchronize_session=False
+            )
+            db.query(AuditEvent).filter(AuditEvent.job_id.in_(job_ids)).delete(
+                synchronize_session=False
+            )
+            db.query(RoomMessage).filter(RoomMessage.job_id.in_(job_ids)).delete(
+                synchronize_session=False
+            )
+            db.query(TaskItem).filter(TaskItem.job_id.in_(job_ids)).update(
+                {TaskItem.job_id: None}, synchronize_session=False
+            )
+            db.query(Job).filter(Job.parent_job_id.in_(job_ids)).update(
+                {Job.parent_job_id: None}, synchronize_session=False
+            )
+            db.query(Job).filter(Job.id.in_(job_ids)).delete(synchronize_session=False)
+        db.query(TaskItem).filter(TaskItem.request_id.in_(request_ids)).update(
+            {TaskItem.request_id: None}, synchronize_session=False
+        )
+        db.query(Objective).filter(Objective.request_id.in_(request_ids)).update(
+            {Objective.request_id: None}, synchronize_session=False
+        )
+        db.query(AuditEvent).filter(AuditEvent.request_id.in_(request_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(WorkRequest).filter(WorkRequest.id.in_(request_ids)).delete(
+            synchronize_session=False
+        )
+
+    db.query(Objective).filter(Objective.id.in_(objective_ids)).delete(
+        synchronize_session=False
+    )
+    db.flush()
+
+    for oid in objective_ids:
+        path = workspace_path(oid)
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+            removed_workspaces += 1
+
+    return {
+        "deleted_objectives": len(objective_ids),
+        "deleted_requests": len(set(request_ids)),
+        "removed_workspaces": removed_workspaces,
+    }
