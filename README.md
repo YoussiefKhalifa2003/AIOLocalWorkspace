@@ -95,7 +95,7 @@ pip install -r requirements.txt
 .venv/bin/python -m playwright install chromium   # Outlook invite emails
 
 cp .env.example .env                   # Windows: copy .env.example .env
-# fill keys in .env (see Configuration)
+# Edit .env — put your own API keys here (see Configuration). You can change them anytime.
 # keep API_BASE_URL=http://127.0.0.1:8000
 
 chmod +x aio                           # macOS/Linux if needed
