@@ -126,7 +126,9 @@ def test_llm_mode_accepts_ask_skill(tmp_path, monkeypatch):
         json={"body": "/ask reply with the word ping only", "speak": False},
     )
     assert r.status_code == 200
-    assert r.json().get("replies"), "AI mode chat should run /ask"
+    data = r.json()
+    assert data.get("pending") is True, "AI mode /ask should queue in the background"
+    assert data.get("user_message_id"), "user message should still be saved"
 
 
 def test_ops_mode_rejects_ask_skill(tmp_path, monkeypatch):

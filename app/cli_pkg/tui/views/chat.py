@@ -1144,6 +1144,7 @@ class ChatView(Vertical):
         # Per-chat in-flight sends / LLM jobs (other rooms stay typable)
         self._sending_chats: set[int] = set()
         self._llm_jobs: dict[int, str] = {}
+        self._llm_after_id: dict[int, int] = {}  # clear busy once an agent reply appears after this id
         self._pending: Static | None = None
         self._pending_attachments: list[dict[str, Any]] = []
         self._setup_opened: set[int] = set()
@@ -1208,6 +1209,7 @@ class ChatView(Vertical):
 
     def on_mount(self) -> None:
         self.set_interval(self.POLL_SECONDS, self.poll_messages)
+        self.set_interval(self.POLL_SECONDS, self.poll_background_llm_jobs)
         self.set_interval(self.PRESENCE_POLL_SECONDS, self.poll_presence)
         self.set_interval(self.HEARTBEAT_SECONDS, self.heartbeat_presence)
         self.call_after_refresh(self.heartbeat_presence)
@@ -1261,6 +1263,7 @@ class ChatView(Vertical):
         self._last_sync = ""
         self._sending_chats.clear()
         self._llm_jobs.clear()
+        self._llm_after_id.clear()
         self._pending = None
         self._pending_attachments = []
         self._setup_opened.clear()
@@ -1431,7 +1434,7 @@ class ChatView(Vertical):
         if self._typing_active and old_id is not None:
             self._emit_typing(False, chat_id=old_id)
         self._clear_typing_timers()
-        self.chat_id = chat_id
+        self.chat_id = int(chat_id)
         self._rows.clear()
         self._views.clear()
         self._blocks_fp = None
@@ -1456,6 +1459,7 @@ class ChatView(Vertical):
             mode = chat_mode_of(chat)
             tip = "@people | /skills (whisper)" if mode == "llm" else "@people | !commands"
             self.title_bar.update(f"[b]#{name}[/b]  [dim]{tip}[/dim]")
+        # Remount progress immediately if THIS room still has an in-flight LLM.
         self._sync_llm_ui()
         self.poll_messages()
         self._sync_chat_list_selection()
@@ -1663,22 +1667,68 @@ class ChatView(Vertical):
             return None
         return self._llm_jobs.get(int(self.chat_id))
 
+    def _chat_label_for_id(self, chat_id: int) -> str:
+        chat = next((c for c in self.chats if int(c.get("id") or 0) == int(chat_id)), {})
+        if chat.get("kind") == "private":
+            raw = str(chat.get("name") or "my room")
+            return "my room" if raw.lower().startswith("private -") else raw
+        return f"#{chat.get('name') or chat_id}"
+
+    def _llm_status_markup(self) -> str | None:
+        """Status-bar line only while viewing the room that has an LLM job."""
+        active = self._active_llm_skill()
+        if not active:
+            return None
+        return f"[#7dd3fc]/{escape(str(active))} running…[/]"
+
+    def _paint_llm_status(self) -> None:
+        line = self._llm_status_markup()
+        if line:
+            self.app.set_status(line)
+        elif not self._llm_jobs:
+            # Only clear LLM-ish status when nothing is in flight.
+            pass
+
+    def _agent_reply_finishes_job(self, chat_id: int, row: dict[str, Any]) -> bool:
+        """True only for an agent reply that belongs to the in-flight job (not history)."""
+        if int(chat_id) not in self._llm_jobs:
+            return False
+        if not (row.get("agent_slug") or row.get("agent")) or row.get("deleted_at"):
+            return False
+        after = self._llm_after_id.get(int(chat_id))
+        if after is None:
+            return False
+        try:
+            mid = int(row.get("id") or 0)
+        except (TypeError, ValueError):
+            return False
+        return mid > int(after)
+
     def _sync_llm_ui(self) -> None:
-        """Show indeterminate progress only for the room that has an LLM job."""
+        """Show progress only in the room that started the LLM — never in other chats."""
         skill = self._active_llm_skill()
         wait = self.query_one("#llm-wait", Vertical)
+
         if skill is None:
-            wait.display = False
-            self.llm_label.update("")
+            # Other rooms stay clean; sidebar … still marks the busy room.
+            self.composer.disabled = False
             if self._pending is not None:
                 try:
                     self._pending.remove()
                 except Exception:
                     pass
                 self._pending = None
-            self.composer.disabled = False
+            wait.display = False
+            self.llm_label.update("")
+            self._render_chat_list()
             return
+
         wait.display = True
+        try:
+            self.llm_bar.display = True
+            self.llm_bar.update(total=None)
+        except Exception:
+            pass
         label = skill.lstrip("/")
         self.llm_label.update(
             f"[b #7dd3fc]/{escape(label)}[/] [dim]model working…[/dim]  "
@@ -1696,6 +1746,7 @@ class ChatView(Vertical):
             self.call_after_refresh(self.transcript.scroll_end, animate=False)
         self.composer.disabled = True
         self._render_chat_list()
+        self._paint_llm_status()
 
     # messages ------------------------------------------------------------
 
@@ -1712,12 +1763,52 @@ class ChatView(Vertical):
         stamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         self.app.call_from_thread(self._apply_messages, chat_id, rows, stamp)
 
+    @work(thread=True, exclusive=True, group="chat-llm-bg")
+    def poll_background_llm_jobs(self) -> None:
+        """While you're in another room, detect when a background LLM reply lands."""
+        jobs = dict(self._llm_jobs)
+        if not jobs:
+            return
+        active = int(self.chat_id) if self.chat_id is not None else None
+        finished: list[int] = []
+        for cid in list(jobs):
+            if active is not None and int(cid) == active:
+                continue  # active room is handled by poll_messages
+            after = self._llm_after_id.get(int(cid))
+            if after is None:
+                continue  # wait until we know the user message id
+            try:
+                rows = self.client.messages(int(cid), after_id=int(after))
+            except ApiError:
+                continue
+            if any(
+                (r.get("agent_slug") or r.get("agent")) and not r.get("deleted_at")
+                for r in rows
+            ):
+                finished.append(int(cid))
+        if finished:
+            self.app.call_from_thread(self._clear_finished_llm_jobs, finished)
+
+    def _clear_finished_llm_jobs(self, chat_ids: list[int]) -> None:
+        changed = False
+        for cid in chat_ids:
+            if cid in self._llm_jobs:
+                self._llm_jobs.pop(cid, None)
+                self._llm_after_id.pop(cid, None)
+                changed = True
+        if changed:
+            self._sync_llm_ui()
+            if not self._llm_jobs:
+                self.app.set_status("[dim]agent finished[/dim]")
+
     def _apply_messages(self, chat_id: int, rows: list[dict], stamp: str) -> None:
         if chat_id != self.chat_id:
             return  # the user switched chats while the request was in flight
         self._last_sync = stamp
-        # Empty poll: do nothing (was re-rendering every message every tick → lag)
+        # Empty poll: still remount progress if this room's LLM is in flight
+        # (e.g. just switched back before the history response arrives).
         if not rows:
+            self._sync_llm_ui()
             return
         at_bottom = self.transcript.scroll_offset.y >= self.transcript.max_scroll_y - 2
         touch_ids: list[int] = []
@@ -1732,15 +1823,18 @@ class ChatView(Vertical):
             if prev is None or message_content_key(prev) != message_content_key(row):
                 touch_ids.append(mid)
             self._maybe_open_setup(row)
+            # Only the agent reply for THIS job clears busy — not older history.
+            if self._agent_reply_finishes_job(chat_id, row):
+                self._llm_jobs.pop(int(chat_id), None)
+                self._llm_after_id.pop(int(chat_id), None)
         self._refresh_transcript_blocks(
             scroll_bottom=at_bottom,
             touch_ids=touch_ids,
         )
-        # Keep / remount thinking bubble if this room still has an LLM job
-        if self._active_llm_skill() and (
-            self._pending is None or self._pending not in self.transcript.children
-        ):
-            self._sync_llm_ui()
+        # Keep / remount thinking bubble if this room still has an LLM job.
+        self._sync_llm_ui()
+        if not self._active_llm_skill() and self.chat_id == chat_id:
+            self.composer.disabled = False
 
     def _ordered_rows(self) -> list[dict[str, Any]]:
         return [self._rows[k] for k in sorted(self._rows)]
@@ -2180,10 +2274,14 @@ class ChatView(Vertical):
         if working:
             skill = skill_name_from_body(body) or (body.split()[0].lstrip("/") if body else "skill")
             self._llm_jobs[chat_id] = skill
+            # Baseline until POST returns with the real user_message_id
+            if chat_id == self.chat_id:
+                self._llm_after_id[chat_id] = int(self._last_id or 0)
             if self.chat_id == chat_id:
                 self._sync_llm_ui()
             else:
                 self._render_chat_list()
+                self._paint_llm_status()
             if self.chat_id != chat_id:
                 self.app.set_status(f"[#7dd3fc]/{escape(skill)} running in another room…[/]")
             else:
@@ -2203,22 +2301,31 @@ class ChatView(Vertical):
 
     def _after_send(self, chat_id: int, data: dict, error: str) -> None:
         self._sending_chats.discard(chat_id)
-        self._llm_jobs.pop(chat_id, None)
-        viewing = self.chat_id == chat_id
+        chat_id = int(chat_id)
+        # Keep per-chat busy UI while the server finishes the LLM in the background.
+        # Only this chat_id may leave _llm_jobs — never clear another room's job
+        # just because we texted here.
+        keep_llm = (not error) and bool(data.get("pending")) and chat_id in self._llm_jobs
+        if not keep_llm:
+            self._llm_jobs.pop(chat_id, None)
+            self._llm_after_id.pop(chat_id, None)
+        elif data.get("user_message_id") is not None:
+            self._llm_after_id[chat_id] = int(data["user_message_id"])
+
+        viewing = self.chat_id is not None and int(self.chat_id) == chat_id
         if viewing:
-            if self._pending is not None:
+            if not keep_llm and self._pending is not None:
                 try:
                     self._pending.remove()
                 except Exception:
                     pass
                 self._pending = None
-            self._sync_llm_ui()
-            self.composer.disabled = False
-            self.composer.focus()
-        else:
-            self._render_chat_list()
-            self._sync_llm_ui()
+            if not keep_llm:
+                self.composer.disabled = False
+                self.composer.focus()
+
         if error:
+            self._sync_llm_ui()
             self.app.set_status(f"[red]{escape(error)}[/red]")
             return
         if data.get("cleared"):
@@ -2236,15 +2343,24 @@ class ChatView(Vertical):
             self.app.refresh_workspace()
             if deleted and int(deleted) == chat_id and viewing:
                 self.chat_id = None
+                self._sync_llm_ui()
                 return
             if created and viewing:
                 self.select_chat(int(created))
                 return
-        self.app.set_status("")
+
+        # Re-assert progress chrome for the active room only.
+        self._sync_llm_ui()
+        if self._active_llm_skill():
+            self._paint_llm_status()
+        elif not data.get("cleared") and not self._llm_jobs:
+            self.app.set_status("")
+        elif not data.get("cleared") and not self._active_llm_skill():
+            # In another room while a job runs: keep status clean (sidebar … is enough).
+            self.app.set_status("")
+
         if viewing:
             self.poll_messages()
-        else:
-            self.app.set_status(f"[dim]agent finished in chat #{chat_id}[/dim]")
         self.app.refresh_workspace()
 
     # edit / delete / open / channel / kick / voice -----------------------
@@ -2392,25 +2508,37 @@ class ChatView(Vertical):
         self._refresh_transcript_blocks(scroll_bottom=True)
 
     def _apply_edit_result(self, chat_id: int, data: dict, error: str) -> None:
-        self._llm_jobs.pop(chat_id, None)
+        keep_llm = (not error) and bool(data.get("pending")) and chat_id in self._llm_jobs
+        if not keep_llm:
+            self._llm_jobs.pop(chat_id, None)
+            self._llm_after_id.pop(chat_id, None)
+        else:
+            mid = (data.get("message") or {}).get("id") or data.get("user_message_id")
+            if mid is not None:
+                self._llm_after_id[chat_id] = int(mid)
         viewing = self.chat_id == chat_id
         if viewing:
-            if self._pending is not None:
+            if not keep_llm and self._pending is not None:
                 try:
                     self._pending.remove()
                 except Exception:
                     pass
                 self._pending = None
             self._sync_llm_ui()
-            self.composer.disabled = False
+            if not keep_llm:
+                self.composer.disabled = False
         else:
             self._render_chat_list()
             self._sync_llm_ui()
         if error:
             self.app.set_status(f"[red]edit failed: {escape(error)}[/red]")
             return
+        if self._llm_jobs:
+            self._paint_llm_status()
         if not viewing:
             self.app.set_status("edit saved (other chat)")
+            if self._llm_jobs:
+                self._paint_llm_status()
             return
 
         at_bottom = self.transcript.scroll_offset.y >= self.transcript.max_scroll_y - 2

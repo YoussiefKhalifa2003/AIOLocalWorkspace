@@ -51,6 +51,13 @@ class IntentResult:
     deleted_chat_id: int | None = None
     confirm_objective_ids: list[int] | None = None
     cleared_chat: bool = False
+    # When True, LLM work was queued; reply will appear via poll (not in this POST).
+    async_pending: bool = False
+    request_id: int | None = None
+    job_ids: list[int] | None = None
+    agents: list[str] | None = None
+    plan_reason: str = ""
+    request_text: str = ""
 
 
 # (user_id, chat_id) -> pending coding prompt after claim warning
@@ -996,6 +1003,24 @@ def _post_lead_reply(
     from app.services.chart_render import pop_charts_marker
     from app.services.chat_visibility import mark_whisper
 
+    if result.async_pending:
+        from app.services.chat_agent_jobs import schedule_chat_agent_followup
+
+        schedule_chat_agent_followup(
+            request_id=int(result.request_id or 0),
+            job_ids=list(result.job_ids or []),
+            chat_id=chat.id,
+            tenant_id=auth.tenant_id,
+            user_id=auth.user_id,
+            agents=list(result.agents or []),
+            plan_reason=result.plan_reason or "",
+            request_text=result.request_text or "",
+            speak=speak,
+            whisper=whisper,
+            agent_slug=result.agent_slug or "lead",
+        )
+        return [], result.created_chat_id, result.deleted_chat_id, False
+
     if result.deleted_chat_id and result.deleted_chat_id == chat.id:
         return [], result.created_chat_id, result.deleted_chat_id, False
 
@@ -1100,7 +1125,8 @@ def _run_agent_branch(
             lines.append("Say `proceed` or `force code ...` to run anyway.")
             return IntentResult(True, "\n".join(lines), "lead")
 
-    # only run first agent synchronously for chat snappiness; handoffs drained
+    # Enqueue only — drain + chat reply run in a background thread so other
+    # users can keep posting while this LLM skill runs.
     req, job_ids, _ = create_work_request(
         db,
         tenant_id=auth.tenant_id,
@@ -1111,49 +1137,16 @@ def _run_agent_branch(
         extra_payload={"chat_id": chat.id},
     )
     db.flush()
-    db.commit()
-    drain_queue(max_jobs=30)
-    jobs = db.query(Job).filter(Job.request_id == req.id).order_by(Job.id).all()
-    arts = (
-        db.query(Artifact)
-        .filter(Artifact.job_id.in_([j.id for j in jobs] or [-1]))
-        .order_by(Artifact.id)
-        .all()
-    )
-    if not arts:
-        err = next((j.error for j in jobs if j.error), "no output")
-        return IntentResult(True, f"Lead→{agents}: failed ({err})", agents[0])
-    chunks = [f"[Lead routed → {', '.join(agents)} | {plan_reason}]"]
-    for a in arts:
-        chunks.append(f"--- {a.agent_type} ---\n{a.content}")
-    body = "\n\n".join(chunks)
-    confirm_agents = [a for a in agents if a in _CONFIRM_AGENTS]
-    cands: list[Objective] = []
-    if confirm_agents:
-        cands = _candidate_objectives(
-            db,
-            tenant_id=auth.tenant_id,
-            project_id=project_id,
-            user_id=auth.user_id,
-            request_text=text,
-            request_id=req.id,
-        )
-        if cands:
-            from app.services.board import set_objective_status
-
-            for obj in cands:
-                # Tie this freeform agent run to the board card for /status evidence
-                if obj.request_id is None:
-                    obj.request_id = req.id
-                if (obj.status or "") == "todo":
-                    set_objective_status(obj, "doing")
-            db.flush()
-    body, confirm_ids = _with_confirm_footer(body, cands)
     return IntentResult(
         True,
-        body,
+        "",
         agents[-1] if agents else "lead",
-        confirm_objective_ids=confirm_ids or None,
+        async_pending=True,
+        request_id=req.id,
+        job_ids=list(job_ids or []),
+        agents=list(agents),
+        plan_reason=plan_reason,
+        request_text=text,
     )
 
 
@@ -1164,8 +1157,11 @@ def handle_chat_message(
     chat: Chat,
     user_message: ChatMessage,
     speak: bool = False,
-) -> tuple[list[ChatMessage], int | None, int | None, bool]:
+) -> tuple[list[ChatMessage], int | None, int | None, bool, bool]:
     """Process a user chat message.
+
+    Returns (replies, created_chat_id, deleted_chat_id, cleared, pending).
+    `pending` is True when an LLM skill was queued in the background.
 
     - `!...` commands: no LLM; whisper in team channels.
     - `/clear`: always available.
@@ -1183,14 +1179,25 @@ def handle_chat_message(
     allows_llm = mode == "llm"
     whisper = False
 
+    def _done(replies, created=None, deleted=None, cleared=False, pending=False):
+        return replies, created, deleted, cleared, pending
+
+    def _lead(result: IntentResult):
+        replies, created, deleted, cleared = _post_lead_reply(
+            db, auth=auth, chat=chat, result=result, speak=speak, whisper=whisper
+        )
+        return _done(replies, created, deleted, cleared, pending=bool(result.async_pending))
+
     # Bang commands - always available
     if raw_body.startswith("!"):
         if is_channel:
             mark_whisper(user_message, auth.user_id)
             whisper = True
 
-        def _force(db_, auth_, chat_, pending):
-            return _run_agent_branch(db_, auth_, chat_, pending, forced_agent="coding", force=True)
+        def _force(db_, auth_, chat_, pending_text):
+            return _run_agent_branch(
+                db_, auth_, chat_, pending_text, forced_agent="coding", force=True
+            )
 
         result = try_bang_command(
             db,
@@ -1203,9 +1210,7 @@ def handle_chat_message(
         )
         if result is None:
             result = IntentResult(True, "Unknown command. Try `!help`.")
-        return _post_lead_reply(
-            db, auth=auth, chat=chat, result=result, speak=speak, whisper=whisper
-        )
+        return _lead(result)
 
     # /clear always; other /skills need llm mode
     if raw_body.startswith("/"):
@@ -1217,32 +1222,20 @@ def handle_chat_message(
 
             if is_channel:
                 mark_whisper(user_message, auth.user_id)
-                whisper = True
+            whisper = True
             reply, _ = clear_chat_for_user(db, auth, chat)
-            return _post_lead_reply(
-                db,
-                auth=auth,
-                chat=chat,
-                result=IntentResult(True, reply, cleared_chat=True),
-                speak=speak,
-                whisper=whisper or True,
-            )
+            return _lead(IntentResult(True, reply, cleared_chat=True))
 
         if not allows_llm:
             if is_channel:
                 mark_whisper(user_message, auth.user_id)
                 whisper = True
-            return _post_lead_reply(
-                db,
-                auth=auth,
-                chat=chat,
-                result=IntentResult(
+            return _lead(
+                IntentResult(
                     True,
                     "This chat is **commands-only** (`!`). "
                     "Create an AI chat (mode: skills) for `/ask` and other skills.",
-                ),
-                speak=speak,
-                whisper=whisper,
+                )
             )
 
         if is_channel:
@@ -1254,19 +1247,10 @@ def handle_chat_message(
             status_result = _run_status_skill(
                 db, auth=auth, chat=chat, rest=parsed.rest or ""
             )
-            return _post_lead_reply(
-                db, auth=auth, chat=chat, result=status_result, speak=speak, whisper=whisper
-            )
+            return _lead(status_result)
 
         if parsed.hint and not parsed.agent:
-            return _post_lead_reply(
-                db,
-                auth=auth,
-                chat=chat,
-                result=IntentResult(True, parsed.hint),
-                speak=speak,
-                whisper=whisper,
-            )
+            return _lead(IntentResult(True, parsed.hint))
 
         ask = parsed.rest.strip() or parsed.skill or "help"
         from app.services.attachment_context import build_attachments_prompt_block
@@ -1290,16 +1274,14 @@ def handle_chat_message(
         result = _run_agent_branch(
             db, auth, chat, prompt, forced_agent=parsed.agent
         )
-        return _post_lead_reply(
-            db, auth=auth, chat=chat, result=result, speak=speak, whisper=whisper
-        )
+        return _lead(result)
 
     # Team channel / ops private: no slash-AI on plain text
     if is_channel:
-        return [], None, None, False
+        return _done([])
 
     # Private room plain notes - no LLM
-    return [], None, None, False
+    return _done([])
 
 
 def _run_status_skill(

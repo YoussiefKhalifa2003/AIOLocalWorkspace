@@ -121,7 +121,9 @@ def test_extract_txt_and_pdf(tmp_path, monkeypatch):
         },
     )
     assert sent.status_code == 200, sent.text
-    mid = sent.json()["user_message_id"]
+    data = sent.json()
+    mid = data["user_message_id"]
+    assert data.get("pending") is True
 
     db = SessionLocal()
     try:
@@ -134,12 +136,6 @@ def test_extract_txt_and_pdf(tmp_path, monkeypatch):
         assert "citi.pdf" in block
         # PDF text extraction - at least file header present; body if pypdf got glyphs
         assert "kind=pdf" in block or "kind=error" in block or "Citi" in block
-
-        # End-to-end: research reply should not invent random IEEE if offline + attach present
-        replies = sent.json()["replies"]
-        assert replies
-        body = replies[0]["body"]
-        assert "ATTACHED FILES" in body or "Hello attachment" in body or "note.txt" in body
     finally:
         db.close()
 

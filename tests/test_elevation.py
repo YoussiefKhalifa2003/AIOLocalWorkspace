@@ -249,7 +249,15 @@ def test_gate_d_file_claims(tmp_path, monkeypatch):
         headers=hs,
         json={"body": "!go", "speak": False},
     )
-    assert "Lead routed" in r.json()["replies"][0]["body"] or "coding" in r.json()["replies"][0]["body"].lower()
+    data = r.json()
+    # Force-coding runs in the background now (same as /code)
+    assert data.get("pending") is True or (
+        data.get("replies")
+        and (
+            "Lead routed" in data["replies"][0]["body"]
+            or "coding" in data["replies"][0]["body"].lower()
+        )
+    )
 
 
 def test_gate_e_agent_backlog_manual_pr(tmp_path, monkeypatch):

@@ -877,6 +877,11 @@ class AioApp(App[None]):
             self.chat_view.set_presence(ws.presence)
         self.people_view.set_members(ws.members, ws.me, presence=ws.presence or self.chat_view.presence)
         self._sync_owner_tabs()
+        # Keep progress chrome if this room still has an in-flight LLM after a refresh.
+        try:
+            self.chat_view._sync_llm_ui()
+        except Exception:
+            pass
         self._paint_status()
         self._maybe_offer_tour()
 
@@ -1060,7 +1065,15 @@ class AioApp(App[None]):
         if self._board_error:
             parts.append(f"[red]{escape(self._board_error)}[/red]")
         line = "  |  ".join(parts)
-        if self._message:
+        # LLM progress text only when viewing that room (see chat_view._llm_status_markup).
+        llm_line = None
+        try:
+            llm_line = self.chat_view._llm_status_markup()
+        except Exception:
+            llm_line = None
+        if llm_line:
+            line = f"{line}   {llm_line}"
+        elif self._message:
             line = f"{line}   {self._message}"
         self.status_line.update(line)
         self._paint_mentions_btn()

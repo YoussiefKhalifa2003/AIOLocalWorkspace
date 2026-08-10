@@ -234,7 +234,7 @@ class ApiClient:
         return self.post(
             f"/chats/{chat_id}/messages",
             json={"body": body, "speak": False, "attachment_ids": attachment_ids or []},
-            timeout=300.0,  # a /deepresearch runs synchronously inside this call
+            timeout=60.0,  # LLM runs in background; POST returns after enqueue
         )
 
     def edit_message(self, chat_id: int, message_id: int, body: str) -> dict[str, Any]:

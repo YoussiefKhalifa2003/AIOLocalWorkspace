@@ -476,7 +476,7 @@ def test_color_for_member_stable_and_distinct():
 @pytest.mark.parametrize(
     "body,kind,expected",
     [
-        ("/ask what is up", "channel", True),
+        ("/ask what is up", "channel", False),  # ops channel: no LLM busy chrome
         ("/deepresearch topic", "private", True),
         ("/clear", "private", False),
         ("!add something", "channel", False),
@@ -488,6 +488,86 @@ def test_color_for_member_stable_and_distinct():
 )
 def test_agent_work_detection(body, kind, expected):
     assert looks_like_agent_work(body, kind) is expected
+
+
+def test_llm_status_only_when_viewing_busy_room():
+    """No cross-room 'still working in my room' banner — only the busy room shows it."""
+    from app.cli_pkg.tui.views.chat import ChatView
+
+    view = ChatView.__new__(ChatView)
+    view._llm_jobs = {2: "deepresearch"}
+    view._llm_after_id = {2: 40}
+    view.chats = [
+        {"id": 1, "kind": "channel", "name": "general"},
+        {"id": 2, "kind": "private", "name": "private - Demo"},
+    ]
+    view.chat_id = 1  # viewing general
+    assert view._llm_status_markup() is None
+
+    view.chat_id = 2  # viewing the busy room
+    line = view._llm_status_markup()
+    assert line is not None
+    assert "deepresearch" in line
+    assert "running" in line
+
+
+def test_old_agent_history_does_not_clear_inflight_llm_job():
+    """Reloading a room must not treat older agent replies as 'job finished'."""
+    from app.cli_pkg.tui.views.chat import ChatView
+
+    view = ChatView.__new__(ChatView)
+    view._llm_jobs = {2: "deepresearch"}
+    view._llm_after_id = {2: 50}  # user message that started this run
+    assert view._agent_reply_finishes_job(2, {"id": 12, "agent_slug": "deepresearch"}) is False
+    assert view._agent_reply_finishes_job(2, {"id": 50, "agent_slug": "deepresearch"}) is False
+    assert view._agent_reply_finishes_job(2, {"id": 51, "agent_slug": "deepresearch"}) is True
+    assert view._agent_reply_finishes_job(2, {"id": 51, "sender_email": "a@x"}) is False
+
+
+def test_apply_messages_history_reload_keeps_inflight_job():
+    """Switching back into a busy room reloads history without dropping the job."""
+    from app.cli_pkg.tui.views.chat import ChatView
+    from unittest.mock import MagicMock
+
+    view = ChatView.__new__(ChatView)
+    view.chat_id = 2
+    view._llm_jobs = {2: "deepresearch"}
+    view._llm_after_id = {2: 50}
+    view._rows = {}
+    view._views = {}
+    view._blocks_fp = None
+    view._last_id = 0
+    view._setup_opened = set()
+    view._pending = None
+    view.composer = MagicMock()
+    view.transcript = MagicMock()
+    view.transcript.scroll_offset.y = 0
+    view.transcript.max_scroll_y = 0
+    view._refresh_transcript_blocks = MagicMock()
+    view._sync_llm_ui = MagicMock()
+    view._maybe_open_setup = MagicMock()
+
+    history = [
+        {"id": 10, "agent_slug": "deepresearch", "body": "old answer"},
+        {"id": 50, "sender_email": "a@local.test", "body": "/deepresearch nvidia"},
+    ]
+    view._apply_messages(2, history, "2026-01-01T00:00:00Z")
+
+    assert view._llm_jobs == {2: "deepresearch"}
+    view._sync_llm_ui.assert_called()
+
+
+def test_texting_other_room_does_not_clear_foreign_llm_job():
+    """Plain send in #general must not drop a private-room LLM job entry."""
+    llm_jobs = {2: "deepresearch"}
+    llm_after = {2: 40}
+    sent_chat_id = 1  # general
+    keep_llm = False  # plain text, not pending
+    if not keep_llm:
+        llm_jobs.pop(sent_chat_id, None)
+        llm_after.pop(sent_chat_id, None)
+    assert llm_jobs == {2: "deepresearch"}
+    assert llm_after == {2: 40}
 
 
 # autocomplete dropdown ----------------------------------------------------

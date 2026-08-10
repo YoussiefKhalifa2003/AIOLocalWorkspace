@@ -1569,11 +1569,13 @@
       if (expectsLlm) beginLlmJob(chatId, next);
       save.disabled = true;
       cancel.disabled = true;
+      let pending = false;
       try {
         const data = await api(`/chats/${chatId}/messages/${m.id}`, {
           method: "PATCH",
           body: JSON.stringify({ body: next }),
         });
+        pending = !!(expectsLlm && data && data.pending);
         const updated = data.message || data;
         const removedIds = data.removed_ids || [];
         const replies = data.replies || [];
@@ -1591,7 +1593,7 @@
         save.disabled = false;
         cancel.disabled = false;
       } finally {
-        if (expectsLlm) endLlmJob(chatId);
+        if (expectsLlm && !pending) endLlmJob(chatId);
         syncComposerForActiveChat();
       }
     };
@@ -1924,7 +1926,13 @@
         `/chats/${state.chatId}/messages?after_id=${state.lastMsgId}${since}`
       );
       state.lastSyncAt = new Date().toISOString();
-      if (rows.length) renderMessages(rows, true);
+      if (rows.length) {
+        renderMessages(rows, true);
+        const chatId = Number(state.chatId);
+        if ((state.llmJobs || {})[chatId] && rows.some((m) => m.agent_slug || m.agent)) {
+          endLlmJob(chatId);
+        }
+      }
       await refreshMentions();
     } catch (_) { /* ignore transient */ }
   }
@@ -1961,6 +1969,7 @@
     } else if (Number(state.chatId) === Number(chatId)) {
       setComposerBusy(true);
     }
+    let pending = false;
     try {
       const data = await api(`/chats/${chatId}/messages`, {
         method: "POST",
@@ -1970,14 +1979,16 @@
           attachment_ids: ids,
         }),
       });
+      pending = !!(expectsLlm && data && data.pending);
       if (Number(state.chatId) === Number(chatId)) {
         await afterMessageMeta(data);
       } else if (data.created_chat_id || data.deleted_chat_id) {
         await refreshSidebar();
       }
     } finally {
-      if (expectsLlm) endLlmJob(chatId);
-      else setComposerBusy(false);
+      // Keep busy UI until poll sees the agent reply (background LLM).
+      if (expectsLlm && !pending) endLlmJob(chatId);
+      else if (!expectsLlm) setComposerBusy(false);
       syncComposerForActiveChat();
     }
   }
@@ -2063,25 +2074,18 @@
     const label = $("llmWaitLabel");
     const hint = $("llmWaitHint");
     if (!box || !bar) return;
+    // Only show progress in the room that started the LLM — never in other chats.
     if (!job) {
       removePendingBubble();
       box.classList.add("hidden");
       bar.classList.remove("indeterminate");
       return;
     }
-    const skill = job.skill || "";
     box.classList.remove("hidden");
     bar.classList.add("indeterminate");
-    if (label) {
-      label.textContent = skill
-        ? `Running /${skill} - model is working…`
-        : "Agent working - model is generating…";
-    }
-    if (hint) {
-      hint.textContent = skill
-        ? `/${skill} in progress in this room - switch chats to keep talking elsewhere`
-        : "Model working in this room - switch chats to keep talking elsewhere";
-    }
+    const skill = job.skill || "";
+    if (label) label.textContent = skill ? `/${skill} working…` : "agent working…";
+    if (hint) hint.textContent = "other chats stay open";
     showPendingBubble(skill);
   }
 
@@ -2089,13 +2093,13 @@
     const id = Number(chatId);
     if (!state.llmJobs) state.llmJobs = {};
     state.llmJobs[id] = { skill: skillNameFromBody(body) || "" };
-    if (Number(state.chatId) === id) syncComposerForActiveChat();
+    syncComposerForActiveChat();
   }
 
   function endLlmJob(chatId) {
     const id = Number(chatId);
     if (state.llmJobs) delete state.llmJobs[id];
-    if (Number(state.chatId) === id) syncComposerForActiveChat();
+    syncComposerForActiveChat();
   }
 
   async function send(ev) {

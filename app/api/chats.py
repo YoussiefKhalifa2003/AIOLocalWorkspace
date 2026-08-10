@@ -410,12 +410,13 @@ def edit_message(
     db.flush()
 
     replies: list[ChatMessage] = []
+    pending = False
     # Re-process as if newly sent (skip /clear - editing should not wipe the room)
     skip_rerun = text.startswith("/") and text[1:].strip().lower().startswith(
         ("clear", "clear chat", "clear messages")
     )
     if not skip_rerun:
-        replies, _, _, _ = handle_chat_message(
+        replies, _, _, _, pending = handle_chat_message(
             db,
             auth=auth,
             chat=chat,
@@ -431,6 +432,7 @@ def edit_message(
     return {
         "message": message_to_dict(db, msg),
         "removed_ids": removed_ids,
+        "pending": pending,
         "replies": [message_to_dict(db, r) for r in replies],
     }
 
@@ -507,7 +509,7 @@ def post_message(
         row.message_id = user_msg.id
     db.flush()
 
-    replies, created_chat_id, deleted_chat_id, cleared = handle_chat_message(
+    replies, created_chat_id, deleted_chat_id, cleared, pending = handle_chat_message(
         db,
         auth=auth,
         chat=chat,
@@ -529,6 +531,7 @@ def post_message(
         "created_chat_id": created_chat_id,
         "deleted_chat_id": deleted_chat_id,
         "cleared": cleared,
+        "pending": pending,
         "replies": [
             {
                 "id": r.id,

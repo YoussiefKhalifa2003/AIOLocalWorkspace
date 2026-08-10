@@ -250,6 +250,8 @@ def test_skill_edit_keeps_later_user_messages(tmp_path, monkeypatch):
     assert data["message"]["edited_at"]
     assert reply_id in data["removed_ids"]
     assert later_id not in data["removed_ids"]
+    # Re-queued skill (if room allows LLM) should not block the response shape
+    assert "pending" in data
 
     msgs = client.get(f"/chats/{g}/messages?after_id=0", headers=ha).json()
     ids = [m["id"] for m in msgs]
