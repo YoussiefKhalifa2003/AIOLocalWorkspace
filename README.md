@@ -29,18 +29,17 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start"><strong>Quick start</strong></a>
+  <a href="#host-owner"><strong>Host</strong></a>
+  &nbsp;/&nbsp;
+  <a href="#member"><strong>Member</strong></a>
   &nbsp;/&nbsp;
   <a href="#living-in-the-app">Living in the app</a>
   &nbsp;/&nbsp;
   <a href="#board--coding-runners">Board &amp; runners</a>
-  &nbsp;/&nbsp;
-  <a href="#invites-off-lan">Invites off-LAN</a>
 </p>
 
 <pre>
-uvicorn app.main:app --host 0.0.0.0 --port 8000   # terminal 1
-aio                                              # terminal 2
+# Host: API + tunnel + CLI   |   Member: ./aio  or  .\aio.cmd
 </pre>
 
 ---
@@ -62,12 +61,12 @@ Built for small teams who want serious agent workflows without leaving the shell
 
 ## Table of contents
 
-- [Quick start](#quick-start)
+- [Host (owner)](#host-owner)
+- [Member](#member)
 - [Living in the app](#living-in-the-app)
 - [Creating chats](#creating-chats)
 - [Mentions](#mentions)
 - [Board & coding runners](#board--coding-runners)
-- [Invites off-LAN](#invites-off-lan)
 - [Features](#features)
 - [CLI reference](#cli-reference)
 - [Configuration](#configuration)
@@ -80,51 +79,117 @@ Built for small teams who want serious agent workflows without leaving the shell
 
 ---
 
-## Quick start
+## Host (owner)
+
+One machine runs the API. Keep these terminals open.
+
+### First-time setup (once)
 
 ```bash
 git clone <your-repo-url>
 cd WORK
 
-python3 -m venv .venv          # Windows: py -3 -m venv .venv
-# macOS / Linux
-source .venv/bin/activate
-# Windows PowerShell
-# .\.venv\Scripts\Activate.ps1
-
+python3 -m venv .venv                  # Windows: py -3 -m venv .venv
+source .venv/bin/activate              # Windows: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-# optional (gives a global `aio` command): pip install -e .
-cp .env.example .env           # Windows: copy .env.example .env
-# Add LLM keys: see Configuration (host only)
+.venv/bin/python -m playwright install chromium   # Outlook invite emails
 
-./aio seed                     # Windows: .\aio.cmd seed
+cp .env.example .env                   # Windows: copy .env.example .env
+# fill keys in .env (see Configuration)
+# keep API_BASE_URL=http://127.0.0.1:8000
+
+chmod +x aio                           # macOS/Linux if needed
+./aio seed                             # Windows: .\aio.cmd seed
+brew install cloudflared               # or install from Cloudflare downloads
+```
+
+### Every session (4 terminals)
+
+**T1 — API**
+```bash
+source .venv/bin/activate              # Windows: .\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Second terminal:
-
+**T2 — Cloudflare (off-LAN invites)**
 ```bash
-./aio doctor    # Windows: .\aio.cmd doctor
-./aio           # Windows: .\aio.cmd
+cloudflared tunnel --url http://127.0.0.1:8000
+```
+Copy the printed `https://….trycloudflare.com` into `.env`:
+```env
+INVITE_APP_URL=https://xxxx.trycloudflare.com
+```
+Remint with `!invite` after the URL changes.
+
+**T3 — Outlook login (once per machine, or when session expires)**
+```bash
+./aio outlook-login                    # Windows: .\aio.cmd outlook-login
+# NOT: ./aio run outlook-login
+```
+Sign in in Chromium → saves `data/outlook_auth.json` (gitignored).
+
+**T4 — Your CLI**
+```bash
+./aio                                  # Windows: .\aio.cmd
+```
+Sign in: **Server** `http://127.0.0.1:8000` · demo owner `a@local.test` / `demo`  
+Then:
+```text
+!invite colleague@email.com
+```
+If Chromium opens: click **Send** (or Cmd+Enter). Or share the join link from chat manually.
+
+Checklist: `./aio host` · preflight: `./aio doctor`
+
+Same Wi‑Fi only (no tunnel): skip T2; members use `http://YOUR_LAN_IP:8000` as Server.
+
+---
+
+## Member
+
+No API. No Cloudflare. No Outlook.
+
+1. Open the host’s join link → create account → note **Server** on the Done page.
+2. Install + run:
+
+**macOS / Linux**
+```bash
+git clone <your-repo-url>
+cd WORK
+git pull
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+chmod +x aio        # if permission denied
+./aio
 ```
 
-**Windows note:** `./aio` is a bash script (Git Bash/WSL). In **PowerShell / cmd** use:
-
+**Windows (PowerShell)**
 ```powershell
+git clone <your-repo-url>
+cd WORK
+git pull
+
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
 .\aio.cmd
-# or, without the launcher:
+```
+
+3. Sign in → paste **Server** (`https://….trycloudflare.com`) + email/password.
+
+Fallback:
+```bash
+# macOS/Linux
+.venv/bin/python -m app.cli_pkg.main
+```
+```powershell
+# Windows
 .\.venv\Scripts\python.exe -m app.cli_pkg.main
 ```
-
-After Sign in, credentials are saved (`~/.aio/credentials.json`).  
-On Sign in you can set **Server** (API base URL): required for teammates joining via a public tunnel.
-
-```bash
-rm -f aio.db && ./aio seed          # reset demo data
-# Windows: del aio.db ; .\aio.cmd seed
-```
-
-> **Important:** restart `uvicorn` after changing `.env` or pulling code (`get_settings` is cached).
 
 ---
 
@@ -368,7 +433,7 @@ Password: **`demo`**
 # @ping between two logins -> @N next to Tour -> jump
 # Board: card -> a -> codex (or claude_code)
 # Chat: !claude / !codex open real CLIs
-# Owner: !invite after setting INVITE_APP_URL tunnel
+# Owner: !invite after tunnel INVITE_APP_URL (see Host section)
 ```
 
 More prompts: [`commands.txt`](commands.txt).
