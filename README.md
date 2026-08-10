@@ -360,20 +360,33 @@ Type `!help`. In public channels, command traffic is **whisper-only**.
 
 ## Configuration
 
-Copy `.env.example` -> `.env`.
+Host only: copy `.env.example` → `.env` and set your keys. Members do not need these.
+
+You can change any of these anytime — edit `.env`, then **restart uvicorn** so the API reloads them.
 
 | Variable | Purpose |
 |----------|---------|
-| `GEMINI_API_KEY` | Gemini models |
-| `OPENROUTER_API_KEY` | Model picker / chat skills |
-| `GROQ_API_KEY` | TTS + Whisper |
-| `TAVILY_API_KEY` | `/deepresearch` |
+| `GEMINI_API_KEY` | Gemini models (chat / skills) |
+| `OPENROUTER_API_KEY` | Model picker / alternate chat models |
+| `GROQ_API_KEY` | TTS + mic (Whisper) |
+| `TAVILY_API_KEY` | `/deepresearch` web research |
+| `CODEX_API_KEY` | Codex board runner (or use `codex` CLI login) |
+| `ANTHROPIC_API_KEY` | Claude board runner (or use `claude` CLI login) |
 | `GITHUB_TOKEN` / `GITHUB_REPO` | Agent PRs (see [AIOPlayground](#related-repo)) |
 | `CODING_BACKEND` | Keep `llm` for chat; use board runners for CLIs |
-| `CODEX_API_KEY` / `ANTHROPIC_API_KEY` | Headless board runners (optional if CLI already logged in) |
 | `DATABASE_URL` | Default `sqlite:///./aio.db` |
-| `API_BASE_URL` | Owner local CLI -> API (`http://127.0.0.1:8000`) |
-| `INVITE_APP_URL` | Public join-link origin (tunnel HTTPS for off-LAN) |
+| `API_BASE_URL` | Owner local CLI → API (`http://127.0.0.1:8000`) |
+| `INVITE_APP_URL` | Public join-link origin (Cloudflare HTTPS for off-LAN) |
+
+Example `.env` snippets:
+```env
+GROQ_API_KEY=gsk_...
+TAVILY_API_KEY=tvly-...
+CODEX_API_KEY=...
+ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=...
+OPENROUTER_API_KEY=sk-or-...
+```
 
 ---
 
