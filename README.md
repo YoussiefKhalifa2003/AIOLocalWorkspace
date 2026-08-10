@@ -39,7 +39,7 @@
 </p>
 
 <pre>
-# Host: API + tunnel + CLI   |   Member: ./aio  or  .\aio.cmd
+# Member: ./setup.sh  or  .\setup.cmd   |   Host: ./setup.sh --host  then T1–T4
 </pre>
 
 ---
@@ -81,27 +81,19 @@ Built for small teams who want serious agent workflows without leaving the shell
 
 ## Host (owner)
 
-One machine runs the API. Keep these terminals open.
+One machine runs the API.
 
-### First-time setup (once)
+### First-time (once)
 
 ```bash
 git clone <your-repo-url>
 cd WORK
-
-python3 -m venv .venv                  # Windows: py -3 -m venv .venv
-source .venv/bin/activate              # Windows: .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-.venv/bin/python -m playwright install chromium   # Outlook invite emails
-
-cp .env.example .env                   # Windows: copy .env.example .env
-# Edit .env — put your own API keys here (see Configuration). You can change them anytime.
-# keep API_BASE_URL=http://127.0.0.1:8000
-
-chmod +x aio                           # macOS/Linux if needed
-./aio seed                             # Windows: .\aio.cmd seed
-brew install cloudflared               # or install from Cloudflare downloads
+./setup.sh --host                 # Windows: .\setup.cmd --host
 ```
+
+That creates `.venv`, installs deps, Playwright Chromium, `.env`, and seeds the DB.  
+Edit `.env` with your API keys (see [Configuration](#configuration)). Keep `API_BASE_URL=http://127.0.0.1:8000`.  
+Install Cloudflare once: `brew install cloudflared` (or from Cloudflare downloads).
 
 ### Every session (4 terminals)
 
@@ -115,7 +107,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```bash
 cloudflared tunnel --url http://127.0.0.1:8000
 ```
-Copy the printed `https://….trycloudflare.com` into `.env`:
+Copy `https://….trycloudflare.com` into `.env`:
 ```env
 INVITE_APP_URL=https://xxxx.trycloudflare.com
 ```
@@ -126,18 +118,14 @@ Remint with `!invite` after the URL changes.
 ./aio outlook-login                    # Windows: .\aio.cmd outlook-login
 # NOT: ./aio run outlook-login
 ```
-Sign in in Chromium → saves `data/outlook_auth.json` (gitignored).
 
 **T4 — Your CLI**
 ```bash
 ./aio                                  # Windows: .\aio.cmd
+# or after pull: ./setup.sh            # Windows: .\setup.cmd
 ```
 Sign in: **Server** `http://127.0.0.1:8000` · demo owner `a@local.test` / `demo`  
-Then:
-```text
-!invite colleague@email.com
-```
-If Chromium opens: click **Send** (or Cmd+Enter). Or share the join link from chat manually.
+Then: `!invite colleague@email.com` — if Chromium opens, click **Send**. Or share the join link from chat.
 
 Checklist: `./aio host` · preflight: `./aio doctor`
 
@@ -150,46 +138,26 @@ Same Wi‑Fi only (no tunnel): skip T2; members use `http://YOUR_LAN_IP:8000` as
 No API. No Cloudflare. No Outlook.
 
 1. Open the host’s join link → create account → note **Server** on the Done page.
-2. Install + run:
+2. One command after clone:
 
 **macOS / Linux**
 ```bash
 git clone <your-repo-url>
 cd WORK
-git pull
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-chmod +x aio        # if permission denied
-./aio
+./setup.sh
 ```
 
-**Windows (PowerShell)**
+**Windows (PowerShell / cmd)**
 ```powershell
 git clone <your-repo-url>
 cd WORK
-git pull
-
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-.\aio.cmd
+.\setup.cmd
 ```
 
-3. Sign in → paste **Server** (`https://….trycloudflare.com`) + email/password.
+That creates `.venv`, installs deps, and opens Sign in.  
+Paste **Server** (`https://….trycloudflare.com`) + email/password.
 
-Fallback:
-```bash
-# macOS/Linux
-.venv/bin/python -m app.cli_pkg.main
-```
-```powershell
-# Windows
-.\.venv\Scripts\python.exe -m app.cli_pkg.main
-```
+Later sessions: `./setup.sh` or `.\setup.cmd` (or `./aio` / `.\aio.cmd` if the venv already exists).
 
 ---
 

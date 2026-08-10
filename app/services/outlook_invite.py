@@ -72,8 +72,8 @@ def build_invite_email(*, invite_url: str, max_uses: int, workspace: str) -> tup
         f"You've been invited to the {workspace} workspace ({seats}).\n\n"
         f"Open this link to register (works off-VPN when using a public invite URL):\n"
         f"{invite_url}\n\n"
-        f"After signup, on macOS/Linux run: ./aio\n"
-        f"On Windows PowerShell run: .\\aio.cmd\n"
+        f"After signup, on macOS/Linux run: ./setup.sh\n"
+        f"On Windows run: .\\setup.cmd\n"
         f"On Sign in, paste the Server URL from the Done page if prompted, "
         f"then use your email and password."
     )

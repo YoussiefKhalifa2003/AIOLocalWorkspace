@@ -1012,9 +1012,9 @@ AIO host — keep these terminals open
       Then: !invite colleague@email.com
 
   Members (other machines)
-      Open join link → register → install deps → launch:
-        macOS/Linux:  ./aio
-        Windows:      .\\aio.cmd
+      Open join link → register → then:
+        macOS/Linux:  ./setup.sh
+        Windows:      .\\setup.cmd
       Paste Server (tunnel HTTPS) + email/password.
       They do NOT run uvicorn or cloudflared.
 
