@@ -16,7 +16,7 @@ for arg in "$@"; do
     -h|--help)
       echo "Usage: ./setup.sh [--host] [--no-launch]"
       echo "  (default)  create venv, install deps, launch aio"
-      echo "  --host     also Playwright Chromium, .env, seed DB"
+      echo "  --host     also .env, seed DB, optional Chromium (y/n)"
       echo "  --no-launch  install only (do not open the app)"
       exit 0
       ;;
@@ -42,8 +42,17 @@ python -m pip install -r requirements.txt
 chmod +x aio setup.sh 2>/dev/null || true
 
 if [[ "$HOST" -eq 1 ]]; then
-  echo "→ Playwright Chromium (Outlook invites)"
-  python -m playwright install chromium
+  echo
+  read -r -p "Install Playwright Chromium for Outlook invite emails? [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES)
+      echo "→ Playwright Chromium"
+      python -m playwright install chromium
+      ;;
+    *)
+      echo "→ skipping Chromium (you can still share join links from chat; run later: .venv/bin/python -m playwright install chromium)"
+      ;;
+  esac
   if [[ ! -f .env ]]; then
     cp .env.example .env
     echo "→ created .env from .env.example — add your API keys, then restart the API later"
@@ -57,7 +66,7 @@ if [[ "$HOST" -eq 1 ]]; then
   echo "  T1  uvicorn app.main:app --host 0.0.0.0 --port 8000"
   echo "  T2  cloudflared tunnel --url http://127.0.0.1:8000"
   echo "      → paste https://….trycloudflare.com into .env as INVITE_APP_URL="
-  echo "  T3  ./aio outlook-login   (once)"
+  echo "  T3  ./aio outlook-login   (once, only if you installed Chromium)"
   echo
 fi
 

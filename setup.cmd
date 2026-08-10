@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 REM One-command setup + launch for AIO (Windows cmd / PowerShell).
 REM Member (default):  .\setup.cmd
 REM Host first-time:   .\setup.cmd --host
@@ -20,7 +20,7 @@ goto parse
 :help
 echo Usage: .\setup.cmd [--host] [--no-launch]
 echo   (default)  create venv, install deps, launch aio
-echo   --host     also Playwright Chromium, .env, seed DB
+echo   --host     also .env, seed DB, optional Chromium (y/n)
 echo   --no-launch  install only (do not open the app)
 exit /b 0
 :parsed
@@ -48,26 +48,37 @@ echo -^> pip install -r requirements.txt
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 exit /b 1
 
-if "%HOST%"=="1" (
-  echo -^> Playwright Chromium ^(Outlook invites^)
-  ".venv\Scripts\python.exe" -m playwright install chromium
-  if not exist ".env" (
-    copy /Y .env.example .env >nul
-    echo -^> created .env from .env.example — add your API keys, then restart the API later
-  )
-  if not exist "aio.db" (
-    echo -^> seeding demo DB
-    ".venv\Scripts\python.exe" -m app.cli_pkg.main seed
-  )
-  echo.
-  echo Host: keep these running in other terminals:
-  echo   T1  uvicorn app.main:app --host 0.0.0.0 --port 8000
-  echo   T2  cloudflared tunnel --url http://127.0.0.1:8000
-  echo       -^> paste https://….trycloudflare.com into .env as INVITE_APP_URL=
-  echo   T3  .\aio.cmd outlook-login   ^(once^)
-  echo.
-)
+if not "%HOST%"=="1" goto launch_check
 
+echo.
+set /p REPLY=Install Playwright Chromium for Outlook invite emails? [y/N] 
+if /I "!REPLY!"=="y" goto install_chromium
+if /I "!REPLY!"=="yes" goto install_chromium
+echo -^> skipping Chromium ^(share join links from chat; later: .venv\Scripts\python.exe -m playwright install chromium^)
+goto host_env
+
+:install_chromium
+echo -^> Playwright Chromium
+".venv\Scripts\python.exe" -m playwright install chromium
+
+:host_env
+if not exist ".env" (
+  copy /Y .env.example .env >nul
+  echo -^> created .env from .env.example — add your API keys, then restart the API later
+)
+if not exist "aio.db" (
+  echo -^> seeding demo DB
+  ".venv\Scripts\python.exe" -m app.cli_pkg.main seed
+)
+echo.
+echo Host: keep these running in other terminals:
+echo   T1  uvicorn app.main:app --host 0.0.0.0 --port 8000
+echo   T2  cloudflared tunnel --url http://127.0.0.1:8000
+echo       -^> paste https://….trycloudflare.com into .env as INVITE_APP_URL=
+echo   T3  .\aio.cmd outlook-login   ^(once, only if you installed Chromium^)
+echo.
+
+:launch_check
 if "%NO_LAUNCH%"=="1" (
   echo Setup done. Run: .\aio.cmd
   exit /b 0

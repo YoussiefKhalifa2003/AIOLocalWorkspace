@@ -91,7 +91,7 @@ cd WORK
 ./setup.sh --host                 # Windows: .\setup.cmd --host
 ```
 
-That creates `.venv`, installs deps, Playwright Chromium, `.env`, and seeds the DB.  
+That creates `.venv`, installs deps, optionally Playwright Chromium (y/n), `.env`, and seeds the DB.
 Edit `.env` with your API keys (see [Configuration](#configuration)). Keep `API_BASE_URL=http://127.0.0.1:8000`.  
 Install Cloudflare once: `brew install cloudflared` (or from Cloudflare downloads).
 
