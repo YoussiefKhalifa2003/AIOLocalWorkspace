@@ -1007,15 +1007,18 @@ AIO host — keep these terminals open
       → creates data/outlook_auth.json (gitignored)
 
   T4  Your CLI
-      ./aio
+      ./aio                 # Windows: .\\aio.cmd
       Sign in → Server http://127.0.0.1:8000 (on this machine)
       Then: !invite colleague@email.com
 
   Members (other machines)
-      Open join link → register → ./aio → paste Server (tunnel HTTPS) + email/password
+      Open join link → register → install deps → launch:
+        macOS/Linux:  ./aio
+        Windows:      .\\aio.cmd
+      Paste Server (tunnel HTTPS) + email/password.
       They do NOT run uvicorn or cloudflared.
 
-  Preflight: ./aio doctor
+  Preflight: ./aio doctor   (Windows: .\\aio.cmd doctor)
 """.strip()
     )
 

@@ -67,7 +67,7 @@ def _join_page(*, token: str, error: str = "") -> HTMLResponse:
 </style></head>
 <body>
   <h1>Join AIO</h1>
-  <p class="sub">Create your account once. After signup, run <code>aio</code> in a terminal and sign in. If you joined from off the company network, paste the <b>Server</b> URL from the Done page into Sign in. Your name is how teammates will @ you.</p>
+  <p class="sub">Create your account once. After signup, open a terminal in the project folder and run <code>./aio</code> (macOS/Linux) or <code>.\aio.cmd</code> (Windows), then sign in. If you joined from off the company network, paste the <b>Server</b> URL from the Done page into Sign in. Your name is how teammates will @ you.</p>
   {err}
   <form method="post" action="/join/{token}/register" id="reg">
     <label>Name (required - your @handle)</label>
@@ -110,8 +110,9 @@ def _join_success(result: dict) -> HTMLResponse:
 <body>
   <h1>Done</h1>
   <p class="sub">Account created for <b>{_escape(name)}</b> ({_escape(email)}).</p>
-  <p class="sub">AIO is CLI-first. On a machine with the project, run:</p>
-  <pre>aio</pre>
+  <p class="sub">AIO is CLI-first. On a machine with the project:</p>
+  <pre>macOS / Linux:  ./aio
+Windows:         .\\aio.cmd</pre>
   <p class="sub">On the Sign in screen:</p>
   <ul class="sub">
     <li><b>Server</b> (paste exactly): <code>{_escape(base)}</code></li>

@@ -72,7 +72,8 @@ def build_invite_email(*, invite_url: str, max_uses: int, workspace: str) -> tup
         f"You've been invited to the {workspace} workspace ({seats}).\n\n"
         f"Open this link to register (works off-VPN when using a public invite URL):\n"
         f"{invite_url}\n\n"
-        f"After signup, run: aio\n"
+        f"After signup, on macOS/Linux run: ./aio\n"
+        f"On Windows PowerShell run: .\\aio.cmd\n"
         f"On Sign in, paste the Server URL from the Done page if prompted, "
         f"then use your email and password."
     )
@@ -113,6 +114,130 @@ def ensure_playwright_browsers() -> Path:
             "Run: .venv/bin/python -m playwright install chromium"
         )
     return cache
+
+
+def _outlook_looks_logged_out(page) -> bool:
+    url = (page.url or "").lower()
+    if any(x in url for x in ("login.microsoftonline.com", "login.live.com", "login.microsoft.com")):
+        return True
+    return False
+
+
+def _fill_compose_fields(page, *, to: str, subject: str, body: str) -> None:
+    """Best-effort fill when the compose deeplink leaves fields empty."""
+
+    def _type_into(selectors: tuple[str, ...], text: str, *, clear: bool = True) -> bool:
+        for sel in selectors:
+            try:
+                loc = page.locator(sel).first
+                if not loc.count():
+                    continue
+                loc.click(timeout=2000)
+                if clear:
+                    loc.fill("")  # may no-op on contenteditable
+                    page.keyboard.press("Meta+A")
+                    page.keyboard.press("Backspace")
+                page.keyboard.type(text, delay=15)
+                return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    _type_into(
+        (
+            'input[aria-label="To"]',
+            'div[aria-label="To"] [contenteditable="true"]',
+            'div[aria-label="To"]',
+            '[aria-label="To"]',
+        ),
+        to,
+    )
+    page.keyboard.press("Tab")
+    _type_into(
+        (
+            'input[aria-label="Subject"]',
+            'input[placeholder="Add a subject"]',
+            '[aria-label="Subject"]',
+        ),
+        subject,
+    )
+    _type_into(
+        (
+            'div[aria-label="Message body"]',
+            'div[aria-label="Message body, press Alt+F10 to exit"]',
+            'div[role="textbox"][aria-label*="Message"]',
+            'div[contenteditable="true"][aria-label*="Message"]',
+        ),
+        body,
+        clear=True,
+    )
+
+
+def _try_click_send(page) -> bool:
+    for selector in (
+        'button[aria-label="Send"]',
+        'button[title="Send"]',
+        '[data-automation-id="sendButton"]',
+        'button:has-text("Send")',
+    ):
+        try:
+            btn = page.locator(selector).first
+            if btn.count() and btn.is_visible(timeout=2500):
+                btn.click(timeout=5000)
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+def _confirm_outlook_sent(page, *, timeout_ms: int = 12_000) -> bool:
+    """True only when Outlook shows a real sent signal (never assume)."""
+    import time
+
+    deadline = time.monotonic() + (timeout_ms / 1000.0)
+    toast_needles = (
+        "Message sent",
+        "Your message was sent",
+        "Email sent",
+    )
+    while time.monotonic() < deadline:
+        if _outlook_looks_logged_out(page):
+            return False
+        for text in toast_needles:
+            try:
+                loc = page.get_by_text(text, exact=False).first
+                if loc.is_visible(timeout=300):
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        # Compose deeplink usually closes / leaves compose after a real send.
+        url = (page.url or "").lower()
+        if "deeplink/compose" not in url and "/mail/" in url and "compose" not in url:
+            return True
+        page.wait_for_timeout(350)
+    return False
+
+
+def _show_manual_send_hint(page) -> None:
+    """Visible banner in the Chromium window so the host knows to click Send."""
+    try:
+        page.evaluate(
+            """() => {
+              if (document.getElementById('aio-outlook-hint')) return;
+              const el = document.createElement('div');
+              el.id = 'aio-outlook-hint';
+              el.textContent = 'AIO: click Send in Outlook (or Cmd+Enter). Waiting…';
+              Object.assign(el.style, {
+                position: 'fixed', top: '12px', left: '50%', transform: 'translateX(-50%)',
+                zIndex: '2147483647', background: '#0f172a', color: '#f8fafc',
+                padding: '10px 16px', borderRadius: '8px', font: '14px/1.4 system-ui,sans-serif',
+                boxShadow: '0 8px 24px rgba(0,0,0,.35)', pointerEvents: 'none'
+              });
+              document.documentElement.appendChild(el);
+            }"""
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def send_invite_via_outlook(
@@ -167,7 +292,7 @@ def send_invite_via_outlook(
     )
     qs = urllib.parse.urlencode({"to": to, "subject": subject, "body": body})
     url = f"{OUTLOOK_COMPOSE}?{qs}"
-    # Default visible browser so you can watch the send.
+    # Default visible browser so you can watch / click Send yourself.
     use_headless = settings.outlook_headless if headless is None else headless
     timeout_ms = int(settings.outlook_timeout_seconds * 1000)
 
@@ -177,32 +302,60 @@ def send_invite_via_outlook(
             context = browser.new_context(storage_state=str(storage))
             page = context.new_page()
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-            page.wait_for_timeout(2500)
+            page.wait_for_timeout(3500)
 
-            sent = False
-            for selector in (
-                'button[aria-label="Send"]',
-                'button[title="Send"]',
-                '[data-automation-id="sendButton"]',
-                'button:has-text("Send")',
-            ):
-                try:
-                    btn = page.locator(selector).first
-                    if btn.count() and btn.is_visible(timeout=3000):
-                        btn.click(timeout=5000)
-                        sent = True
-                        break
-                except Exception:  # noqa: BLE001
-                    continue
-            if not sent:
-                # Outlook on Mac: Cmd+Enter
+            if _outlook_looks_logged_out(page):
+                browser.close()
+                return {
+                    "ok": False,
+                    "skipped": False,
+                    "to": to,
+                    "reason": (
+                        "Outlook session expired — run ./aio outlook-login again, "
+                        "then remint !invite"
+                    ),
+                }
+
+            try:
+                _fill_compose_fields(page, to=to, subject=subject, body=body)
+            except Exception:  # noqa: BLE001
+                pass
+
+            clicked = _try_click_send(page)
+            if not clicked:
                 page.keyboard.press("Meta+Enter")
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(400)
                 page.keyboard.press("Control+Enter")
 
-            page.wait_for_timeout(2500)
+            # Short auto-confirm window first.
+            confirmed = _confirm_outlook_sent(page, timeout_ms=max(6_000, min(timeout_ms, 12_000)))
+
+            # Headed: leave the window up so the host can click Send manually.
+            if not confirmed and not use_headless:
+                _show_manual_send_hint(page)
+                log.info("Waiting for manual Outlook Send to %s (up to 2 minutes)", to)
+                print(
+                    "\nAIO: Chromium is open — click Send in Outlook (or press Cmd+Enter).\n"
+                    "Waiting up to 2 minutes for confirmation…\n",
+                    flush=True,
+                )
+                confirmed = _confirm_outlook_sent(page, timeout_ms=120_000)
+
             context.storage_state(path=str(storage))
             browser.close()
+
+        if not confirmed:
+            return {
+                "ok": False,
+                "skipped": False,
+                "to": to,
+                "reason": (
+                    "Outlook did not confirm send. In the Chromium window click Send "
+                    "(or Cmd+Enter), or share the join link from chat — it still works."
+                ),
+                "headless": use_headless,
+            }
+
         log.info("Outlook invite sent to %s", to)
         return {"ok": True, "skipped": False, "to": to, "headless": use_headless}
     except Exception as exc:  # noqa: BLE001

@@ -86,25 +86,34 @@ Built for small teams who want serious agent workflows without leaving the shell
 git clone <your-repo-url>
 cd WORK
 
-python3 -m venv .venv
+python3 -m venv .venv          # Windows: py -3 -m venv .venv
 # macOS / Linux
 source .venv/bin/activate
 # Windows PowerShell
 # .\.venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
-cp .env.example .env
-# Add LLM keys: see Configuration
+# optional (gives a global `aio` command): pip install -e .
+cp .env.example .env           # Windows: copy .env.example .env
+# Add LLM keys: see Configuration (host only)
 
-./aio seed
+./aio seed                     # Windows: .\aio.cmd seed
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 Second terminal:
 
 ```bash
-./aio doctor    # API, git, invite URL, Codex/Claude CLIs, keys
-./aio           # always opens Sign in, then the workspace
+./aio doctor    # Windows: .\aio.cmd doctor
+./aio           # Windows: .\aio.cmd
+```
+
+**Windows note:** `./aio` is a bash script (Git Bash/WSL). In **PowerShell / cmd** use:
+
+```powershell
+.\aio.cmd
+# or, without the launcher:
+.\.venv\Scripts\python.exe -m app.cli_pkg.main
 ```
 
 After Sign in, credentials are saved (`~/.aio/credentials.json`).  
@@ -112,7 +121,7 @@ On Sign in you can set **Server** (API base URL): required for teammates joining
 
 ```bash
 rm -f aio.db && ./aio seed          # reset demo data
-# Windows: del aio.db ; aio seed
+# Windows: del aio.db ; .\aio.cmd seed
 ```
 
 > **Important:** restart `uvicorn` after changing `.env` or pulling code (`get_settings` is cached).
@@ -251,8 +260,12 @@ Keep **API_BASE_URL=http://127.0.0.1:8000** on the owner machine. Publish join l
 New teammate (no API / no tunnel on their machine):
 
 1. Open the join link -> create account -> **Done** page shows **Server**.
-2. Run `aio` -> Sign in -> paste **Server** (tunnel HTTPS) + email/password.
-3. Workspace loads (`#general` + private room).
+2. Clone/pull the repo, create `.venv`, `pip install -r requirements.txt`.
+3. Run the app:
+   - macOS/Linux: `./aio`
+   - Windows PowerShell: `.\aio.cmd`
+4. Sign in -> paste **Server** (tunnel HTTPS) + email/password.
+5. Workspace loads (`#general` + private room).
 
 ---
 
