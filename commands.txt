@@ -57,8 +57,10 @@ hey team, standup in 5
 
 # Invite (off-LAN): keep API_BASE_URL=http://127.0.0.1:8000 on the API host
 # cloudflared tunnel --url http://127.0.0.1:8000
-# INVITE_APP_URL=https://xxxx.trycloudflare.com   # then restart uvicorn + remint
-# !invite
+# INVITE_APP_URL=https://xxxx.trycloudflare.com   # then remint !invite
+# One-time Outlook: ./aio outlook-login   (NOT ./aio run outlook-login)
+# Checklist: ./aio host
+# !invite colleague@email.com
 # On Sign in, paste Server from the Done page if joining off the company network
 
 # MY ROOM - /skills for AI, !commands, plain notes stay quiet

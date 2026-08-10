@@ -19,7 +19,12 @@ def invite_public_base_url() -> str:
     HTTP without an explicit port defaults to :8000 (local API).
     HTTPS without a port keeps the standard origin (no :8000) so Cloudflare
     quick tunnels and other public hosts work.
+
+    Re-reads settings each call so editing INVITE_APP_URL in `.env` (e.g. a new
+    trycloudflare.com origin) applies on the next `!invite` without restarting
+    uvicorn.
     """
+    get_settings.cache_clear()
     settings = get_settings()
     raw = (settings.invite_app_url or settings.api_base_url or "http://127.0.0.1:8000").strip()
     if raw.endswith("/"):
@@ -42,6 +47,24 @@ def invite_public_base_url() -> str:
     else:
         netloc = f"{host}:{port}"
     return urlunparse((scheme, netloc, "", "", "", ""))
+
+
+def invite_url_looks_private(url: str) -> bool:
+    """True when the join link is LAN/loopback (won't work for off-LAN invitees)."""
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    if host in ("localhost", "127.0.0.1", "::1"):
+        return True
+    if host.startswith("10.") or host.startswith("192.168.") or host.startswith("169.254."):
+        return True
+    # 172.16.0.0 – 172.31.255.255
+    if host.startswith("172."):
+        parts = host.split(".")
+        if len(parts) >= 2 and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
+            return True
+    return False
 
 
 def clamp_invite_uses(n: int | None) -> int:

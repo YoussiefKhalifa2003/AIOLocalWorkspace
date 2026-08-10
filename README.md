@@ -224,20 +224,34 @@ Requires the CLIs on PATH (`npm i -g @anthropic-ai/claude-code`, `@openai/codex`
 
 ## Invites off-LAN
 
-Keep the **owner machine** on localhost API. Publish join links via a tunnel:
+### Host terminals (keep open)
 
 ```bash
+# T1 — API
 uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# T2 — Cloudflare (off-LAN only; leave 127.0.0.1 here)
 cloudflared tunnel --url http://127.0.0.1:8000
-# .env: INVITE_APP_URL=https://xxxx.trycloudflare.com
-# keep API_BASE_URL=http://127.0.0.1:8000 on the owner machine
-# restart uvicorn, remint !invite (discard old 10.x links)
+# copy https://xxxx.trycloudflare.com → .env INVITE_APP_URL=…
+# then remint !invite (INVITE_APP_URL is re-read on each mint)
+
+# T3 — one-time Outlook for invite emails
+./aio outlook-login          # NOT ./aio run outlook-login
+# saves data/outlook_auth.json (gitignored; each host logs in once)
+
+# T4 — your CLI
+./aio                        # Server: http://127.0.0.1:8000 on the host
+# then: !invite colleague@email.com
 ```
 
-New teammate:
+Print the same checklist anytime: `./aio host` · preflight: `./aio doctor`
+
+Keep **API_BASE_URL=http://127.0.0.1:8000** on the owner machine. Publish join links via the tunnel URL in `INVITE_APP_URL`.
+
+New teammate (no API / no tunnel on their machine):
 
 1. Open the join link -> create account -> **Done** page shows **Server**.
-2. Run `aio` -> Sign in -> paste **Server** + email/password.
+2. Run `aio` -> Sign in -> paste **Server** (tunnel HTTPS) + email/password.
 3. Workspace loads (`#general` + private room).
 
 ---

@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
@@ -243,6 +244,8 @@ def outlook_login() -> None:
 
     typer.echo("Opening Outlook in Chromium…")
     typer.echo("(Ignore Homebrew playwright - AIO uses .venv/bin/python -m playwright)")
+    typer.echo("Correct command is:  ./aio outlook-login")
+    typer.echo("Not:                 ./aio run outlook-login")
     try:
         path = interactive_outlook_login(headed=True)
     except Exception as exc:  # noqa: BLE001
@@ -250,8 +253,12 @@ def outlook_login() -> None:
         typer.echo("If Chromium is missing, run:")
         typer.echo("  .venv/bin/python -m playwright install chromium")
         raise typer.Exit(1) from exc
-    typer.echo(f"Saved session to {path or outlook_storage_path()}")
-    typer.echo("Invites: ./aio invite-email colleague@example.com")
+    saved = path or outlook_storage_path()
+    typer.echo(f"Saved session to {saved}")
+    if not Path(saved).is_file():
+        typer.secho("Session file missing after login — try again.", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    typer.echo("Invites: ./aio invite-email colleague@example.com  or  !invite email@domain")
 
 
 @app.command("invite-email")
@@ -978,16 +985,70 @@ def objectives_clear(
     _print_objectives(prog)
 
 
+@app.command("host")
+def host_guide() -> None:
+    """Print host startup steps (API + tunnel + Outlook + CLI)."""
+    typer.echo(
+        """
+AIO host — keep these terminals open
+
+  T1  API
+      cd WORK && source .venv/bin/activate
+      uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  T2  Cloudflare (off-LAN invites only)
+      cloudflared tunnel --url http://127.0.0.1:8000
+      → copy https://….trycloudflare.com into .env as INVITE_APP_URL=…
+      → remint with !invite (URL is re-read from .env; restart API if unsure)
+
+  T3  One-time Outlook (invite emails)
+      ./aio outlook-login
+      (not ./aio run outlook-login)
+      → creates data/outlook_auth.json (gitignored)
+
+  T4  Your CLI
+      ./aio
+      Sign in → Server http://127.0.0.1:8000 (on this machine)
+      Then: !invite colleague@email.com
+
+  Members (other machines)
+      Open join link → register → ./aio → paste Server (tunnel HTTPS) + email/password
+      They do NOT run uvicorn or cloudflared.
+
+  Preflight: ./aio doctor
+""".strip()
+    )
+
+
 @app.command()
 def run(
-    objective_id: int = typer.Argument(...),
+    objective_id: str = typer.Argument(..., help="Board objective id (integer)"),
     project_id: int = typer.Option(DEFAULT_PROJECT, "--project-id"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     wait: bool = typer.Option(True, "--wait/--no-wait"),
 ) -> None:
-    """Shortcut: ./aio run <objective_id>"""
+    """Shortcut: ./aio run <objective_id>  — board jobs only (not Outlook)."""
+    key = objective_id.strip().lower().replace("_", "-")
+    if key in {"outlook-login", "outlook", "invite-email", "host", "doctor"}:
+        typer.secho(
+            f"'./aio run {objective_id}' is not valid.\n"
+            f"For Outlook invites use:  ./aio outlook-login\n"
+            f"For host steps use:      ./aio host",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    try:
+        oid = int(objective_id)
+    except ValueError as exc:
+        typer.secho(
+            f"Expected an objective id number, got {objective_id!r}.\n"
+            "Board run:   ./aio run 12\n"
+            "Outlook:     ./aio outlook-login",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1) from exc
     objectives_run(
-        objective_id=objective_id,
+        objective_id=oid,
         project_id=project_id,
         api_key=api_key,
         wait=wait,

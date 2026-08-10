@@ -3,7 +3,10 @@ __pycache__/
 *.py[cod]
 .env
 aio.db
+aio.db-wal
+aio.db-shm
 *.db
+.DS_Store
 .pytest_cache/
 .mypy_cache/
 dist/

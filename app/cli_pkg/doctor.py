@@ -166,7 +166,7 @@ def check_outlook_invite() -> Check:
             "Outlook invite",
             False,
             f"no session | domain={domain}",
-            "run: aio outlook-login",
+            "run: ./aio outlook-login  (not ./aio run outlook-login)",
         )
     return Check("Outlook invite", True, f"ready | domain={domain} | {storage}")
 

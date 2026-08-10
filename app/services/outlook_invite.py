@@ -41,10 +41,19 @@ def fix_playwright_browsers_path() -> Path:
     return target
 
 
+def repo_root() -> Path:
+    """WORK/ repo root (stable even if the shell cwd is elsewhere)."""
+    return Path(__file__).resolve().parents[2]
+
+
 def outlook_storage_path() -> Path:
+    """Session file path; relative paths resolve against the repo root."""
     settings = get_settings()
     raw = (settings.outlook_storage_state or "data/outlook_auth.json").strip()
-    return Path(raw).expanduser()
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = repo_root() / path
+    return path
 
 
 def outlook_configured() -> bool:
@@ -129,7 +138,11 @@ def send_invite_via_outlook(
         return {
             "ok": False,
             "skipped": False,
-            "reason": f"Outlook session missing ({storage}). Run: aio outlook-login",
+            "reason": (
+                f"Outlook session missing ({storage}). "
+                "From the WORK folder run: ./aio outlook-login "
+                "(not ./aio run outlook-login)"
+            ),
         }
 
     try:

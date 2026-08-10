@@ -139,3 +139,18 @@ def test_invite_public_base_url_http_defaults_to_8000(monkeypatch):
     from app.services.workspace_invite import invite_public_base_url
 
     assert invite_public_base_url() == "http://10.205.70.120:8000"
+
+
+def test_invite_url_picks_up_env_change_without_manual_cache_clear(monkeypatch):
+    """Hosts change trycloudflare URLs often; !invite must see the new .env value."""
+    monkeypatch.setenv("INVITE_APP_URL", "http://192.168.1.116:8000")
+    from app.config import get_settings
+    from app.services.workspace_invite import invite_public_base_url, invite_url_looks_private
+
+    get_settings.cache_clear()
+    get_settings()  # warm cache with the LAN URL
+    monkeypatch.setenv("INVITE_APP_URL", "https://none-buyers-neil-bond.trycloudflare.com")
+    url = invite_public_base_url()
+    assert url == "https://none-buyers-neil-bond.trycloudflare.com"
+    assert invite_url_looks_private(url) is False
+    assert invite_url_looks_private("http://192.168.1.116:8000/join/x") is True

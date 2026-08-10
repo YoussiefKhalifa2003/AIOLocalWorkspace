@@ -125,6 +125,15 @@ def _invite_reply(data: dict) -> str:
     elif outlook:
         reason = outlook.get("reason") or "send failed"
         msg += f"\n\nOutlook email failed: {reason}"
+
+    from app.services.workspace_invite import invite_url_looks_private
+
+    if invite_url_looks_private(url):
+        msg += (
+            "\n\nThis link is a LAN/localhost URL — off-LAN teammates cannot open it. "
+            "Set INVITE_APP_URL to your Cloudflare HTTPS origin in `.env`, then remint "
+            "(`cloudflared tunnel --url http://127.0.0.1:8000`)."
+        )
     return msg
 
 
